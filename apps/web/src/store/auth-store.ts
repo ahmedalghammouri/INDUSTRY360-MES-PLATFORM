@@ -72,9 +72,6 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           state.refreshToken = null;
           state.isAuthenticated = false;
         });
-        if (typeof window !== 'undefined') {
-          window.location.href = '/login';
-        }
       },
 
       setLoading: (loading) => {

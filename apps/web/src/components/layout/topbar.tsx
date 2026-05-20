@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bell,
@@ -19,11 +19,13 @@ import {
   Activity,
   Globe,
   AlertTriangle,
+  Map,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
 import { useAuthStore } from '@/store/auth-store';
 import { useNotificationStore } from '@/store/notification-store';
+import { useFactoryStore } from '@/store/factory-store';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -153,9 +155,31 @@ function ConnectionStatus() {
   );
 }
 
+function FactoryChip() {
+  const { selectedFactory } = useFactoryStore();
+  if (!selectedFactory) return null;
+  return (
+    <div
+      className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border"
+      style={{
+        borderColor: `${selectedFactory.color}40`,
+        background: `${selectedFactory.color}10`,
+        color: selectedFactory.color,
+      }}
+    >
+      <span
+        className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
+        style={{ background: selectedFactory.color }}
+      />
+      <span className="font-mono tracking-wider">{selectedFactory.code}</span>
+    </div>
+  );
+}
+
 export function Topbar() {
   const { user, logout } = useAuthStore();
   const { unreadCount } = useNotificationStore();
+  const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
 
   return (
@@ -167,6 +191,9 @@ export function Topbar() {
 
       {/* Right section */}
       <div className="flex items-center gap-1.5 shrink-0">
+        {/* Factory indicator */}
+        <FactoryChip />
+
         {/* Connection status */}
         <ConnectionStatus />
 
@@ -244,7 +271,7 @@ export function Topbar() {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="gap-2 text-destructive focus:text-destructive"
-              onClick={logout}
+              onClick={() => { logout(); router.push('/'); }}
             >
               <LogOut size={14} />
               Sign out

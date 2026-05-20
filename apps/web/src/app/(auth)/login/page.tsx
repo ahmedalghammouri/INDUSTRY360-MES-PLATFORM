@@ -2,14 +2,16 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, EyeOff, Loader2, Shield, Factory, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Shield, Factory, AlertCircle, ArrowLeft, MapPin } from 'lucide-react';
+import { FACTORIES } from '@/features/factory-selector/factories';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 
 import { useAuthStore } from '@/store/auth-store';
+import { useFactoryStore } from '@/store/factory-store';
 import { authService } from '@/services/auth.service';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +28,11 @@ type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const factoryCode = searchParams.get('factory');
+  const factory = FACTORIES.find((f) => f.id === factoryCode) ?? null;
   const { setAuth } = useAuthStore();
+  const { setFactory } = useFactoryStore();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +52,7 @@ export default function LoginPage() {
     try {
       const result = await authService.login(data.email, data.password);
       setAuth(result.user, result.accessToken, result.refreshToken);
+      if (factoryCode) setFactory(factoryCode);
       router.push('/dashboard');
     } catch (err: unknown) {
       const message =
@@ -139,10 +146,53 @@ export default function LoginPage() {
             <div className="font-bold text-lg">INDUSTRY360 MES</div>
           </div>
 
+          {/* Factory context badge */}
+          {factory ? (
+            <div
+              className="flex items-center justify-between rounded-xl px-4 py-3 border"
+              style={{ borderColor: `${factory.color}40`, background: `${factory.color}08` }}
+            >
+              <div className="flex items-center gap-3">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: factory.color, boxShadow: `0 0 8px ${factory.color}` }} />
+                <div>
+                  <div className="text-xs font-bold font-mono" style={{ color: factory.color }}>{factory.code}</div>
+                  <div className="text-[11px] text-muted-foreground leading-tight">{factory.name}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <MapPin size={10} />
+                  <span>{factory.city}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => router.push('/')}
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors ml-2"
+                >
+                  <ArrowLeft size={12} />
+                  Change
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => router.push('/')}
+              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft size={14} />
+              Back to factory selection
+            </button>
+          )}
+
           <div>
-            <h2 className="text-2xl font-bold text-foreground">Welcome back</h2>
+            <h2 className="text-2xl font-bold text-foreground">
+              {factory ? `Sign in to ${factory.code}` : 'Welcome back'}
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Sign in to your MES account to continue
+              {factory
+                ? `Access the MES platform for ${factory.name}`
+                : 'Sign in to your MES account to continue'}
             </p>
           </div>
 

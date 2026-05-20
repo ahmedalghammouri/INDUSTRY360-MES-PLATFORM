@@ -5,7 +5,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth-store';
 import { authService } from '@/services/auth.service';
 
-const PUBLIC_ROUTES = ['/login', '/forgot-password', '/reset-password'];
+const isPublicRoute = (pathname: string) =>
+  pathname === '/' ||
+  pathname.startsWith('/login') ||
+  pathname.startsWith('/forgot-password') ||
+  pathname.startsWith('/reset-password');
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, accessToken, setAuth, logout } = useAuthStore();
@@ -14,27 +18,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshAttempted = useRef(false);
 
   useEffect(() => {
-    const isPublic = PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
+    const isPublic = isPublicRoute(pathname);
 
     if (isAuthenticated && isPublic) {
+      refreshAttempted.current = false;
       router.replace('/dashboard');
       return;
     }
 
-    if (!isAuthenticated && !isPublic && !refreshAttempted.current) {
-      refreshAttempted.current = true;
-      authService
-        .refreshToken()
-        .then((data) => {
-          if (data) {
-            setAuth(data.user, data.accessToken, data.refreshToken);
-          } else {
-            router.replace('/login');
-          }
-        })
-        .catch(() => {
-          router.replace('/login');
-        });
+    if (!isAuthenticated && !isPublic) {
+      if (!refreshAttempted.current) {
+        refreshAttempted.current = true;
+        authService
+          .refreshToken()
+          .then((data) => {
+            if (data) {
+              setAuth(data.user, data.accessToken, data.refreshToken);
+            } else {
+              router.replace('/');
+            }
+          })
+          .catch(() => {
+            router.replace('/');
+          });
+      } else {
+        // refresh already attempted or explicit logout — return to factory selector
+        router.replace('/');
+      }
     }
   }, [isAuthenticated, pathname, router, setAuth, logout]);
 
@@ -55,9 +65,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .refreshToken()
         .then((data) => {
           if (data) setAuth(data.user, data.accessToken, data.refreshToken);
-          else logout();
+          else {
+            logout();
+            router.replace('/');
+          }
         })
-        .catch(() => logout());
+        .catch(() => {
+          logout();
+          router.replace('/');
+        });
     }, delay);
 
     return () => clearTimeout(timer);

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -30,10 +30,13 @@ import {
   FileText,
   Cpu,
   Activity,
+  Map,
+  LogOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSidebarStore } from '@/store/ui-store';
 import { useAuthStore } from '@/store/auth-store';
+import { useFactoryStore } from '@/store/factory-store';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -265,6 +268,79 @@ function SidebarItem({ item, isCollapsed, depth = 0 }: SidebarItemProps) {
   return content;
 }
 
+function BackToMapButton({ isCollapsed }: { isCollapsed: boolean }) {
+  const router = useRouter();
+  const { selectedFactory, clearFactory } = useFactoryStore();
+  const { logout } = useAuthStore();
+
+  function handleBackToMap() {
+    logout();
+    clearFactory();
+    router.push('/');
+  }
+
+  const btn = (
+    <button
+      onClick={handleBackToMap}
+      className={cn(
+        'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all duration-200 group relative overflow-hidden',
+        'border border-cyan-500/20 hover:border-cyan-500/50',
+        'bg-gradient-to-r from-cyan-500/5 to-blue-500/5 hover:from-cyan-500/15 hover:to-blue-500/10',
+        'text-cyan-400/70 hover:text-cyan-300',
+        isCollapsed && 'justify-center px-2',
+      )}
+    >
+      {/* Animated left border accent */}
+      <span className="absolute left-0 top-0 h-full w-0.5 bg-cyan-400/50 group-hover:bg-cyan-400 transition-colors" />
+
+      <Map size={15} className="shrink-0 text-cyan-400 group-hover:text-cyan-300 transition-colors" />
+
+      <AnimatePresence>
+        {!isCollapsed && (
+          <motion.div
+            initial={{ opacity: 0, width: 0 }}
+            animate={{ opacity: 1, width: 'auto' }}
+            exit={{ opacity: 0, width: 0 }}
+            className="flex-1 min-w-0 overflow-hidden"
+          >
+            <div className="whitespace-nowrap leading-tight">
+              {selectedFactory ? (
+                <>
+                  <span className="text-[10px] text-cyan-400/50 block font-mono tracking-wider uppercase">
+                    {selectedFactory.code}
+                  </span>
+                  <span className="text-[11px] truncate block">Switch Factory</span>
+                </>
+              ) : (
+                <span className="text-[11px]">Back to Map</span>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {!isCollapsed && (
+        <LogOut size={12} className="shrink-0 opacity-40 group-hover:opacity-80 transition-opacity" />
+      )}
+    </button>
+  );
+
+  if (isCollapsed) {
+    return (
+      <TooltipProvider delayDuration={0}>
+        <Tooltip>
+          <TooltipTrigger asChild>{btn}</TooltipTrigger>
+          <TooltipContent side="right" className="font-medium text-xs">
+            {selectedFactory ? `Switch Factory (${selectedFactory.code})` : 'Back to Map'}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return btn;
+}
+
 export function Sidebar() {
   const { isCollapsed, toggle } = useSidebarStore();
   const { user } = useAuthStore();
@@ -322,6 +398,11 @@ export function Sidebar() {
           <SidebarItem key={item.href || item.label} item={item} isCollapsed={isCollapsed} />
         ))}
       </nav>
+
+      {/* Back to Map */}
+      <div className="px-2 py-2 border-t border-sidebar-border">
+        <BackToMapButton isCollapsed={isCollapsed} />
+      </div>
 
       {/* Bottom nav */}
       <div className="px-2 py-2 border-t border-sidebar-border space-y-0.5">
