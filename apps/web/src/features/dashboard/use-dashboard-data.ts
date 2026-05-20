@@ -1,0 +1,101 @@
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/services/api.client';
+import { useRealtimeData } from '@/hooks/use-websocket';
+
+export interface DashboardKPIs {
+  oee: number;
+  availability: number;
+  performance: number;
+  quality: number;
+  totalOutput: number;
+  activeAlarms: number;
+  oeeTrend: number;
+  availabilityTrend: number;
+  performanceTrend: number;
+  qualityTrend: number;
+  outputTrend: number;
+  alarmTrend: number;
+}
+
+export interface Machine {
+  id: string;
+  name: string;
+  code: string;
+  state: 'RUNNING' | 'IDLE' | 'STOPPED' | 'FAULT' | 'MAINTENANCE' | 'OFFLINE';
+  oee: number;
+  currentOrder?: string;
+  throughput: number;
+  runtime: number;
+  lastUpdate: string;
+  area: string;
+}
+
+export interface ProductionStatus {
+  runningLines: number;
+  totalLines: number;
+  activeOrders: number;
+  completedToday: number;
+  plannedOutput: number;
+  actualOutput: number;
+}
+
+export interface Alarm {
+  id: string;
+  code: string;
+  description: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  machine: string;
+  triggeredAt: string;
+  acknowledged: boolean;
+}
+
+export interface DashboardData {
+  kpis: DashboardKPIs;
+  machines: Machine[];
+  productionStatus: ProductionStatus;
+  productionTrend: Array<{ time: string; actual: number; target: number; efficiency: number }>;
+  qualityTrend: Array<{ time: string; fpy: number; rework: number; scrap: number }>;
+  downtimePareto: Array<{ reason: string; duration: number; frequency: number; cumulative: number }>;
+  shiftSummary: {
+    shiftName: string;
+    operator: string;
+    startTime: string;
+    elapsed: number;
+    output: number;
+    target: number;
+    oee: number;
+    downtime: number;
+    defects: number;
+  };
+  alarms: Alarm[];
+}
+
+async function fetchDashboardData(): Promise<DashboardData> {
+  return api.get<DashboardData>('/dashboard/overview');
+}
+
+export function useDashboardData() {
+  const query = useQuery({
+    queryKey: ['dashboard', 'overview'],
+    queryFn: fetchDashboardData,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+
+  // Real-time updates for KPIs via WebSocket
+  const realtimeKPIs = useRealtimeData<Partial<DashboardKPIs>>('dashboard:kpis', {});
+  const realtimeMachines = useRealtimeData<Machine[]>('machines:status', []);
+
+  return {
+    data: query.data
+      ? {
+          ...query.data,
+          kpis: { ...query.data.kpis, ...realtimeKPIs },
+          machines: realtimeMachines.length > 0 ? realtimeMachines : query.data.machines,
+        }
+      : undefined,
+    isLoading: query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
+  };
+}

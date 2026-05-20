@@ -1,0 +1,162 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mes-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-industry360_mes}
+      POSTGRES_USER: ${POSTGRES_USER:-mes_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - mes-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mes_user} -d ${POSTGRES_DB:-industry360_mes}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: mes-redis-prod
+    restart: always
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - mes-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: mes-influxdb-prod
+    restart: always
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:-admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-industry360}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-mes_timeseries}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - mes-network
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mes-mqtt-prod
+    restart: always
+    volumes:
+      - ./infrastructure/docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./infrastructure/docker/mosquitto/passwd:/mosquitto/config/passwd
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    ports:
+      - "1883:1883"
+    networks:
+      - mes-network
+
+  api:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME}/api:${TAG:-latest}
+    container_name: mes-api-prod
+    restart: always
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mes_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-industry360_mes}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
+      INFLUXDB_ORG: ${INFLUXDB_ORG:-industry360}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-mes_timeseries}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+      PORT: 3001
+      API_PREFIX: api/v1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mes-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/api/v1/health', r => process.exit(r.statusCode < 500 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  web:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME}/web:${TAG:-latest}
+    container_name: mes-web-prod
+    restart: always
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - api
+    networks:
+      - mes-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', r => process.exit(r.statusCode < 500 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  nginx:
+    image: nginx:alpine
+    container_name: mes-nginx-prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/conf.d:/etc/nginx/conf.d:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - nginx_cache:/var/cache/nginx
+    depends_on:
+      - api
+      - web
+    networks:
+      - mes-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  influxdb_data:
+    driver: local
+  mosquitto_data:
+    driver: local
+  mosquitto_log:
+    driver: local
+  nginx_cache:
+    driver: local
+
+networks:
+  mes-network:
+    driver: bridge

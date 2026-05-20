@@ -1,0 +1,85 @@
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
+import { PrismaService } from '../../database/prisma.service';
+
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findAll(tenantId: string, filters: { search?: string; role?: string; page?: number; limit?: number }) {
+    const { search, role, page = 1, limit = 20 } = filters;
+
+    const where = {
+      tenantId,
+      deletedAt: null as null,
+      ...(role && { role }),
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' as const } },
+          { email: { contains: search, mode: 'insensitive' as const } },
+        ],
+      }),
+    };
+
+    const [total, data] = await Promise.all([
+      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true, name: true, email: true, role: true,
+          department: true, isActive: true, lastLoginAt: true,
+          createdAt: true, avatarUrl: true,
+        },
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    return { data, total, page, limit };
+  }
+
+  async findById(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { rolePermissions: { include: { permission: true } } },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    const { passwordHash, mfaSecret, ...safe } = user;
+    return safe;
+  }
+
+  async create(tenantId: string, data: {
+    email: string; name: string; role: string;
+    department?: string; siteId?: string; password: string;
+  }) {
+    const exists = await this.prisma.user.findUnique({ where: { email: data.email } });
+    if (exists) throw new ConflictException('Email already registered');
+
+    const passwordHash = await bcrypt.hash(data.password, 12);
+    return this.prisma.user.create({
+      data: {
+        tenantId,
+        email: data.email.toLowerCase(),
+        name: data.name,
+        role: data.role,
+        department: data.department,
+        siteId: data.siteId,
+        passwordHash,
+        language: 'en',
+        timezone: 'UTC',
+      },
+    });
+  }
+
+  async update(id: string, data: { name?: string; role?: string; department?: string; isActive?: boolean }) {
+    return this.prisma.user.update({ where: { id }, data });
+  }
+
+  async deactivate(id: string) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { isActive: false, deletedAt: new Date() },
+    });
+  }
+}

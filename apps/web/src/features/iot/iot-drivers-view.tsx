@@ -1,0 +1,106 @@
+'use client';
+
+import React from 'react';
+import { Plus, Download, Settings, CheckCircle, XCircle } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { api } from '@/services/api.client';
+
+export function IotDriversView() {
+  const { data: drivers, isLoading } = useQuery({
+    queryKey: ['iot', 'drivers'],
+    queryFn: () => api.get('/iot/drivers'),
+    staleTime: 30_000,
+  });
+
+  const driverList = drivers?.data ?? [];
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
+        <div>
+          <h1 className="text-lg font-bold">Protocol Drivers</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Manage communication protocol drivers
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
+            <Download size={13} />
+            Export
+          </Button>
+          <Button size="sm" className="gap-1.5 h-8 text-xs">
+            <Plus size={13} />
+            Add Driver
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto p-6">
+        <div className="industrial-card p-4">
+          <h3 className="text-sm font-semibold mb-4">Available Drivers</h3>
+
+          <div className="rounded-lg border border-border/30 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-border/30">
+                  <TableHead className="text-[11px] font-semibold">Protocol</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Version</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Description</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Devices</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Status</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <TableRow key={i} className="border-border/20">
+                      {Array.from({ length: 6 }).map((_, j) => (
+                        <TableCell key={j}>
+                          <div className="shimmer h-3.5 rounded w-20" />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                ) : driverList.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
+                      No drivers found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  driverList.map((driver: any) => (
+                    <TableRow key={driver.id} className="border-border/20 hover:bg-muted/20">
+                      <TableCell className="font-mono text-xs font-semibold text-primary">{driver.protocol}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{driver.version}</TableCell>
+                      <TableCell className="text-xs">{driver.description}</TableCell>
+                      <TableCell className="text-xs font-semibold">{driver.deviceCount}</TableCell>
+                      <TableCell>
+                        <Badge 
+                          variant={driver.status === 'ACTIVE' ? 'default' : 'secondary'}
+                          className="text-[10px] h-5 gap-1"
+                        >
+                          {driver.status === 'ACTIVE' ? <CheckCircle size={10} /> : <XCircle size={10} />}
+                          {driver.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                          <Settings size={13} />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
