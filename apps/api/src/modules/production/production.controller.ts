@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Body, Param, Query, Request,
+  Controller, Get, Post, Patch, Body, Param, Query,
   HttpCode, HttpStatus, ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
@@ -8,6 +8,12 @@ import { ProductionService } from './production.service';
 import { OEEService } from './oee.service';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { AuditLog } from '../../common/decorators/audit-log.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+
+interface RequestUser {
+  id: string;
+  factoryId: string | null;
+}
 
 @ApiTags('Production')
 @ApiBearerAuth('JWT-auth')
@@ -20,8 +26,8 @@ export class ProductionController {
 
   @Get('kpis')
   @ApiOperation({ summary: 'Get production KPIs for current day' })
-  async getKPIs(@Request() req: { user: { tenantId: string } }) {
-    return this.productionService.getKPIs(req.user.tenantId);
+  async getKPIs(@CurrentUser() user: RequestUser) {
+    return this.productionService.getKPIs(user.factoryId);
   }
 
   @Get('work-orders')
@@ -32,14 +38,14 @@ export class ProductionController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async findWorkOrders(
-    @Request() req: { user: { tenantId: string } },
+    @CurrentUser() user: RequestUser,
     @Query('search') search?: string,
     @Query('status') status?: string,
     @Query('priority') priority?: string,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
   ) {
-    return this.productionService.findWorkOrders(req.user.tenantId, {
+    return this.productionService.findWorkOrders(user.factoryId, {
       search,
       status: status as 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'ON_HOLD' | 'CANCELLED',
       priority,
@@ -53,19 +59,18 @@ export class ProductionController {
   @AuditLog('PRODUCTION_WO_CREATE')
   @ApiOperation({ summary: 'Create a new work order' })
   async createWorkOrder(
-    @Request() req: { user: { tenantId: string; id: string } },
+    @CurrentUser() user: RequestUser & { id: string },
     @Body() dto: {
-      productId: string;
-      equipmentId: string;
+      skuId: string;
+      machineId: string;
       plannedQty: number;
       plannedStart: string;
       plannedEnd: string;
       priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-      recipeId?: string;
       notes?: string;
     },
   ) {
-    return this.productionService.createWorkOrder(req.user.tenantId, req.user.id, {
+    return this.productionService.createWorkOrder(user.factoryId, user.id, {
       ...dto,
       plannedStart: new Date(dto.plannedStart),
       plannedEnd: new Date(dto.plannedEnd),
@@ -78,10 +83,10 @@ export class ProductionController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Start a planned work order' })
   async startWorkOrder(
-    @Request() req: { user: { tenantId: string; id: string } },
+    @CurrentUser() user: RequestUser & { id: string },
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.productionService.startWorkOrder(req.user.tenantId, req.user.id, id);
+    return this.productionService.startWorkOrder(user.factoryId, user.id, id);
   }
 
   @Patch('work-orders/:id/complete')
@@ -90,11 +95,11 @@ export class ProductionController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Complete a work order' })
   async completeWorkOrder(
-    @Request() req: { user: { tenantId: string; id: string } },
+    @CurrentUser() user: RequestUser & { id: string },
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: { actualQty: number },
   ) {
-    return this.productionService.completeWorkOrder(req.user.tenantId, req.user.id, id, body.actualQty);
+    return this.productionService.completeWorkOrder(user.factoryId, user.id, id, body.actualQty);
   }
 
   @Post('oee/calculate')

@@ -7,22 +7,31 @@ export interface LoginResponse {
   user: User;
 }
 
-export interface MFAResponse {
-  mfaRequired: boolean;
-  mfaToken: string;
+export interface FactoryInfo {
+  id: string;
+  code: string;
+  name: string;
+  nameAr: string | null;
+  city: string | null;
+  lat: number | null;
+  lng: number | null;
+  color: string;
+  glowColor: string;
+  isActive: boolean;
 }
 
 export const authService = {
-  login: (email: string, password: string) =>
-    api.post<LoginResponse>('/auth/login', { email, password }),
+  // Factory selector — load all active factories from the backend
+  getFactories: () => api.get<FactoryInfo[]>('/auth/factories'),
 
-  loginWithMFA: (mfaToken: string, otp: string) =>
-    api.post<LoginResponse>('/auth/mfa/verify', { mfaToken, otp }),
+  // Factory-scoped login: pass factoryCode so JWT gets the right factoryId
+  login: (email: string, password: string, factoryCode?: string) =>
+    api.post<LoginResponse>('/auth/login', { email, password, factoryCode }),
 
-  logout: () => api.post('/auth/logout'),
+  logout: () => api.post('/auth/logout').catch(() => {}),
 
   refreshToken: (refreshToken: string) =>
-    api.post<LoginResponse>('/auth/refresh', { refreshToken }),
+    api.post<LoginResponse & { user: User }>('/auth/refresh', { refreshToken }),
 
   getProfile: () => api.get<User>('/auth/me'),
 
@@ -33,11 +42,5 @@ export const authService = {
     api.post('/auth/reset-password', { token, password }),
 
   changePassword: (currentPassword: string, newPassword: string) =>
-    api.post('/auth/change-password', { currentPassword, newPassword }),
-
-  setupMFA: () => api.post<{ qrCode: string; secret: string }>('/auth/mfa/setup'),
-
-  verifyMFASetup: (otp: string) => api.post('/auth/mfa/enable', { otp }),
-
-  disableMFA: (otp: string) => api.post('/auth/mfa/disable', { otp }),
+    api.patch('/auth/change-password', { currentPassword, newPassword }),
 };

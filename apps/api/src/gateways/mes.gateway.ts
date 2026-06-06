@@ -4,7 +4,7 @@ import {
   MessageBody, ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, UseGuards } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { OnEvent } from '@nestjs/event-emitter';
 
@@ -20,11 +20,11 @@ export class MesWebSocketGateway implements OnGatewayInit, OnGatewayConnection, 
   server!: Server;
 
   private readonly logger = new Logger(MesWebSocketGateway.name);
-  private readonly connectedClients = new Map<string, { userId: string; tenantId: string; socket: Socket }>();
+  private readonly connectedClients = new Map<string, { userId: string; factoryId: string | null; socket: Socket }>();
 
   constructor(private readonly jwtService: JwtService) {}
 
-  afterInit(server: Server) {
+  afterInit(_server: Server) {
     this.logger.log('WebSocket Gateway initialized');
 
     // Heartbeat — push simulated real-time data every 5 seconds
@@ -41,15 +41,19 @@ export class MesWebSocketGateway implements OnGatewayInit, OnGatewayConnection, 
         return;
       }
 
-      const payload = this.jwtService.verify<{ sub: string; tenantId: string }>(token);
+      const payload = this.jwtService.verify<{ sub: string; factoryId: string | null }>(token);
       this.connectedClients.set(client.id, {
         userId: payload.sub,
-        tenantId: payload.tenantId,
+        factoryId: payload.factoryId,
         socket: client,
       });
 
-      // Join tenant room
-      await client.join(`tenant:${payload.tenantId}`);
+      // Join factory room (or global room for SUPER_ADMIN)
+      if (payload.factoryId) {
+        await client.join(`factory:${payload.factoryId}`);
+      } else {
+        await client.join('factory:all');
+      }
 
       this.logger.log(`Client connected: ${client.id} (user: ${payload.sub})`);
 
@@ -67,13 +71,13 @@ export class MesWebSocketGateway implements OnGatewayInit, OnGatewayConnection, 
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
-  @SubscribeMessage('subscribe:equipment')
-  handleEquipmentSubscription(
-    @MessageBody() data: { equipmentIds: string[] },
+  @SubscribeMessage('subscribe:machines')
+  handleMachineSubscription(
+    @MessageBody() data: { machineIds: string[] },
     @ConnectedSocket() client: Socket,
   ) {
-    data.equipmentIds.forEach((id) => client.join(`equipment:${id}`));
-    return { subscribed: data.equipmentIds };
+    data.machineIds.forEach((id) => client.join(`machine:${id}`));
+    return { subscribed: data.machineIds };
   }
 
   @SubscribeMessage('subscribe:alarms')
@@ -84,14 +88,15 @@ export class MesWebSocketGateway implements OnGatewayInit, OnGatewayConnection, 
 
   // Broadcast production events
   @OnEvent('production.work-order.started')
-  handleWorkOrderStarted(payload: { workOrder: { id: string; orderNumber: string }; tenantId: string }) {
-    this.server.to(`tenant:${payload.tenantId}`).emit('production:work-order:started', {
+  handleWorkOrderStarted(payload: { workOrder: { id: string; orderNumber: string }; factoryId: string | null }) {
+    const room = payload.factoryId ? `factory:${payload.factoryId}` : 'factory:all';
+    this.server.to(room).emit('production:work-order:started', {
       workOrderId: payload.workOrder.id,
       orderNumber: payload.workOrder.orderNumber,
       timestamp: new Date().toISOString(),
     });
 
-    this.sendNotification(payload.tenantId, {
+    this.sendNotification(payload.factoryId, {
       title: 'Work Order Started',
       message: `Work order ${payload.workOrder.orderNumber} has started`,
       severity: 'info',
@@ -100,8 +105,9 @@ export class MesWebSocketGateway implements OnGatewayInit, OnGatewayConnection, 
   }
 
   @OnEvent('production.work-order.completed')
-  handleWorkOrderCompleted(payload: { workOrder: { id: string; orderNumber: string }; tenantId: string }) {
-    this.server.to(`tenant:${payload.tenantId}`).emit('production:work-order:completed', {
+  handleWorkOrderCompleted(payload: { workOrder: { id: string; orderNumber: string }; factoryId: string | null }) {
+    const room = payload.factoryId ? `factory:${payload.factoryId}` : 'factory:all';
+    this.server.to(room).emit('production:work-order:completed', {
       workOrderId: payload.workOrder.id,
       orderNumber: payload.workOrder.orderNumber,
       timestamp: new Date().toISOString(),
@@ -109,28 +115,32 @@ export class MesWebSocketGateway implements OnGatewayInit, OnGatewayConnection, 
   }
 
   // Broadcast KPI updates
-  broadcastKPIs(tenantId: string, kpis: Record<string, number>) {
-    this.server.to(`tenant:${tenantId}`).emit('dashboard:kpis', kpis);
+  broadcastKPIs(factoryId: string | null, kpis: Record<string, number>) {
+    const room = factoryId ? `factory:${factoryId}` : 'factory:all';
+    this.server.to(room).emit('dashboard:kpis', kpis);
   }
 
   // Broadcast machine status
-  broadcastMachineStatus(tenantId: string, machines: unknown[]) {
-    this.server.to(`tenant:${tenantId}`).emit('machines:status', machines);
+  broadcastMachineStatus(factoryId: string | null, machines: unknown[]) {
+    const room = factoryId ? `factory:${factoryId}` : 'factory:all';
+    this.server.to(room).emit('machines:status', machines);
   }
 
   // Broadcast alarm
-  broadcastAlarm(tenantId: string, alarm: unknown) {
-    this.server.to(`tenant:${tenantId}`).emit('alarm:triggered', alarm);
+  broadcastAlarm(factoryId: string | null, alarm: unknown) {
+    const room = factoryId ? `factory:${factoryId}` : 'factory:all';
+    this.server.to(room).emit('alarm:triggered', alarm);
     this.server.to('alarms:active').emit('alarm:triggered', alarm);
   }
 
-  sendNotification(tenantId: string, notification: {
+  sendNotification(factoryId: string | null, notification: {
     title: string;
     message: string;
     severity: string;
     category: string;
   }) {
-    this.server.to(`tenant:${tenantId}`).emit('notification', {
+    const room = factoryId ? `factory:${factoryId}` : 'factory:all';
+    this.server.to(room).emit('notification', {
       ...notification,
       timestamp: new Date().toISOString(),
     });
@@ -145,9 +155,10 @@ export class MesWebSocketGateway implements OnGatewayInit, OnGatewayConnection, 
       quality: 97 + Math.random() * 2.5,
     };
 
-    // Broadcast to all connected tenants
-    this.connectedClients.forEach(({ tenantId }) => {
-      this.server.to(`tenant:${tenantId}`).emit('dashboard:kpis', mockKPIs);
+    // Broadcast to all connected factory rooms
+    this.connectedClients.forEach(({ factoryId }) => {
+      const room = factoryId ? `factory:${factoryId}` : 'factory:all';
+      this.server.to(room).emit('dashboard:kpis', mockKPIs);
     });
   }
 

@@ -1,7 +1,13 @@
-import { Controller, Get, Post, Body, Param, Request, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IotService } from './iot.service';
 import { IndustrialDriverFactory } from './drivers/driver-factory';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+
+interface RequestUser {
+  id: string;
+  factoryId: string | null;
+}
 
 @ApiTags('IIoT')
 @ApiBearerAuth('JWT-auth')
@@ -15,10 +21,10 @@ export class IotController {
   @Get('devices')
   @ApiOperation({ summary: 'List IoT devices' })
   async getDevices(
-    @Request() req: { user: { tenantId: string } },
+    @CurrentUser() user: RequestUser,
     @Query('status') status?: string,
   ) {
-    return this.iotService.getDevices(req.user.tenantId, { status });
+    return this.iotService.getDevices(user.factoryId, { status });
   }
 
   @Get('devices/:id/status')
@@ -31,18 +37,18 @@ export class IotController {
   @ApiOperation({ summary: 'Connect to an IoT device' })
   async connectDevice(
     @Param('id') id: string,
-    @Request() req: { user: { tenantId: string } },
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.iotService.connectDevice(req.user.tenantId, id);
+    return this.iotService.connectDevice(user.factoryId, id);
   }
 
   @Get('tags')
   @ApiOperation({ summary: 'Browse tag hierarchy' })
   async getTags(
-    @Request() req: { user: { tenantId: string } },
+    @CurrentUser() user: RequestUser,
     @Query('deviceId') deviceId?: string,
   ) {
-    return this.iotService.getTags(req.user.tenantId, deviceId);
+    return this.iotService.getTags(user.factoryId, deviceId);
   }
 
   @Post('tags/read')

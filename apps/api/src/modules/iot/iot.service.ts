@@ -5,47 +5,54 @@ import { PrismaService } from '../../database/prisma.service';
 export class IotService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getDevices(tenantId: string, filters: { status?: string }) {
-    return this.prisma.ioTDevice.findMany({
+  async getDevices(factoryId: string | null, filters: { status?: string }) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    return this.prisma.device.findMany({
       where: {
-        tenantId,
+        ...factoryFilter,
         ...(filters.status && { status: filters.status }),
         isActive: true,
       },
       include: {
-        equipment: { select: { name: true, code: true } },
+        machine: { select: { name: true, code: true } },
       },
       orderBy: { name: 'asc' },
     });
   }
 
   async getDeviceStatus(deviceId: string) {
-    const device = await this.prisma.ioTDevice.findUnique({
-      where: { deviceId },
+    const device = await this.prisma.device.findUnique({
+      where: { id: deviceId },
       include: {
-        equipment: { select: { name: true, code: true } },
-        tagValues: {
-          orderBy: { timestamp: 'desc' },
+        machine: { select: { name: true, code: true } },
+        tagDefinitions: {
+          where: { isActive: true },
+          include: {
+            currentValue: true,
+          },
+          orderBy: { name: 'asc' },
           take: 10,
-          include: { tag: { select: { name: true, unit: true } } },
         },
       },
     });
     return device;
   }
 
-  async connectDevice(tenantId: string, deviceId: string) {
-    await this.prisma.ioTDevice.update({
-      where: { deviceId },
+  async connectDevice(factoryId: string | null, deviceId: string) {
+    await this.prisma.device.update({
+      where: { id: deviceId },
       data: { status: 'CONNECTED', lastSeenAt: new Date() },
     });
     return { status: 'CONNECTED', timestamp: new Date() };
   }
 
-  async getTags(tenantId: string, deviceId?: string) {
-    return this.prisma.ioTTag.findMany({
+  async getTags(factoryId: string | null, deviceId?: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    return this.prisma.tagDefinition.findMany({
       where: {
-        tenantId,
+        ...factoryFilter,
         ...(deviceId && { deviceId }),
         isActive: true,
       },
@@ -54,8 +61,20 @@ export class IotService {
   }
 
   async recordTagValue(tagId: string, value: string, quality: string): Promise<void> {
-    await this.prisma.ioTTagValue.create({
-      data: { tagId, value, quality, timestamp: new Date() },
+    await this.prisma.tagCurrentValue.upsert({
+      where: { tagId },
+      create: {
+        tagId,
+        factoryId: (await this.prisma.tagDefinition.findUnique({ where: { id: tagId }, select: { factoryId: true } }))?.factoryId ?? '',
+        value,
+        quality: quality as 'GOOD' | 'BAD' | 'UNCERTAIN' | 'NOT_CONNECTED',
+        timestamp: new Date(),
+      },
+      update: {
+        value,
+        quality: quality as 'GOOD' | 'BAD' | 'UNCERTAIN' | 'NOT_CONNECTED',
+        timestamp: new Date(),
+      },
     });
   }
 }

@@ -5,17 +5,19 @@ import { PrismaService } from '../../database/prisma.service';
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getProductionReport(tenantId: string, from: Date, to: Date) {
-    const records = await this.prisma.productionRecord.findMany({
-      where: { tenantId, startTime: { gte: from }, endTime: { lte: to } },
-      include: { equipment: { select: { name: true, code: true } } },
-      orderBy: { startTime: 'asc' },
+  async getProductionReport(factoryId: string | null, from: Date, to: Date) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    const records = await this.prisma.oEERecord.findMany({
+      where: { ...factoryFilter, recordDate: { gte: from, lte: to } },
+      include: { machine: { select: { name: true, code: true } } },
+      orderBy: { recordDate: 'asc' },
     });
 
-    const totalPlanned = records.reduce((s, r) => s + r.plannedQty, 0);
-    const totalActual = records.reduce((s, r) => s + r.actualQty, 0);
-    const totalGood = records.reduce((s, r) => s + r.goodQty, 0);
-    const totalDowntime = records.reduce((s, r) => s + r.downtime, 0);
+    const totalPlanned = records.reduce((s, r) => s + r.totalOutput, 0);
+    const totalActual = records.reduce((s, r) => s + r.totalOutput, 0);
+    const totalGood = records.reduce((s, r) => s + r.goodOutput, 0);
+    const totalDowntime = records.reduce((s, r) => s + r.downtimeMin, 0);
     const avgOEE = records.length ? records.reduce((s, r) => s + (r.oee ?? 0), 0) / records.length : 0;
 
     return {
@@ -30,25 +32,27 @@ export class ReportsService {
         avgOEE: parseFloat(avgOEE.toFixed(1)),
       },
       records: records.map((r) => ({
-        date: r.startTime.toISOString(),
-        equipment: r.equipment.name,
-        plannedQty: r.plannedQty,
-        actualQty: r.actualQty,
-        goodQty: r.goodQty,
+        date: r.recordDate.toISOString(),
+        machine: r.machine.name,
+        plannedQty: r.totalOutput,
+        actualQty: r.totalOutput,
+        goodQty: r.goodOutput,
         oee: r.oee,
-        downtime: r.downtime,
+        downtime: r.downtimeMin,
       })),
     };
   }
 
-  async getQualityReport(tenantId: string, from: Date, to: Date) {
+  async getQualityReport(factoryId: string | null, from: Date, to: Date) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
     const [inspections, ncrs] = await Promise.all([
-      this.prisma.qualityInspection.findMany({
-        where: { tenantId, date: { gte: from, lte: to } },
+      this.prisma.inspectionResult.findMany({
+        where: { ...factoryFilter, inspectedAt: { gte: from, lte: to } },
         include: { inspector: { select: { name: true } } },
       }),
-      this.prisma.nonConformanceReport.findMany({
-        where: { tenantId, detectedAt: { gte: from, lte: to } },
+      this.prisma.nCR.findMany({
+        where: { ...factoryFilter, detectedAt: { gte: from, lte: to } },
         orderBy: { severity: 'desc' },
       }),
     ]);
@@ -96,7 +100,7 @@ export class ReportsService {
       {
         id: 'oee-analysis',
         name: 'OEE Deep Dive',
-        description: 'Detailed OEE breakdown by equipment, shift, and product',
+        description: 'Detailed OEE breakdown by machine, shift, and SKU',
         module: 'production',
         icon: 'Gauge',
       },

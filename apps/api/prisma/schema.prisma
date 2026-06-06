@@ -1,11 +1,12 @@
 // ============================================================
-// INDUSTRY360 MES Platform - Prisma Schema
-// Enterprise Manufacturing Execution System Database
+// INDUSTRY360 MES Platform — Prisma Schema
+// ISA-95 Compliant Enterprise Manufacturing Execution System
+// National Care Company (NCC) — KSA Industrial Network
 // ============================================================
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["fullTextSearch", "fullTextIndex"]
+  previewFeatures = ["fullTextSearch"]
   binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
 }
 
@@ -15,80 +16,1668 @@ datasource db {
 }
 
 // ============================================================
-// MULTI-TENANCY
+// ISA-95 LEVEL 4 — ENTERPRISE
 // ============================================================
 
-model Tenant {
-  id          String   @id @default(uuid())
-  code        String   @unique
-  name        String
-  industry    String?
-  country     String?
-  timezone    String   @default("UTC")
-  currency    String   @default("USD")
-  language    String   @default("en")
-  logoUrl     String?
-  isActive    Boolean  @default(true)
-  settings    Json     @default("{}")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
+model Enterprise {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  nameAr    String?
+  industry  String?
+  country   String   @default("SA")
+  timezone  String   @default("Asia/Riyadh")
+  currency  String   @default("SAR")
+  language  String   @default("en")
+  logoUrl   String?
+  isActive  Boolean  @default(true)
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  // Relations
-  users        User[]
-  sites        Site[]
-  products     Product[]
-  equipment    Equipment[]
-  workOrders   WorkOrder[]
-  alarms       Alarm[]
+  factories Factory[]
+  users     User[]
 
-  @@map("tenants")
+  @@map("enterprises")
 }
 
 // ============================================================
-// USERS & RBAC
+// ISA-95 LEVEL 3 — FACTORY (SITE)
+// ============================================================
+
+model Factory {
+  id           String   @id @default(uuid())
+  enterpriseId String
+  code         String   @unique
+  name         String
+  nameAr       String?
+  city         String?
+  country      String   @default("SA")
+  address      String?
+  lat          Float?
+  lng          Float?
+  color        String   @default("#00C8FF")
+  glowColor    String   @default("rgba(0,200,255,0.3)")
+  timezone     String   @default("Asia/Riyadh")
+  isActive     Boolean  @default(true)
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  enterprise        Enterprise          @relation(fields: [enterpriseId], references: [id])
+  areas             Area[]
+  productionLines   ProductionLine[]
+  machines          Machine[]
+  users             User[]
+  skus              SKU[]
+  shifts            ShiftTemplate[]
+  shiftInstances    ShiftInstance[]
+  productionOrders  ProductionOrder[]
+  workOrders        WorkOrder[]
+  batchRecords      BatchRecord[]
+  materialLots      MaterialLot[]
+  downtimeCauses    DowntimeCause[]
+  downtimeEvents    DowntimeEvent[]
+  oeeRecords        OEERecord[]
+  machineStates     MachineStateRecord[]
+  qualityPlans      QualityPlan[]
+  inspectionResults InspectionResult[]
+  ncrs              NCR[]
+  capas             CAPA[]
+  spcMeasurements   SPCMeasurement[]
+  maintenanceWOs    MaintenanceWO[]
+  pmPlans           PMPlan[]
+  pmTasks           PMTask[]
+  spareParts        SparePart[]
+  energyMeters      EnergyMeter[]
+  energyReadings    EnergyReading[]
+  energySummaries   EnergySummary[]
+  devices           Device[]
+  tagDefinitions    TagDefinition[]
+  alarmDefinitions  AlarmDefinition[]
+  alarmEvents       AlarmEvent[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  notificationRules NotificationRule[]
+
+  @@map("factories")
+}
+
+// ============================================================
+// ISA-95 LEVEL 3 — AREA (Making, Packing, Utility, Warehouse)
+// ============================================================
+
+model Area {
+  id          String   @id @default(uuid())
+  factoryId   String
+  code        String
+  name        String
+  nameAr      String?
+  type        AreaType @default(PACKING)
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  factory         Factory          @relation(fields: [factoryId], references: [id])
+  productionLines ProductionLine[]
+  machines        Machine[]
+  energyMeters    EnergyMeter[]
+
+  @@unique([factoryId, code])
+  @@map("areas")
+}
+
+enum AreaType {
+  MAKING
+  PACKING
+  FILLING
+  UTILITY
+  WAREHOUSE
+  LABORATORY
+  OFFICE
+}
+
+// ============================================================
+// ISA-95 LEVEL 3 — PRODUCTION LINE
+// ============================================================
+
+model ProductionLine {
+  id          String       @id @default(uuid())
+  factoryId   String
+  areaId      String
+  code        String
+  name        String
+  nameAr      String?
+  type        LineType     @default(PACKING)
+  description String?
+  isActive    Boolean      @default(true)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  factory        Factory         @relation(fields: [factoryId], references: [id])
+  area           Area            @relation(fields: [areaId], references: [id])
+  machines       Machine[]
+  workOrders     WorkOrder[]
+  shiftInstances ShiftInstance[]
+
+  @@unique([factoryId, code])
+  @@map("production_lines")
+}
+
+enum LineType {
+  PACKING
+  FILLING
+  MAKING
+  BLOW_MOLDING
+  BLOW_FILM
+  AEROSOL
+  CUTTING_SEALING
+  UTILITY
+}
+
+// ============================================================
+// ISA-95 LEVEL 2 — MACHINE (EQUIPMENT)
+// ============================================================
+
+model Machine {
+  id               String          @id @default(uuid())
+  factoryId        String
+  areaId           String?
+  lineId           String?
+  code             String
+  name             String
+  nameAr           String?
+  sortOrder        Int             @default(0)
+  machineType      MachineType     @default(MACHINE)
+  manufacturer     String?
+  model            String?
+  serialNumber     String?
+  installDate      DateTime?
+  warrantyExpiry   DateTime?
+  criticality      Criticality     @default(MEDIUM)
+  designCapacity   Float?          // units per hour
+  downtimeThreshold Int            @default(60) // seconds before classifying as downtime
+  isActive         Boolean         @default(true)
+  metadata         Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  factory            Factory              @relation(fields: [factoryId], references: [id])
+  area               Area?                @relation(fields: [areaId], references: [id])
+  line               ProductionLine?      @relation(fields: [lineId], references: [id])
+  currentStatus      MachineCurrentStatus?
+  modules            MachineModule[]
+  cycleTimes         MachineCycleTime[]
+  downtimeCauses     DowntimeCause[]
+  stateRecords       MachineStateRecord[]
+  downtimeEvents     DowntimeEvent[]
+  oeeRecords         OEERecord[]
+  workOrders         WorkOrder[]
+  maintenanceWOs     MaintenanceWO[]
+  pmPlans            PMPlan[]
+  pmTasks            PMTask[]
+  runtimeHours       MachineRuntimeHours[]
+  failureModes       FailureMode[]
+  inspectionResults  InspectionResult[]
+  spcMeasurements    SPCMeasurement[]
+  devices            Device[]
+  tagDefinitions     TagDefinition[]
+  alarmEvents        AlarmEvent[]
+  energyMeters       EnergyMeter[]
+
+  @@unique([factoryId, code])
+  @@map("machines")
+  @@index([factoryId])
+  @@index([lineId])
+}
+
+enum MachineType {
+  MACHINE
+  PRODUCTION_LINE
+  CONVEYOR
+  ROBOT
+  PALLETIZER
+  CHECKWEIGHER
+  FILLING_MACHINE
+  CARTONING_MACHINE
+  WRAPPING_MACHINE
+  BLOW_MOLDING
+  BLOW_FILM
+  COMPRESSOR
+  BOILER
+  TRANSFORMER
+  CHILLER
+  ENERGY_METER
+  PUMP
+  MIXER
+  REACTOR
+  HMI
+  GATEWAY
+  SENSOR
+}
+
+enum Criticality {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// ============================================================
+// ISA-95 LEVEL 1 — MACHINE MODULE
+// ============================================================
+
+model MachineModule {
+  id          String   @id @default(uuid())
+  machineId   String
+  code        String
+  name        String
+  type        String?  // DRIVE, SENSOR, VALVE, ACTUATOR, CONTROLLER
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@unique([machineId, code])
+  @@map("machine_modules")
+}
+
+// CURRENT STATUS — live snapshot
+model MachineCurrentStatus {
+  id              String       @id @default(uuid())
+  machineId       String       @unique
+  state           MachineState @default(OFFLINE)
+  currentSKUId    String?
+  currentWOId     String?
+  oee             Float?
+  availability    Float?
+  performance     Float?
+  quality         Float?
+  actualSpeed     Float?       // units/hour
+  targetSpeed     Float?
+  goodCount       Int          @default(0)
+  rejectCount     Int          @default(0)
+  downtimeMinutes Float        @default(0)
+  runtimeMinutes  Float        @default(0)
+  lastEventAt     DateTime?
+  updatedAt       DateTime     @updatedAt
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@map("machine_current_status")
+}
+
+enum MachineState {
+  RUNNING
+  IDLE
+  PLANNED_STOP
+  BREAKDOWN
+  SETUP
+  CHANGEOVER
+  STARVED
+  BLOCKED
+  OFFLINE
+  MAINTENANCE
+}
+
+// ============================================================
+// MACHINE CYCLE TIME (per SKU per machine — from NCC data)
+// ============================================================
+
+model MachineCycleTime {
+  id              String   @id @default(uuid())
+  machineId       String
+  skuId           String
+  cycleTimeSeconds Int
+  unitType        String   @default("UNIT") // UNIT, INNER, CARTON, PALLET
+  maxSpeed        Float?   // units per hour (theoretical max)
+  source          String   @default("NCC_DATA") // NCC_DATA, MEASURED, CALCULATED
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  machine Machine @relation(fields: [machineId], references: [id])
+  sku     SKU     @relation(fields: [skuId], references: [id])
+
+  @@unique([machineId, skuId, unitType])
+  @@map("machine_cycle_times")
+}
+
+// ============================================================
+// PRODUCT & SKU MASTER DATA
+// ============================================================
+
+model ProductFamily {
+  id        String   @id @default(uuid())
+  factoryId String
+  code      String
+  name      String
+  nameAr    String?
+  brand     String?
+  category  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  skus SKU[]
+
+  @@unique([factoryId, code])
+  @@map("product_families")
+}
+
+model SKU {
+  id              String   @id @default(uuid())
+  factoryId       String
+  familyId        String?
+  itemNumber      String   // NCC SAP item number (e.g. 10310064)
+  code            String   // Internal code
+  name            String
+  nameAr          String?
+  shortName       String?
+  brand           String?
+  category        String?
+  weight          Float?
+  weightUnit      String   @default("kg")
+  packagingType   String?  // HF (High Foam), LF (Low Foam)
+  unitsPerInner   Int      @default(1)
+  innersPerCarton Int      @default(1)
+  cartonsPerPallet Int     @default(1)
+  baseUnit        String   @default("EA") // EA, INNER, CARTON
+  isActive        Boolean  @default(true)
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  factory        Factory            @relation(fields: [factoryId], references: [id])
+  family         ProductFamily?     @relation(fields: [familyId], references: [id])
+  cycleTimes     MachineCycleTime[]
+  bomComponents  BOMComponent[]
+  workOrders     WorkOrder[]
+  batchRecords   BatchRecord[]
+
+  @@unique([factoryId, itemNumber])
+  @@map("skus")
+  @@index([factoryId])
+}
+
+model BOMComponent {
+  id              String   @id @default(uuid())
+  skuId           String
+  componentCode   String
+  componentName   String
+  quantity        Float
+  unit            String
+  type            String   @default("RAW") // RAW, PACKAGING, CONSUMABLE
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  sku SKU @relation(fields: [skuId], references: [id])
+
+  @@map("bom_components")
+}
+
+// ============================================================
+// PRODUCTION EXECUTION
+// ============================================================
+
+// PRODUCTION ORDER (ERP / SAP level)
+model ProductionOrder {
+  id             String              @id @default(uuid())
+  factoryId      String
+  orderNumber    String              @unique
+  sapOrderNumber String?
+  skuId          String?
+  targetQty      Int
+  completedQty   Int                 @default(0)
+  unit           String              @default("CARTON")
+  status         ProductionOrderStatus @default(PLANNED)
+  priority       Priority            @default(MEDIUM)
+  plannedStart   DateTime
+  plannedEnd     DateTime
+  actualStart    DateTime?
+  actualEnd      DateTime?
+  customer       String?
+  notes          String?
+  sapSync        Boolean             @default(false)
+  sapSyncedAt    DateTime?
+  createdById    String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  deletedAt      DateTime?
+
+  factory    Factory    @relation(fields: [factoryId], references: [id])
+  workOrders WorkOrder[]
+
+  @@map("production_orders")
+  @@index([factoryId, status])
+}
+
+enum ProductionOrderStatus {
+  PLANNED
+  RELEASED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  ON_HOLD
+}
+
+// WORK ORDER (shop floor execution)
+model WorkOrder {
+  id                  String          @id @default(uuid())
+  factoryId           String
+  productionOrderId   String?
+  lineId              String?
+  machineId           String?
+  skuId               String?
+  shiftInstanceId     String?
+  orderNumber         String          @unique
+  status              WorkOrderStatus @default(PLANNED)
+  priority            Priority        @default(MEDIUM)
+  plannedQty          Int
+  actualQty           Int             @default(0)
+  goodQty             Int             @default(0)
+  scrapQty            Int             @default(0)
+  reworkQty           Int             @default(0)
+  plannedStart        DateTime
+  plannedEnd          DateTime
+  actualStart         DateTime?
+  actualEnd           DateTime?
+  oee                 Float?
+  availability        Float?
+  performance         Float?
+  quality             Float?
+  downtimeMinutes     Float           @default(0)
+  plannedCycleTime    Float?          // seconds per unit
+  notes               String?
+  createdById         String?
+  startedById         String?
+  completedById       String?
+  operatorId          String?
+  supervisorId        String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  deletedAt           DateTime?
+
+  factory           Factory          @relation(fields: [factoryId], references: [id])
+  productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
+  line              ProductionLine?  @relation(fields: [lineId], references: [id])
+  machine           Machine?         @relation(fields: [machineId], references: [id])
+  sku               SKU?             @relation(fields: [skuId], references: [id])
+  shiftInstance     ShiftInstance?   @relation(fields: [shiftInstanceId], references: [id])
+  createdBy         User?            @relation("WOCreatedBy", fields: [createdById], references: [id])
+  startedBy         User?            @relation("WOStartedBy", fields: [startedById], references: [id])
+  completedBy       User?            @relation("WOCompletedBy", fields: [completedById], references: [id])
+  operator          User?            @relation("WOOperator", fields: [operatorId], references: [id])
+  supervisor        User?            @relation("WOSupervisor", fields: [supervisorId], references: [id])
+  batchRecords      BatchRecord[]
+  downtimeEvents    DowntimeEvent[]
+  materialConsumptions MaterialConsumption[]
+  productionEvents  ProductionEvent[]
+  inspectionResults InspectionResult[]
+
+  @@map("work_orders")
+  @@index([factoryId, status])
+  @@index([factoryId, plannedStart])
+  @@index([machineId])
+}
+
+enum WorkOrderStatus {
+  PLANNED
+  RELEASED
+  IN_PROGRESS
+  COMPLETED
+  ON_HOLD
+  CANCELLED
+}
+
+// PRODUCTION EVENT (state changes, count updates, etc.)
+model ProductionEvent {
+  id            String             @id @default(uuid())
+  factoryId     String
+  workOrderId   String?
+  machineId     String?
+  shiftId       String?
+  eventType     ProductionEventType
+  timestamp     DateTime           @default(now())
+  value         Float?
+  skuId         String?
+  metadata      Json?
+
+  workOrder WorkOrder? @relation(fields: [workOrderId], references: [id])
+
+  @@map("production_events")
+  @@index([factoryId, timestamp])
+  @@index([machineId, timestamp])
+}
+
+enum ProductionEventType {
+  WO_STARTED
+  WO_COMPLETED
+  WO_PAUSED
+  COUNT_UPDATE
+  SCRAP_RECORDED
+  CHANGEOVER_START
+  CHANGEOVER_END
+  SHIFT_START
+  SHIFT_END
+  DOWNTIME_START
+  DOWNTIME_END
+  SPEED_CHANGE
+  SKU_CHANGE
+}
+
+// ============================================================
+// TRACEABILITY — BATCH / LOT RECORD
+// ============================================================
+
+model BatchRecord {
+  id               String      @id @default(uuid())
+  factoryId        String
+  workOrderId      String?
+  skuId            String?
+  batchNumber      String      @unique
+  lotNumber        String?
+  status           BatchStatus @default(ACTIVE)
+  quantity         Int
+  goodQuantity     Int         @default(0)
+  scrapQuantity    Int         @default(0)
+  unit             String      @default("CARTON")
+  startTime        DateTime?
+  endTime          DateTime?
+  expiryDate       DateTime?
+  releaseDate      DateTime?
+  releasedById     String?
+  electronicRecord Json?       // EBR — process parameters, checkpoints
+  notes            String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  factory              Factory               @relation(fields: [factoryId], references: [id])
+  workOrder            WorkOrder?            @relation(fields: [workOrderId], references: [id])
+  sku                  SKU?                  @relation(fields: [skuId], references: [id])
+  materialConsumptions MaterialConsumption[]
+  genealogyAsChild     GenealogyLink[]       @relation("ChildBatch")
+  genealogyAsParent    GenealogyLink[]       @relation("ParentBatch")
+  inspectionResults    InspectionResult[]
+
+  @@map("batch_records")
+  @@index([factoryId])
+  @@index([lotNumber])
+}
+
+enum BatchStatus {
+  ACTIVE
+  COMPLETED
+  RELEASED
+  REJECTED
+  ON_HOLD
+  QUARANTINE
+}
+
+// MATERIAL LOT (incoming raw materials, packaging)
+model MaterialLot {
+  id              String      @id @default(uuid())
+  factoryId       String
+  materialCode    String
+  materialName    String
+  lotNumber       String
+  supplierLot     String?
+  supplierId      String?
+  supplierName    String?
+  quantity        Float
+  remainingQty    Float
+  unit            String
+  status          BatchStatus @default(ACTIVE)
+  receivedAt      DateTime    @default(now())
+  expiryDate      DateTime?
+  storageLocation String?
+  binNumber       String?
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  factory    Factory               @relation(fields: [factoryId], references: [id])
+  consumptions MaterialConsumption[]
+
+  @@unique([factoryId, lotNumber, materialCode])
+  @@map("material_lots")
+}
+
+// MATERIAL CONSUMPTION (links batch to raw materials consumed)
+model MaterialConsumption {
+  id               String   @id @default(uuid())
+  factoryId        String
+  workOrderId      String?
+  batchRecordId    String?
+  materialLotId    String?
+  materialCode     String
+  materialName     String
+  quantityPlanned  Float
+  quantityActual   Float    @default(0)
+  unit             String
+  consumedAt       DateTime @default(now())
+  consumedById     String?
+
+  workOrder   WorkOrder?   @relation(fields: [workOrderId], references: [id])
+  batchRecord BatchRecord? @relation(fields: [batchRecordId], references: [id])
+  materialLot MaterialLot? @relation(fields: [materialLotId], references: [id])
+
+  @@map("material_consumptions")
+  @@index([batchRecordId])
+  @@index([materialLotId])
+}
+
+// GENEALOGY LINK (parent-child batch relationships)
+model GenealogyLink {
+  id            String   @id @default(uuid())
+  parentBatchId String
+  childBatchId  String
+  materialCode  String?
+  quantity      Float?
+  createdAt     DateTime @default(now())
+
+  parentBatch BatchRecord @relation("ParentBatch", fields: [parentBatchId], references: [id])
+  childBatch  BatchRecord @relation("ChildBatch", fields: [childBatchId], references: [id])
+
+  @@unique([parentBatchId, childBatchId])
+  @@map("genealogy_links")
+}
+
+// ============================================================
+// SHIFTS
+// ============================================================
+
+model ShiftTemplate {
+  id                     String   @id @default(uuid())
+  factoryId              String
+  code                   String
+  name                   String
+  nameAr                 String?
+  startTime              String   // HH:mm (24h)
+  endTime                String   // HH:mm (24h)
+  crossesMidnight        Boolean  @default(false)
+  plannedProductionHours Float    // e.g. 11.0
+  shiftDurationHours     Float    // e.g. 12.0
+  breakMinutes           Int      @default(30)
+  cleaningMinutes        Int      @default(30)
+  days                   Json     // [0=Sun,1=Mon,...,6=Sat]
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  factory   Factory         @relation(fields: [factoryId], references: [id])
+  instances ShiftInstance[]
+
+  @@unique([factoryId, code])
+  @@map("shift_templates")
+}
+
+model ShiftInstance {
+  id               String        @id @default(uuid())
+  factoryId        String
+  shiftTemplateId  String
+  lineId           String?
+  shiftDate        DateTime      // the calendar date (start date)
+  startTime        DateTime
+  endTime          DateTime?
+  targetQty        Int?
+  actualQty        Int           @default(0)
+  goodQty          Int           @default(0)
+  scrapQty         Int           @default(0)
+  oee              Float?
+  availability     Float?
+  performance      Float?
+  quality          Float?
+  downtimeMinutes  Float         @default(0)
+  plannedDowntime  Float         @default(0)
+  operatorId       String?
+  supervisorId     String?
+  handoverNotes    String?
+  status           ShiftStatus   @default(PLANNED)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  factory        Factory         @relation(fields: [factoryId], references: [id])
+  shiftTemplate  ShiftTemplate   @relation(fields: [shiftTemplateId], references: [id])
+  line           ProductionLine? @relation(fields: [lineId], references: [id])
+  operator       User?           @relation("ShiftOperator", fields: [operatorId], references: [id])
+  supervisor     User?           @relation("ShiftSupervisor", fields: [supervisorId], references: [id])
+  workOrders     WorkOrder[]
+  stateRecords   MachineStateRecord[]
+  oeeRecords     OEERecord[]
+
+  @@map("shift_instances")
+  @@index([factoryId, shiftDate])
+}
+
+enum ShiftStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+// ============================================================
+// OEE ENGINE — MACHINE STATE & DOWNTIME
+// ============================================================
+
+model MachineStateRecord {
+  id              String        @id @default(uuid())
+  factoryId       String
+  machineId       String
+  shiftInstanceId String?
+  workOrderId     String?
+  skuId           String?
+  state           MachineState
+  startTime       DateTime
+  endTime         DateTime?
+  durationMinutes Float?        // calculated on endTime set
+  isPlannedStop   Boolean       @default(false)
+  downtimeCauseId String?
+  notes           String?
+  source          String        @default("SYSTEM") // SYSTEM, OPERATOR, MAINTENANCE
+
+  factory        Factory        @relation(fields: [factoryId], references: [id])
+  machine        Machine        @relation(fields: [machineId], references: [id])
+  shiftInstance  ShiftInstance? @relation(fields: [shiftInstanceId], references: [id])
+  downtimeCause  DowntimeCause? @relation(fields: [downtimeCauseId], references: [id])
+
+  @@map("machine_state_records")
+  @@index([factoryId, startTime])
+  @@index([machineId, startTime])
+}
+
+// DOWNTIME CAUSE (NCC pre-loaded codes per machine)
+model DowntimeCause {
+  id          String          @id @default(uuid())
+  factoryId   String
+  machineId   String?         // null = applicable to all machines
+  code        String
+  name        String
+  nameAr      String?
+  category    DowntimeCategory
+  isPlanned   Boolean         @default(false)
+  sortOrder   Int             @default(0)
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+
+  factory       Factory              @relation(fields: [factoryId], references: [id])
+  machine       Machine?             @relation(fields: [machineId], references: [id])
+  stateRecords  MachineStateRecord[]
+  downtimeEvents DowntimeEvent[]
+
+  @@map("downtime_causes")
+  @@index([factoryId])
+  @@index([machineId])
+}
+
+enum DowntimeCategory {
+  MECHANICAL
+  ELECTRICAL
+  PROCESS
+  MATERIAL
+  OPERATOR
+  CHANGEOVER
+  UTILITY
+  QUALITY
+  PLANNED_MAINTENANCE
+  PLANNED_CLEANING
+  PLANNED_BREAK
+  EXTERNAL
+  OTHER
+}
+
+// DOWNTIME EVENT (logged, can be linked to maintenance WO)
+model DowntimeEvent {
+  id              String    @id @default(uuid())
+  factoryId       String
+  machineId       String
+  workOrderId     String?
+  shiftInstanceId String?
+  causeId         String?
+  reason          String?   // free text override
+  category        DowntimeCategory
+  startTime       DateTime
+  endTime         DateTime?
+  durationMinutes Float?
+  isPlanned       Boolean   @default(false)
+  reportedById    String?
+  acknowledged    Boolean   @default(false)
+  acknowledgedById String?
+  acknowledgedAt  DateTime?
+  maintenanceWOId String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  factory   Factory        @relation(fields: [factoryId], references: [id])
+  machine   Machine        @relation(fields: [machineId], references: [id])
+  workOrder WorkOrder?     @relation(fields: [workOrderId], references: [id])
+  cause     DowntimeCause? @relation(fields: [causeId], references: [id])
+
+  @@map("downtime_events")
+  @@index([factoryId, startTime])
+  @@index([machineId, startTime])
+}
+
+// OEE RECORD (calculated and stored for reporting)
+model OEERecord {
+  id                   String   @id @default(uuid())
+  factoryId            String
+  machineId            String
+  shiftInstanceId      String?
+  recordDate           DateTime
+  shiftCode            String?
+  skuId                String?
+  plannedProductionMin Float    // minutes
+  actualProductionMin  Float    // minutes (excl planned stops)
+  uptimeMin            Float    // minutes actually running
+  downtimeMin          Float    // minutes unplanned downtime
+  plannedDowntimeMin   Float    @default(0)
+  totalOutput          Int
+  goodOutput           Int
+  scrapOutput          Int      @default(0)
+  idealCycleTime       Float?   // seconds per unit
+  availability         Float    // %
+  performance          Float    // %
+  quality              Float    // %
+  oee                  Float    // %
+  calculatedAt         DateTime @default(now())
+
+  factory       Factory        @relation(fields: [factoryId], references: [id])
+  machine       Machine        @relation(fields: [machineId], references: [id])
+  shiftInstance ShiftInstance? @relation(fields: [shiftInstanceId], references: [id])
+
+  @@map("oee_records")
+  @@index([factoryId, recordDate])
+  @@index([machineId, recordDate])
+}
+
+// MACHINE RUNTIME HOURS (for PM scheduling)
+model MachineRuntimeHours {
+  id               String   @id @default(uuid())
+  machineId        String
+  factoryId        String
+  recordDate       DateTime @db.Date
+  dailyHours       Float
+  cumulativeHours  Float
+  source           String   @default("CALCULATED") // CALCULATED, MANUAL
+  createdAt        DateTime @default(now())
+
+  machine Machine @relation(fields: [machineId], references: [id])
+
+  @@unique([machineId, recordDate])
+  @@map("machine_runtime_hours")
+}
+
+// ============================================================
+// QUALITY MANAGEMENT
+// ============================================================
+
+model QualityPlan {
+  id                  String   @id @default(uuid())
+  factoryId           String
+  skuId               String?
+  machineId           String?
+  code                String
+  name                String
+  type                String   @default("IN_PROCESS") // INCOMING, IN_PROCESS, FINAL
+  samplingFrequency   String?  // EVERY_BATCH, HOURLY, etc.
+  samplingQty         Int      @default(1)
+  version             String   @default("1")
+  isActive            Boolean  @default(true)
+  approvedAt          DateTime?
+  approvedById        String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  factory    Factory              @relation(fields: [factoryId], references: [id])
+  parameters QualityParameter[]
+  results    InspectionResult[]
+
+  @@map("quality_plans")
+}
+
+model QualityParameter {
+  id           String   @id @default(uuid())
+  planId       String
+  name         String
+  unit         String?
+  nominalValue Float?
+  ucl          Float?   // upper control limit
+  lcl          Float?   // lower control limit
+  usl          Float?   // upper spec limit
+  lsl          Float?   // lower spec limit
+  checkMethod  String?
+  isKPI        Boolean  @default(false)
+  sortOrder    Int      @default(0)
+
+  plan QualityPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@map("quality_parameters")
+}
+
+model InspectionResult {
+  id               String    @id @default(uuid())
+  factoryId        String
+  planId           String?
+  workOrderId      String?
+  batchRecordId    String?
+  machineId        String?
+  inspectionNumber String    @unique
+  type             InspectionType
+  result           InspectionResult2 @default(PENDING)
+  totalQty         Int
+  passQty          Int       @default(0)
+  failQty          Int       @default(0)
+  measurements     Json?     // [{parameterId, value, pass}]
+  checklistData    Json?
+  attachments      Json?
+  inspectorId      String
+  inspectedAt      DateTime  @default(now())
+  approvedById     String?
+  approvedAt       DateTime?
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  factory     Factory      @relation(fields: [factoryId], references: [id])
+  plan        QualityPlan? @relation(fields: [planId], references: [id])
+  workOrder   WorkOrder?   @relation(fields: [workOrderId], references: [id])
+  batchRecord BatchRecord? @relation(fields: [batchRecordId], references: [id])
+  machine     Machine?     @relation(fields: [machineId], references: [id])
+  inspector   User         @relation("InspectionInspector", fields: [inspectorId], references: [id])
+
+  @@map("inspection_results")
+  @@index([factoryId, inspectedAt])
+}
+
+enum InspectionType {
+  INCOMING
+  IN_PROCESS
+  FINAL
+  PATROL
+  AUDIT
+}
+
+enum InspectionResult2 {
+  PENDING
+  PASS
+  FAIL
+  CONDITIONAL
+}
+
+model NCR {
+  id             String      @id @default(uuid())
+  factoryId      String
+  ncrNumber      String      @unique
+  title          String
+  description    String
+  severity       Severity    @default(MAJOR)
+  status         NCRStatus   @default(OPEN)
+  skuId          String?
+  batchRecordId  String?
+  machineId      String?
+  defectCategory String
+  defectCode     String?
+  quantity       Int
+  disposition    String?     // USE_AS_IS, REWORK, SCRAP, RETURN_TO_SUPPLIER
+  detectedById   String
+  detectedAt     DateTime
+  dueDate        DateTime
+  rootCause      String?
+  correctiveAction String?
+  preventiveAction String?
+  resolvedAt     DateTime?
+  resolvedById   String?
+  closedAt       DateTime?
+  closedById     String?
+  attachments    Json?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  factory    Factory @relation(fields: [factoryId], references: [id])
+  detectedBy User    @relation("NCRDetectedBy", fields: [detectedById], references: [id])
+  capas      CAPA[]
+
+  @@map("ncrs")
+  @@index([factoryId, status])
+}
+
+enum NCRStatus {
+  OPEN
+  IN_REVIEW
+  CAPA_PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum Severity {
+  MINOR
+  MAJOR
+  CRITICAL
+}
+
+model CAPA {
+  id          String     @id @default(uuid())
+  factoryId   String
+  capaNumber  String     @unique
+  ncrId       String?
+  type        CAPAType
+  title       String
+  description String
+  status      CAPAStatus @default(OPEN)
+  priority    Priority   @default(MEDIUM)
+  assignedToId String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  verifiedAt  DateTime?
+  verifiedById String?
+  effectiveness String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  factory    Factory @relation(fields: [factoryId], references: [id])
+  ncr        NCR?    @relation(fields: [ncrId], references: [id])
+  assignedTo User?   @relation("CAPAAssignedTo", fields: [assignedToId], references: [id])
+  actions    CAPAAction[]
+
+  @@map("capas")
+}
+
+enum CAPAType {
+  CORRECTIVE
+  PREVENTIVE
+}
+
+enum CAPAStatus {
+  OPEN
+  IN_PROGRESS
+  VERIFIED
+  CLOSED
+}
+
+model CAPAAction {
+  id          String   @id @default(uuid())
+  capaId      String
+  description String
+  assignedToId String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  status      String   @default("OPEN")
+  evidence    String?
+  createdAt   DateTime @default(now())
+
+  capa CAPA @relation(fields: [capaId], references: [id], onDelete: Cascade)
+
+  @@map("capa_actions")
+}
+
+// SPC — Statistical Process Control
+model SPCMeasurement {
+  id              String   @id @default(uuid())
+  factoryId       String
+  machineId       String
+  skuId           String?
+  parameterName   String
+  parameterUnit   String?
+  value           Float
+  sampleSize      Int      @default(1)
+  subgroupNumber  Int?
+  workOrderId     String?
+  shiftInstanceId String?
+  measuredAt      DateTime @default(now())
+  measuredById    String?
+  isOutOfControl  Boolean  @default(false)
+  controlViolation String?  // RULE_1, RULE_2, etc.
+  ucl             Float?
+  lcl             Float?
+  cl              Float?
+  usl             Float?
+  lsl             Float?
+
+  factory Factory @relation(fields: [factoryId], references: [id])
+  machine Machine @relation(fields: [machineId], references: [id])
+
+  @@map("spc_measurements")
+  @@index([factoryId, measuredAt])
+  @@index([machineId, parameterName, measuredAt])
+}
+
+// ============================================================
+// MAINTENANCE (CMMS / EAM)
+// ============================================================
+
+model FailureMode {
+  id                 String   @id @default(uuid())
+  factoryId          String
+  machineId          String
+  code               String
+  description        String
+  category           DowntimeCategory @default(MECHANICAL)
+  causeDescription   String?
+  effectDescription  String?
+  severityScore      Int      @default(1) // 1-10 RPN
+  occurrenceScore    Int      @default(1)
+  detectionScore     Int      @default(1)
+  rpn                Int      @default(1) // severity × occurrence × detection
+  recommendedAction  String?
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+
+  machine Machine @relation(fields: [machineId], references: [id])
+
+  @@map("failure_modes")
+  @@index([machineId])
+}
+
+model PMPlan {
+  id               String          @id @default(uuid())
+  factoryId        String
+  machineId        String
+  code             String
+  name             String
+  type             PMType
+  description      String?
+  frequencyDays    Int?
+  runtimeHours     Float?
+  estimatedHours   Float?
+  instructions     String?
+  checklistTemplate Json?
+  lastExecutedAt   DateTime?
+  nextDueAt        DateTime?
+  isActive         Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  factory   Factory          @relation(fields: [factoryId], references: [id])
+  machine   Machine          @relation(fields: [machineId], references: [id])
+  spareParts PMPlanSparePart[]
+  tasks     PMTask[]
+
+  @@map("pm_plans")
+}
+
+enum PMType {
+  TIME_BASED
+  RUNTIME_BASED
+  CONDITION_BASED
+  CALENDAR_BASED
+}
+
+model PMPlanSparePart {
+  id          String  @id @default(uuid())
+  pmPlanId    String
+  sparePartId String
+  quantity    Float
+  unit        String  @default("PCS")
+
+  pmPlan    PMPlan    @relation(fields: [pmPlanId], references: [id], onDelete: Cascade)
+  sparePart SparePart @relation(fields: [sparePartId], references: [id])
+
+  @@map("pm_plan_spare_parts")
+}
+
+model PMTask {
+  id            String   @id @default(uuid())
+  factoryId     String
+  planId        String
+  machineId     String
+  scheduledDate DateTime @db.Date
+  completedAt   DateTime?
+  status        PMTaskStatus @default(SCHEDULED)
+  assignedToId  String?
+  actualHours   Float?
+  notes         String?
+  sparesUsed    Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  factory    Factory    @relation(fields: [factoryId], references: [id])
+  plan       PMPlan     @relation(fields: [planId], references: [id])
+  machine    Machine    @relation(fields: [machineId], references: [id])
+  assignedTo User?      @relation("PMTaskAssignedTo", fields: [assignedToId], references: [id])
+
+  @@map("pm_tasks")
+  @@index([factoryId, scheduledDate])
+}
+
+enum PMTaskStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  SKIPPED
+}
+
+model MaintenanceWO {
+  id                   String       @id @default(uuid())
+  factoryId            String
+  woNumber             String       @unique
+  type                 MaintType
+  priority             Priority     @default(MEDIUM)
+  status               MaintStatus  @default(OPEN)
+  machineId            String
+  failureModeId        String?
+  triggeredByDowntimeId String?
+  title                String
+  description          String?
+  estimatedHours       Float?
+  actualHours          Float?
+  laborCost            Float?
+  partsCost            Float?
+  totalCost            Float?
+  assignedToId         String?
+  requestedById        String?
+  dueDate              DateTime?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  runtimeHoursAtService Float?
+  checklistData        Json?
+  notes                String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  deletedAt            DateTime?
+
+  factory    Factory   @relation(fields: [factoryId], references: [id])
+  machine    Machine   @relation(fields: [machineId], references: [id])
+  assignedTo User?     @relation("MaintAssignedTo", fields: [assignedToId], references: [id])
+  requestedBy User?    @relation("MaintRequestedBy", fields: [requestedById], references: [id])
+  sparesUsed MaintWOSparePart[]
+
+  @@map("maintenance_wos")
+  @@index([factoryId, status])
+  @@index([machineId])
+}
+
+enum MaintType {
+  PREVENTIVE
+  CORRECTIVE
+  EMERGENCY
+  PREDICTIVE
+  INSPECTION
+  LUBRICATION
+}
+
+enum MaintStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+model SparePart {
+  id              String   @id @default(uuid())
+  factoryId       String
+  partNumber      String
+  name            String
+  description     String?
+  category        String?
+  manufacturer    String?
+  model           String?
+  supplier        String?
+  unitCost        Float?
+  stockQty        Float    @default(0)
+  minStockQty     Float    @default(0)
+  maxStockQty     Float?
+  storageLocation String?
+  binNumber       String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  factory      Factory            @relation(fields: [factoryId], references: [id])
+  pmPlanLinks  PMPlanSparePart[]
+  woConsumptions MaintWOSparePart[]
+
+  @@unique([factoryId, partNumber])
+  @@map("spare_parts")
+}
+
+model MaintWOSparePart {
+  id          String  @id @default(uuid())
+  woId        String
+  sparePartId String
+  quantity    Float
+  unitCost    Float?
+
+  wo        MaintenanceWO @relation(fields: [woId], references: [id], onDelete: Cascade)
+  sparePart SparePart     @relation(fields: [sparePartId], references: [id])
+
+  @@map("maint_wo_spare_parts")
+}
+
+// ============================================================
+// ENERGY MANAGEMENT
+// ============================================================
+
+model EnergyMeter {
+  id          String      @id @default(uuid())
+  factoryId   String
+  machineId   String?     // null = area-level meter
+  areaId      String?
+  meterNumber String
+  name        String
+  type        EnergyType
+  unit        String      // kWh, m3, L, kW
+  brand       String?
+  location    String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  factory   Factory        @relation(fields: [factoryId], references: [id])
+  machine   Machine?       @relation(fields: [machineId], references: [id])
+  area      Area?          @relation(fields: [areaId], references: [id])
+  readings  EnergyReading[]
+  summaries EnergySummary[]
+
+  @@unique([factoryId, meterNumber])
+  @@map("energy_meters")
+}
+
+enum EnergyType {
+  ELECTRICAL
+  NATURAL_GAS
+  COMPRESSED_AIR
+  WATER
+  STEAM
+  CHILLED_WATER
+}
+
+model EnergyReading {
+  id              String   @id @default(uuid())
+  meterId         String
+  factoryId       String
+  timestamp       DateTime
+  value           Float
+  unit            String
+  shiftInstanceId String?
+  workOrderId     String?
+  source          String   @default("AUTO") // AUTO (from IoT), MANUAL
+  quality         String   @default("GOOD")
+  createdAt       DateTime @default(now())
+
+  factory Factory     @relation(fields: [factoryId], references: [id])
+  meter   EnergyMeter @relation(fields: [meterId], references: [id])
+
+  @@map("energy_readings")
+  @@index([meterId, timestamp])
+  @@index([factoryId, timestamp])
+}
+
+model EnergySummary {
+  id                String         @id @default(uuid())
+  meterId           String
+  factoryId         String
+  periodType        EnergyPeriod
+  periodStart       DateTime
+  periodEnd         DateTime
+  totalConsumption  Float
+  unit              String
+  cost              Float?
+  costCurrency      String         @default("SAR")
+  productionQty     Float?
+  specificEnergy    Float?         // kWh/unit
+  createdAt         DateTime       @default(now())
+
+  factory Factory     @relation(fields: [factoryId], references: [id])
+  meter   EnergyMeter @relation(fields: [meterId], references: [id])
+
+  @@map("energy_summaries")
+  @@index([meterId, periodStart])
+}
+
+enum EnergyPeriod {
+  HOURLY
+  SHIFT
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+// ============================================================
+// IIIOT — LOGICAL CONNECTIVITY LAYER
+// ============================================================
+
+model Device {
+  id             String   @id @default(uuid())
+  factoryId      String
+  machineId      String?
+  name           String
+  deviceCode     String   @unique
+  type           String   // PLC, HMI, GATEWAY, SENSOR, METER, DRIVE
+  protocol       String   // OPCUA, MODBUS, MQTT, FINS, S7, HTTP
+  ipAddress      String?
+  port           Int?
+  connectionString String?
+  status         String   @default("DISCONNECTED") // CONNECTED, DISCONNECTED, ERROR
+  lastSeenAt     DateTime?
+  firmware       String?
+  config         Json?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  factory        Factory          @relation(fields: [factoryId], references: [id])
+  machine        Machine?         @relation(fields: [machineId], references: [id])
+  tagDefinitions TagDefinition[]
+
+  @@map("devices")
+  @@index([factoryId])
+}
+
+model TagDefinition {
+  id                    String   @id @default(uuid())
+  factoryId             String
+  machineId             String?
+  deviceId              String?
+  code                  String
+  name                  String
+  description           String?
+  dataType              TagDataType
+  unit                  String?
+  minValue              Float?
+  maxValue              Float?
+  scaleFactor           Float?
+  offset                Float?
+  tagType               TagType  @default(MEASUREMENT)
+  historizationEnabled  Boolean  @default(true)
+  historizationRateSec  Int      @default(60)
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  factory          Factory           @relation(fields: [factoryId], references: [id])
+  machine          Machine?          @relation(fields: [machineId], references: [id])
+  device           Device?           @relation(fields: [deviceId], references: [id])
+  currentValue     TagCurrentValue?
+  alarmDefinitions AlarmDefinition[]
+
+  @@unique([factoryId, code])
+  @@map("tag_definitions")
+}
+
+enum TagDataType {
+  BOOL
+  INT
+  FLOAT
+  STRING
+  TIMESTAMP
+}
+
+enum TagType {
+  STATUS
+  COUNTER
+  MEASUREMENT
+  SETPOINT
+  ALARM
+  EVENT
+  ENERGY
+}
+
+model TagCurrentValue {
+  id        String      @id @default(uuid())
+  tagId     String      @unique
+  factoryId String
+  value     String
+  quality   TagQuality  @default(GOOD)
+  timestamp DateTime    @default(now())
+
+  tag TagDefinition @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@map("tag_current_values")
+}
+
+enum TagQuality {
+  GOOD
+  BAD
+  UNCERTAIN
+  NOT_CONNECTED
+}
+
+model AlarmDefinition {
+  id           String        @id @default(uuid())
+  factoryId    String
+  tagId        String?
+  code         String
+  name         String
+  severity     AlarmSeverity @default(HIGH)
+  category     String        @default("PROCESS")
+  condition    String?       // GT, LT, EQ, NEQ
+  threshold    Float?
+  deadband     Float?
+  delaySeconds Int           @default(0)
+  autoAck      Boolean       @default(false)
+  notifyRoles  Json          @default("[]")
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  factory Factory         @relation(fields: [factoryId], references: [id])
+  tag     TagDefinition?  @relation(fields: [tagId], references: [id])
+  events  AlarmEvent[]
+
+  @@map("alarm_definitions")
+}
+
+enum AlarmSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+model AlarmEvent {
+  id                 String        @id @default(uuid())
+  factoryId          String
+  alarmDefinitionId  String?
+  machineId          String?
+  code               String
+  description        String
+  severity           AlarmSeverity
+  category           String?
+  value              Float?
+  threshold          Float?
+  triggeredAt        DateTime
+  acknowledgedAt     DateTime?
+  acknowledgedById   String?
+  resolvedAt         DateTime?
+  resolvedById       String?
+  durationMinutes    Float?
+  notes              String?
+  metadata           Json?
+
+  factory         Factory          @relation(fields: [factoryId], references: [id])
+  machine         Machine?         @relation(fields: [machineId], references: [id])
+  alarmDefinition AlarmDefinition? @relation(fields: [alarmDefinitionId], references: [id])
+
+  @@map("alarm_events")
+  @@index([factoryId, triggeredAt])
+  @@index([machineId, triggeredAt])
+}
+
+// ============================================================
+// USERS & RBAC — FACTORY-SCOPED
 // ============================================================
 
 model User {
-  id                   String    @id @default(uuid())
-  tenantId             String
-  email                String    @unique
-  name                 String
-  passwordHash         String
-  role                 String    @default("OPERATOR")
-  department           String?
-  siteId               String?
-  avatarUrl            String?
-  language             String    @default("en")
-  timezone             String    @default("UTC")
-  isActive             Boolean   @default(true)
-  mfaEnabled           Boolean   @default(false)
-  mfaSecret            String?
-  passwordChangedAt    DateTime?
-  lastLoginAt          DateTime?
-  failedLoginAttempts  Int       @default(0)
-  lockedAt             DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  deletedAt            DateTime?
+  id                  String    @id @default(uuid())
+  enterpriseId        String
+  factoryId           String?   // null = SUPER_ADMIN (access to all factories)
+  email               String    @unique
+  name                String
+  nameAr              String?
+  passwordHash        String
+  role                UserRole  @default(OPERATOR)
+  department          String?
+  jobTitle            String?
+  phone               String?
+  avatarUrl           String?
+  language            String    @default("en")
+  timezone            String    @default("Asia/Riyadh")
+  isActive            Boolean   @default(true)
+  mfaEnabled          Boolean   @default(false)
+  mfaSecret           String?
+  passwordChangedAt   DateTime?
+  lastLoginAt         DateTime?
+  failedLoginAttempts Int       @default(0)
+  lockedAt            DateTime?
+  notifyEmail         Boolean   @default(true)
+  notifyWhatsapp      Boolean   @default(false)
+  notifySMS           Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
 
-  // Relations
-  tenant           Tenant             @relation(fields: [tenantId], references: [id])
-  site             Site?              @relation(fields: [siteId], references: [id])
-  sessions         UserSession[]
-  rolePermissions  UserRolePermission[]
-  auditLogs        AuditLog[]
-  createdWorkOrders    WorkOrder[]    @relation("CreatedBy")
-  startedWorkOrders    WorkOrder[]    @relation("StartedBy")
-  completedWorkOrders  WorkOrder[]    @relation("CompletedBy")
-  assignedWorkOrders   WorkOrder[]    @relation("AssignedOperator")
-  maintenanceWOs   MaintenanceWorkOrder[]
-  qualityInspections   QualityInspection[]
-  shiftLogs        ShiftLog[]         @relation("ShiftOperator")
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  factory      Factory?   @relation(fields: [factoryId], references: [id])
+  sessions     UserSession[]
+  auditLogs    AuditLog[]
+  notifications Notification[]
+
+  // Work Order relations
+  woCreated        WorkOrder[] @relation("WOCreatedBy")
+  woStarted        WorkOrder[] @relation("WOStartedBy")
+  woCompleted      WorkOrder[] @relation("WOCompletedBy")
+  woOperator       WorkOrder[] @relation("WOOperator")
+  woSupervisor     WorkOrder[] @relation("WOSupervisor")
+  shiftAsOperator  ShiftInstance[] @relation("ShiftOperator")
+  shiftAsSupervisor ShiftInstance[] @relation("ShiftSupervisor")
+
+  // Quality
+  inspections   InspectionResult[] @relation("InspectionInspector")
+  ncrsDetected  NCR[]              @relation("NCRDetectedBy")
+  capaAssigned  CAPA[]             @relation("CAPAAssignedTo")
+
+  // Maintenance
+  maintAssigned   MaintenanceWO[] @relation("MaintAssignedTo")
+  maintRequested  MaintenanceWO[] @relation("MaintRequestedBy")
+  pmTasksAssigned PMTask[]       @relation("PMTaskAssignedTo")
 
   @@map("users")
-  @@index([tenantId])
+  @@index([enterpriseId])
+  @@index([factoryId])
   @@index([email])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  FACTORY_ADMIN
+  PLANT_MANAGER
+  PRODUCTION_MANAGER
+  PRODUCTION_SUPERVISOR
+  QUALITY_MANAGER
+  QUALITY_ENGINEER
+  MAINTENANCE_MANAGER
+  MAINTENANCE_TECHNICIAN
+  ENERGY_MANAGER
+  OPERATOR
+  VIEWER
 }
 
 model UserSession {
@@ -97,6 +1686,7 @@ model UserSession {
   refreshToken String
   userAgent    String?
   ipAddress    String?
+  factoryId    String?  // which factory context was active
   isRevoked    Boolean  @default(false)
   expiresAt    DateTime
   createdAt    DateTime @default(now())
@@ -107,36 +1697,70 @@ model UserSession {
   @@index([userId])
 }
 
-model Permission {
+// ============================================================
+// NOTIFICATIONS & ALERTS
+// ============================================================
+
+model Notification {
+  id          String           @id @default(uuid())
+  userId      String
+  factoryId   String?
+  type        NotificationType
+  title       String
+  message     String
+  data        Json?
+  priority    AlarmSeverity    @default(HIGH)
+  isRead      Boolean          @default(false)
+  readAt      DateTime?
+  emailSent   Boolean          @default(false)
+  smsSent     Boolean          @default(false)
+  pushSent    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  factory Factory? @relation(fields: [factoryId], references: [id])
+
+  @@map("notifications")
+  @@index([userId, isRead])
+  @@index([factoryId, createdAt])
+}
+
+enum NotificationType {
+  ALARM
+  DOWNTIME
+  PRODUCTION
+  QUALITY
+  MAINTENANCE
+  ENERGY
+  SYSTEM
+  INFO
+}
+
+model NotificationRule {
   id          String   @id @default(uuid())
-  code        String   @unique
+  factoryId   String
   name        String
   module      String
-  description String?
+  event       String
+  condition   Json?
+  channels    Json     // email, sms, whatsapp, push
+  recipients  Json     // userIds or roles
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  rolePermissions UserRolePermission[]
+  factory Factory @relation(fields: [factoryId], references: [id])
 
-  @@map("permissions")
+  @@map("notification_rules")
 }
 
-model UserRolePermission {
-  id           String   @id @default(uuid())
-  userId       String
-  permissionId String
-  grantedAt    DateTime @default(now())
-  grantedById  String?
-
-  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  permission Permission @relation(fields: [permissionId], references: [id])
-
-  @@unique([userId, permissionId])
-  @@map("user_role_permissions")
-}
+// ============================================================
+// AUDIT LOG
+// ============================================================
 
 model AuditLog {
   id         String   @id @default(uuid())
-  tenantId   String
+  factoryId  String?
   userId     String?
   action     String
   module     String
@@ -149,677 +1773,18 @@ model AuditLog {
   metadata   Json?
   createdAt  DateTime @default(now())
 
-  user User? @relation(fields: [userId], references: [id])
+  factory Factory? @relation(fields: [factoryId], references: [id])
+  user    User?    @relation(fields: [userId], references: [id])
 
   @@map("audit_logs")
-  @@index([tenantId, createdAt])
+  @@index([factoryId, createdAt])
   @@index([userId])
   @@index([entityType, entityId])
 }
 
 // ============================================================
-// PLANT HIERARCHY (ISA-95)
+// SHARED ENUMS
 // ============================================================
-
-model Site {
-  id        String    @id @default(uuid())
-  tenantId  String
-  code      String
-  name      String
-  country   String?
-  city      String?
-  address   String?
-  timezone  String    @default("UTC")
-  isActive  Boolean   @default(true)
-  metadata  Json?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  tenant    Tenant      @relation(fields: [tenantId], references: [id])
-  users     User[]
-  areas     Area[]
-  equipment Equipment[]
-
-  @@unique([tenantId, code])
-  @@map("sites")
-}
-
-model Area {
-  id          String    @id @default(uuid())
-  tenantId    String
-  siteId      String
-  code        String
-  name        String
-  description String?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
-
-  site        Site        @relation(fields: [siteId], references: [id])
-  workcells   WorkCell[]
-  equipment   Equipment[]
-
-  @@unique([siteId, code])
-  @@map("areas")
-}
-
-model WorkCell {
-  id          String    @id @default(uuid())
-  tenantId    String
-  areaId      String
-  code        String
-  name        String
-  description String?
-  capacity    Float?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
-
-  area      Area        @relation(fields: [areaId], references: [id])
-  equipment Equipment[]
-
-  @@unique([areaId, code])
-  @@map("work_cells")
-}
-
-model Equipment {
-  id              String    @id @default(uuid())
-  tenantId        String
-  siteId          String?
-  areaId          String?
-  workcellId      String?
-  code            String
-  name            String
-  description     String?
-  type            String    @default("MACHINE") // MACHINE, PRODUCTION_LINE, CONVEYOR, ROBOT, etc.
-  manufacturer    String?
-  model           String?
-  serialNumber    String?
-  installDate     DateTime?
-  warrantyExpiry  DateTime?
-  criticality     String    @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
-  areaName        String?
-  isActive        Boolean   @default(true)
-  metadata        Json?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
-
-  tenant          Tenant               @relation(fields: [tenantId], references: [id])
-  site            Site?                @relation(fields: [siteId], references: [id])
-  area            Area?                @relation(fields: [areaId], references: [id])
-  workcell        WorkCell?            @relation(fields: [workcellId], references: [id])
-  latestStatus    EquipmentStatus?
-  workOrders      WorkOrder[]
-  activeWorkOrders EquipmentWorkOrder[]
-  alarms          Alarm[]
-  maintenanceWOs  MaintenanceWorkOrder[]
-  iotDevices      IoTDevice[]
-  productionRecords ProductionRecord[]
-
-  @@unique([tenantId, code])
-  @@map("equipment")
-  @@index([tenantId])
-}
-
-model EquipmentStatus {
-  id              String   @id @default(uuid())
-  equipmentId     String   @unique
-  state           String   @default("OFFLINE") // RUNNING, IDLE, STOPPED, FAULT, MAINTENANCE, OFFLINE
-  oee             Float?
-  availability    Float?
-  performance     Float?
-  quality         Float?
-  throughput      Float?
-  runtimeMinutes  Float?
-  downtimeMinutes Float?
-  currentSpeed    Float?
-  targetSpeed     Float?
-  tags            Json?
-  updatedAt       DateTime @updatedAt
-
-  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
-
-  @@map("equipment_status")
-}
-
-model EquipmentWorkOrder {
-  id          String @id @default(uuid())
-  equipmentId String
-  workOrderId String
-
-  equipment Equipment @relation(fields: [equipmentId], references: [id])
-  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
-
-  @@unique([equipmentId, workOrderId])
-  @@map("equipment_work_orders")
-}
-
-// ============================================================
-// PRODUCTS & RECIPES
-// ============================================================
-
-model Product {
-  id          String    @id @default(uuid())
-  tenantId    String
-  code        String
-  name        String
-  description String?
-  category    String?
-  unit        String    @default("PCS")
-  weight      Float?
-  dimensions  Json?
-  isActive    Boolean   @default(true)
-  metadata    Json?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
-
-  tenant     Tenant      @relation(fields: [tenantId], references: [id])
-  recipes    Recipe[]
-  workOrders WorkOrder[]
-
-  @@unique([tenantId, code])
-  @@map("products")
-}
-
-model Recipe {
-  id          String    @id @default(uuid())
-  tenantId    String
-  productId   String
-  code        String
-  name        String
-  version     String    @default("1.0")
-  status      String    @default("DRAFT") // DRAFT, APPROVED, ACTIVE, ARCHIVED
-  cycleTime   Float?    // minutes per unit
-  parameters  Json?
-  steps       Json?
-  materials   Json?
-  approvedAt  DateTime?
-  approvedBy  String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
-
-  product    Product     @relation(fields: [productId], references: [id])
-  workOrders WorkOrder[]
-
-  @@unique([productId, version])
-  @@map("recipes")
-}
-
-// ============================================================
-// PRODUCTION
-// ============================================================
-
-model WorkOrder {
-  id              String    @id @default(uuid())
-  tenantId        String
-  orderNumber     String    @unique
-  productId       String
-  equipmentId     String
-  recipeId        String?
-  status          WorkOrderStatus @default(PLANNED)
-  priority        Priority  @default(MEDIUM)
-  plannedQty      Int
-  actualQty       Int?
-  goodQty         Int?
-  scrapQty        Int?
-  plannedStart    DateTime
-  plannedEnd      DateTime
-  actualStart     DateTime?
-  actualEnd       DateTime?
-  completedAt     DateTime?
-  cycleTimeMinutes Float?
-  oee             Float?
-  availability    Float?
-  performance     Float?
-  quality         Float?
-  downtimeMinutes Float?
-  notes           String?
-  createdById     String?
-  startedById     String?
-  completedById   String?
-  assignedOperatorId String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
-
-  tenant           Tenant              @relation(fields: [tenantId], references: [id])
-  product          Product             @relation(fields: [productId], references: [id])
-  equipment        Equipment           @relation(fields: [equipmentId], references: [id])
-  recipe           Recipe?             @relation(fields: [recipeId], references: [id])
-  createdBy        User?               @relation("CreatedBy", fields: [createdById], references: [id])
-  startedBy        User?               @relation("StartedBy", fields: [startedById], references: [id])
-  completedBy      User?               @relation("CompletedBy", fields: [completedById], references: [id])
-  assignedOperator User?               @relation("AssignedOperator", fields: [assignedOperatorId], references: [id])
-  equipmentLinks   EquipmentWorkOrder[]
-  productionRecords ProductionRecord[]
-  batches          Batch[]
-  downtimes        DowntimeEvent[]
-
-  @@map("work_orders")
-  @@index([tenantId, status])
-  @@index([tenantId, plannedStart])
-}
-
-model ProductionRecord {
-  id            String   @id @default(uuid())
-  tenantId      String
-  workOrderId   String?
-  equipmentId   String
-  shiftId       String?
-  startTime     DateTime
-  endTime       DateTime
-  plannedTime   Float    // minutes
-  actualTime    Float    // minutes
-  downtime      Float    @default(0) // minutes
-  plannedQty    Int
-  actualQty     Int
-  goodQty       Int
-  scrapQty      Int      @default(0)
-  reworkQty     Int      @default(0)
-  oee           Float?
-  availability  Float?
-  performance   Float?
-  quality       Float?
-  createdAt     DateTime @default(now())
-
-  workOrder WorkOrder? @relation(fields: [workOrderId], references: [id])
-  equipment Equipment  @relation(fields: [equipmentId], references: [id])
-
-  @@map("production_records")
-  @@index([tenantId, startTime])
-  @@index([equipmentId, startTime])
-}
-
-model Batch {
-  id            String    @id @default(uuid())
-  tenantId      String
-  batchNumber   String    @unique
-  workOrderId   String
-  status        String    @default("ACTIVE") // ACTIVE, COMPLETED, REJECTED, ON_HOLD
-  qty           Int
-  startTime     DateTime?
-  endTime       DateTime?
-  expiryDate    DateTime?
-  lotNumber     String?
-  metadata      Json?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
-
-  @@map("batches")
-  @@index([tenantId])
-}
-
-model DowntimeEvent {
-  id          String    @id @default(uuid())
-  tenantId    String
-  workOrderId String?
-  equipmentId String?
-  reason      String
-  category    String    // MECHANICAL, ELECTRICAL, PROCESS, MATERIAL, OPERATOR, CHANGEOVER, etc.
-  startTime   DateTime
-  endTime     DateTime?
-  duration    Float?    // minutes (calculated)
-  notes       String?
-  reportedById String?
-  createdAt   DateTime  @default(now())
-
-  workOrder WorkOrder? @relation(fields: [workOrderId], references: [id])
-
-  @@map("downtime_events")
-  @@index([tenantId, startTime])
-}
-
-// ============================================================
-// SHIFTS
-// ============================================================
-
-model Shift {
-  id         String   @id @default(uuid())
-  tenantId   String
-  name       String
-  code       String
-  startTime  String   // HH:mm format
-  endTime    String   // HH:mm format
-  days       Json     // array of weekday numbers [1,2,3,4,5]
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-
-  shiftLogs ShiftLog[]
-
-  @@map("shifts")
-}
-
-model ShiftLog {
-  id             String    @id @default(uuid())
-  tenantId       String
-  shiftId        String
-  operatorId     String?
-  startTime      DateTime
-  endTime        DateTime?
-  targetOutput   Int?
-  actualOutput   Int?
-  oee            Float?
-  downtimeMinutes Float?
-  defectCount    Int?
-  notes          String?
-  createdAt      DateTime  @default(now())
-
-  shift    Shift @relation(fields: [shiftId], references: [id])
-  operator User? @relation("ShiftOperator", fields: [operatorId], references: [id])
-
-  @@map("shift_logs")
-  @@index([tenantId, startTime])
-}
-
-// ============================================================
-// QUALITY
-// ============================================================
-
-model QualityInspection {
-  id               String    @id @default(uuid())
-  tenantId         String
-  inspectionNumber String    @unique
-  type             String    // INCOMING, IN_PROCESS, FINAL, PATROL
-  productId        String?
-  batchNumber      String?
-  workOrderId      String?
-  result           String    // PASS, FAIL, CONDITIONAL
-  totalQty         Int
-  passQty          Int
-  failQty          Int
-  inspectorId      String
-  date             DateTime
-  checklistData    Json?
-  attachments      Json?
-  notes            String?
-  approvedById     String?
-  approvedAt       DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  inspector User @relation(fields: [inspectorId], references: [id])
-
-  @@map("quality_inspections")
-  @@index([tenantId, date])
-}
-
-model NonConformanceReport {
-  id              String    @id @default(uuid())
-  tenantId        String
-  ncrNumber       String    @unique
-  title           String
-  description     String
-  severity        String    // MINOR, MAJOR, CRITICAL
-  status          String    @default("OPEN") // OPEN, IN_REVIEW, CAPA_PENDING, RESOLVED, CLOSED
-  productId       String?
-  product         String?
-  batchNumber     String?
-  workOrderId     String?
-  defectCategory  String
-  defectCode      String?
-  qty             Int
-  detectedBy      String
-  detectedAt      DateTime
-  dueDate         DateTime
-  rootCause       String?
-  correctiveAction String?
-  preventiveAction String?
-  resolvedAt      DateTime?
-  resolvedById    String?
-  closedAt        DateTime?
-  closedById      String?
-  attachments     Json?
-  metadata        Json?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  capas CAPA[]
-
-  @@map("non_conformance_reports")
-  @@index([tenantId, status])
-  @@index([tenantId, detectedAt])
-}
-
-model CAPA {
-  id          String    @id @default(uuid())
-  tenantId    String
-  capaNumber  String    @unique
-  ncrId       String?
-  type        String    // CORRECTIVE, PREVENTIVE
-  title       String
-  description String
-  status      String    @default("OPEN") // OPEN, IN_PROGRESS, VERIFIED, CLOSED
-  priority    Priority  @default(MEDIUM)
-  assignedTo  String?
-  dueDate     DateTime?
-  completedAt DateTime?
-  verifiedAt  DateTime?
-  verifiedBy  String?
-  effectiveness String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  ncr NonConformanceReport? @relation(fields: [ncrId], references: [id])
-
-  @@map("capa")
-  @@index([tenantId])
-}
-
-// ============================================================
-// MAINTENANCE (CMMS/EAM)
-// ============================================================
-
-model MaintenanceWorkOrder {
-  id             String    @id @default(uuid())
-  tenantId       String
-  woNumber       String    @unique
-  title          String
-  description    String?
-  type           String    // PREVENTIVE, CORRECTIVE, PREDICTIVE, EMERGENCY
-  priority       Priority  @default(MEDIUM)
-  status         String    @default("OPEN") // OPEN, ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED
-  equipmentId    String
-  assignedToId   String?
-  requestedById  String?
-  estimatedHours Float?
-  actualHours    Float?
-  laborCost      Float?
-  partsCost      Float?
-  dueDate        DateTime?
-  startedAt      DateTime?
-  completedAt    DateTime?
-  checklistData  Json?
-  partsUsed      Json?
-  notes          String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
-
-  equipment  Equipment @relation(fields: [equipmentId], references: [id])
-  assignedTo User?     @relation(fields: [assignedToId], references: [id])
-
-  @@map("maintenance_work_orders")
-  @@index([tenantId, status])
-  @@index([equipmentId])
-}
-
-model SparePart {
-  id            String    @id @default(uuid())
-  tenantId      String
-  partNumber    String
-  name          String
-  description   String?
-  category      String?
-  supplier      String?
-  unitCost      Float?
-  stockQty      Int       @default(0)
-  minStockQty   Int       @default(0)
-  maxStockQty   Int?
-  storageLocation String?
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  @@unique([tenantId, partNumber])
-  @@map("spare_parts")
-}
-
-// ============================================================
-// ALARMS & EVENTS
-// ============================================================
-
-model Alarm {
-  id             String    @id @default(uuid())
-  tenantId       String
-  code           String
-  description    String
-  severity       String    // CRITICAL, HIGH, MEDIUM, LOW
-  status         String    @default("ACTIVE") // ACTIVE, ACKNOWLEDGED, RESOLVED, SUPPRESSED
-  category       String?   // PROCESS, EQUIPMENT, SAFETY, QUALITY
-  equipmentId    String?
-  value          Float?
-  threshold      Float?
-  triggeredAt    DateTime
-  acknowledgedAt DateTime?
-  acknowledgedById String?
-  resolvedAt     DateTime?
-  resolvedById   String?
-  duration       Float?    // minutes
-  metadata       Json?
-
-  tenant    Tenant     @relation(fields: [tenantId], references: [id])
-  equipment Equipment? @relation(fields: [equipmentId], references: [id])
-
-  @@map("alarms")
-  @@index([tenantId, status])
-  @@index([tenantId, triggeredAt])
-}
-
-// ============================================================
-// IIoT & CONNECTIVITY
-// ============================================================
-
-model IoTDevice {
-  id           String    @id @default(uuid())
-  tenantId     String
-  equipmentId  String?
-  name         String
-  deviceId     String    @unique
-  type         String    // PLC, SENSOR, GATEWAY, METER, etc.
-  protocol     String    // MQTT, OPCUA, MODBUS, HTTP, etc.
-  connectionString String?
-  status       String    @default("DISCONNECTED") // CONNECTED, DISCONNECTED, ERROR
-  lastSeenAt   DateTime?
-  firmware     String?
-  tags         Json?
-  config       Json?
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  equipment Equipment? @relation(fields: [equipmentId], references: [id])
-  tagValues IoTTagValue[]
-
-  @@map("iot_devices")
-  @@index([tenantId])
-}
-
-model IoTTag {
-  id          String   @id @default(uuid())
-  tenantId    String
-  deviceId    String?
-  name        String
-  address     String
-  dataType    String   // BOOL, INT, FLOAT, STRING
-  unit        String?
-  description String?
-  scanRate    Int      @default(1000) // ms
-  scaleFactor Float?
-  offset      Float?
-  minValue    Float?
-  maxValue    Float?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-
-  values IoTTagValue[]
-
-  @@map("iot_tags")
-  @@index([tenantId])
-}
-
-model IoTTagValue {
-  id        String   @id @default(uuid())
-  tagId     String
-  deviceId  String?
-  value     String
-  quality   String   @default("GOOD") // GOOD, BAD, UNCERTAIN
-  timestamp DateTime @default(now())
-
-  tag    IoTTag    @relation(fields: [tagId], references: [id])
-  device IoTDevice? @relation(fields: [deviceId], references: [id])
-
-  @@map("iot_tag_values")
-  @@index([tagId, timestamp])
-}
-
-// ============================================================
-// NOTIFICATIONS
-// ============================================================
-
-model NotificationRule {
-  id          String   @id @default(uuid())
-  tenantId    String
-  name        String
-  description String?
-  module      String   // production, quality, maintenance, iot
-  event       String
-  condition   Json?
-  channels    Json     // email, sms, push, whatsapp
-  recipients  Json     // user IDs or role names
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@map("notification_rules")
-}
-
-model NotificationLog {
-  id          String   @id @default(uuid())
-  tenantId    String
-  userId      String?
-  type        String
-  title       String
-  message     String
-  channel     String   // email, sms, push, in_app
-  status      String   @default("PENDING") // PENDING, SENT, FAILED
-  sentAt      DateTime?
-  error       String?
-  metadata    Json?
-  createdAt   DateTime @default(now())
-
-  @@map("notification_logs")
-  @@index([tenantId, createdAt])
-}
-
-// ============================================================
-// ENUMS
-// ============================================================
-
-enum WorkOrderStatus {
-  PLANNED
-  IN_PROGRESS
-  COMPLETED
-  ON_HOLD
-  CANCELLED
-}
 
 enum Priority {
   LOW

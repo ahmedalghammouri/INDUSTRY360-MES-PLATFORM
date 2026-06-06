@@ -5,16 +5,24 @@ import { PrismaService } from '../../database/prisma.service';
 export class HierarchyService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getHierarchyTree(tenantId: string) {
-    const sites = await this.prisma.site.findMany({
-      where: { tenantId, deletedAt: null },
+  async getHierarchyTree(factoryId: string | null) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    const factories = await this.prisma.factory.findMany({
+      where: factoryId ? { id: factoryId } : {},
       include: {
         areas: {
-          where: { deletedAt: null },
+          where: { isActive: true },
           include: {
-            equipment: {
-              where: { deletedAt: null },
-              include: { latestStatus: true },
+            productionLines: {
+              where: { isActive: true },
+              include: {
+                machines: {
+                  where: { isActive: true },
+                  include: { currentStatus: true },
+                  orderBy: { name: 'asc' },
+                },
+              },
               orderBy: { name: 'asc' },
             },
           },
@@ -24,48 +32,56 @@ export class HierarchyService {
       orderBy: { name: 'asc' },
     });
 
-    return sites.map((site) => ({
-      id: site.id,
-      type: 'SITE',
-      code: site.code,
-      name: site.name,
-      city: site.city,
-      country: site.country,
-      children: site.areas.map((area) => ({
+    return factories.map((factory) => ({
+      id: factory.id,
+      type: 'FACTORY',
+      code: factory.code,
+      name: factory.name,
+      city: factory.city,
+      country: factory.country,
+      children: factory.areas.map((area) => ({
         id: area.id,
         type: 'AREA',
         code: area.code,
         name: area.name,
-        children: area.equipment.map((eq) => ({
-          id: eq.id,
-          type: 'EQUIPMENT',
-          code: eq.code,
-          name: eq.name,
-          equipmentType: eq.type,
-          state: eq.latestStatus?.state ?? 'OFFLINE',
-          oee: eq.latestStatus?.oee,
+        children: area.productionLines.map((line) => ({
+          id: line.id,
+          type: 'PRODUCTION_LINE',
+          code: line.code,
+          name: line.name,
+          children: line.machines.map((m) => ({
+            id: m.id,
+            type: 'MACHINE',
+            code: m.code,
+            name: m.name,
+            machineType: m.machineType,
+            state: m.currentStatus?.state ?? 'OFFLINE',
+            oee: m.currentStatus?.oee,
+          })),
         })),
       })),
     }));
   }
 
-  async getSites(tenantId: string) {
-    return this.prisma.site.findMany({
-      where: { tenantId, deletedAt: null },
+  async getFactories(factoryId: string | null) {
+    return this.prisma.factory.findMany({
+      where: factoryId ? { id: factoryId } : {},
       orderBy: { name: 'asc' },
     });
   }
 
-  async getEquipment(tenantId: string, filters: { siteId?: string; areaId?: string; type?: string }) {
-    return this.prisma.equipment.findMany({
+  async getMachines(factoryId: string | null, filters: { areaId?: string; lineId?: string; type?: string }) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    return this.prisma.machine.findMany({
       where: {
-        tenantId,
-        deletedAt: null,
-        ...(filters.siteId && { siteId: filters.siteId }),
+        ...factoryFilter,
+        isActive: true,
         ...(filters.areaId && { areaId: filters.areaId }),
-        ...(filters.type && { type: filters.type }),
+        ...(filters.lineId && { lineId: filters.lineId }),
+        ...(filters.type && { machineType: filters.type as 'MACHINE' }),
       },
-      include: { latestStatus: true },
+      include: { currentStatus: true },
       orderBy: { name: 'asc' },
     });
   }

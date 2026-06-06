@@ -232,7 +232,7 @@ export function Topbar() {
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-2 h-8 rounded-lg px-2 hover:bg-muted/50 transition-colors">
               <Avatar className="w-6 h-6">
-                <AvatarImage src={user?.avatar} />
+                <AvatarImage src={user?.avatarUrl} />
                 <AvatarFallback className="bg-primary/20 text-primary text-[10px] font-bold">
                   {user?.name?.substring(0, 2).toUpperCase() || 'US'}
                 </AvatarFallback>

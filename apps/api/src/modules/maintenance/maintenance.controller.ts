@@ -1,6 +1,12 @@
-import { Controller, Get, Query, Request } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { MaintenanceService } from './maintenance.service';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+
+interface RequestUser {
+  id: string;
+  factoryId: string | null;
+}
 
 @ApiTags('Maintenance')
 @ApiBearerAuth('JWT-auth')
@@ -9,20 +15,22 @@ export class MaintenanceController {
   constructor(private readonly maintenanceService: MaintenanceService) {}
 
   @Get('kpis')
-  async getKPIs(@Request() req: { user: { tenantId: string } }) {
-    return this.maintenanceService.getKPIs(req.user.tenantId);
+  @ApiOperation({ summary: 'Get maintenance KPIs' })
+  async getKPIs(@CurrentUser() user: RequestUser) {
+    return this.maintenanceService.getKPIs(user.factoryId);
   }
 
   @Get('work-orders')
+  @ApiOperation({ summary: 'List maintenance work orders' })
   async findWorkOrders(
-    @Request() req: { user: { tenantId: string } },
+    @CurrentUser() user: RequestUser,
     @Query('search') search?: string,
     @Query('status') status?: string,
     @Query('type') type?: string,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
   ) {
-    return this.maintenanceService.findWorkOrders(req.user.tenantId, {
+    return this.maintenanceService.findWorkOrders(user.factoryId, {
       search,
       status,
       type,

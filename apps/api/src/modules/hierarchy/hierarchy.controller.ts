@@ -1,6 +1,12 @@
-import { Controller, Get, Query, Request } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { HierarchyService } from './hierarchy.service';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+
+interface RequestUser {
+  id: string;
+  factoryId: string | null;
+}
 
 @ApiTags('Hierarchy')
 @ApiBearerAuth('JWT-auth')
@@ -10,22 +16,24 @@ export class HierarchyController {
 
   @Get('tree')
   @ApiOperation({ summary: 'Get full ISA-95 hierarchy tree' })
-  async getTree(@Request() req: { user: { tenantId: string } }) {
-    return this.hierarchyService.getHierarchyTree(req.user.tenantId);
+  async getTree(@CurrentUser() user: RequestUser) {
+    return this.hierarchyService.getHierarchyTree(user.factoryId);
   }
 
-  @Get('sites')
-  async getSites(@Request() req: { user: { tenantId: string } }) {
-    return this.hierarchyService.getSites(req.user.tenantId);
+  @Get('factories')
+  @ApiOperation({ summary: 'List factories accessible to user' })
+  async getFactories(@CurrentUser() user: RequestUser) {
+    return this.hierarchyService.getFactories(user.factoryId);
   }
 
-  @Get('equipment')
-  async getEquipment(
-    @Request() req: { user: { tenantId: string } },
-    @Query('siteId') siteId?: string,
+  @Get('machines')
+  @ApiOperation({ summary: 'List machines with optional filters' })
+  async getMachines(
+    @CurrentUser() user: RequestUser,
     @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
     @Query('type') type?: string,
   ) {
-    return this.hierarchyService.getEquipment(req.user.tenantId, { siteId, areaId, type });
+    return this.hierarchyService.getMachines(user.factoryId, { areaId, lineId, type });
   }
 }

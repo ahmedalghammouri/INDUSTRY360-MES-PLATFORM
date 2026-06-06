@@ -1,7 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Request } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+
+interface RequestUser {
+  id: string;
+  enterpriseId: string;
+  factoryId: string | null;
+  role: string;
+}
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT-auth')
@@ -10,13 +18,20 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  @Roles('SUPER_ADMIN', 'ADMIN', 'PLANT_MANAGER')
+  @Roles('SUPER_ADMIN', 'FACTORY_ADMIN', 'PLANT_MANAGER')
   async findAll(
-    @Request() req: { user: { tenantId: string } },
+    @CurrentUser() user: RequestUser,
     @Query('search') search?: string,
     @Query('role') role?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.usersService.findAll(req.user.tenantId, { search, role });
+    return this.usersService.findAll(user.factoryId, {
+      search,
+      role,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
   }
 
   @Get(':id')
@@ -25,27 +40,43 @@ export class UsersController {
   }
 
   @Post()
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'FACTORY_ADMIN')
   async create(
-    @Request() req: { user: { tenantId: string } },
+    @CurrentUser() user: RequestUser,
     @Body() body: {
-      email: string; name: string; role: string;
-      department?: string; password: string;
+      email: string;
+      name: string;
+      role: string;
+      department?: string;
+      jobTitle?: string;
+      phone?: string;
+      password: string;
+      factoryId?: string | null;
     },
   ) {
-    return this.usersService.create(req.user.tenantId, body);
+    return this.usersService.create({
+      enterpriseId: user.enterpriseId,
+      factoryId: user.role === 'SUPER_ADMIN' ? (body.factoryId ?? null) : user.factoryId,
+      email: body.email,
+      name: body.name,
+      role: body.role,
+      department: body.department,
+      jobTitle: body.jobTitle,
+      phone: body.phone,
+      password: body.password,
+    });
   }
 
   @Patch(':id')
   async update(
     @Param('id') id: string,
-    @Body() body: { name?: string; role?: string; department?: string; isActive?: boolean },
+    @Body() body: { name?: string; role?: string; department?: string; isActive?: boolean; factoryId?: string | null },
   ) {
     return this.usersService.update(id, body);
   }
 
   @Delete(':id')
-  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Roles('SUPER_ADMIN', 'FACTORY_ADMIN')
   async remove(@Param('id') id: string) {
     await this.usersService.deactivate(id);
     return { message: 'User deactivated' };

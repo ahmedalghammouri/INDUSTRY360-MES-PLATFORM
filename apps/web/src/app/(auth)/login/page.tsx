@@ -1,22 +1,23 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, Loader2, Shield, Factory, AlertCircle, ArrowLeft, MapPin } from 'lucide-react';
-import { FACTORIES } from '@/features/factory-selector/factories';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 
 import { useAuthStore } from '@/store/auth-store';
-import { useFactoryStore } from '@/store/factory-store';
+import { useFactoryStore, type FactoryBrief } from '@/store/factory-store';
 import { authService } from '@/services/auth.service';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+// Static fallback
+import { FACTORIES } from '@/features/factory-selector/factories';
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -30,12 +31,23 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const factoryCode = searchParams.get('factory');
-  const factory = FACTORIES.find((f) => f.id === factoryCode) ?? null;
+
   const { setAuth } = useAuthStore();
-  const { setFactory } = useFactoryStore();
+  const { setFactory, allFactories } = useFactoryStore();
+
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Resolve factory info: API-loaded store first, then static fallback
+  const factory: FactoryBrief | null = factoryCode
+    ? (allFactories.find((f) => f.code === factoryCode) ??
+        (() => {
+          const s = FACTORIES.find((f) => f.code === factoryCode);
+          if (!s) return null;
+          return { id: s.id, code: s.code, name: s.name, nameAr: s.nameAr, city: s.city, lat: s.lat, lng: s.lng, color: s.color, glowColor: s.glowColor, isActive: true };
+        })())
+    : null;
 
   const {
     register,
@@ -50,9 +62,30 @@ export default function LoginPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await authService.login(data.email, data.password);
+      // Pass factoryCode so backend JWT includes factoryId
+      const result = await authService.login(data.email, data.password, factoryCode ?? undefined);
       setAuth(result.user, result.accessToken, result.refreshToken);
-      if (factoryCode) setFactory(factoryCode);
+
+      // Set factory context from the logged-in user's factory data
+      const userFactory = result.user.factory;
+      if (userFactory) {
+        setFactory({
+          id: userFactory.id,
+          code: userFactory.code,
+          name: userFactory.name,
+          nameAr: userFactory.nameAr,
+          city: undefined,
+          lat: userFactory.lat,
+          lng: userFactory.lng,
+          color: userFactory.color,
+          glowColor: userFactory.glowColor,
+          isActive: true,
+        });
+      } else if (factory) {
+        // SUPER_ADMIN logging in with a factory context
+        setFactory(factory);
+      }
+
       router.push('/dashboard');
     } catch (err: unknown) {
       const message =
@@ -71,12 +104,10 @@ export default function LoginPage() {
         <div className="absolute inset-0 industrial-grid opacity-20" />
         <div className="absolute inset-0 bg-gradient-radial from-primary/10 via-transparent to-transparent" />
 
-        {/* Animated background circles */}
         <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-primary/5 blur-3xl animate-pulse" />
         <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-accent/5 blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
 
         <div className="relative z-10 flex flex-col justify-between p-16">
-          {/* Logo */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
               <Factory className="w-6 h-6 text-white" />
@@ -87,7 +118,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Content */}
           <div className="space-y-8">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -123,9 +153,8 @@ export default function LoginPage() {
             </motion.div>
           </div>
 
-          {/* Footer */}
           <div className="text-white/20 text-sm">
-            © 2026 INDUSTRY360. Enterprise Manufacturing Platform.
+            © 2026 INDUSTRY360 — Enterprise Manufacturing Platform for Saudi Arabia
           </div>
         </div>
       </div>
@@ -153,17 +182,24 @@ export default function LoginPage() {
               style={{ borderColor: `${factory.color}40`, background: `${factory.color}08` }}
             >
               <div className="flex items-center gap-3">
-                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: factory.color, boxShadow: `0 0 8px ${factory.color}` }} />
+                <span
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ background: factory.color, boxShadow: `0 0 8px ${factory.color}` }}
+                />
                 <div>
-                  <div className="text-xs font-bold font-mono" style={{ color: factory.color }}>{factory.code}</div>
+                  <div className="text-xs font-bold font-mono" style={{ color: factory.color }}>
+                    {factory.code}
+                  </div>
                   <div className="text-[11px] text-muted-foreground leading-tight">{factory.name}</div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <MapPin size={10} />
-                  <span>{factory.city}</span>
-                </div>
+                {factory.city && (
+                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <MapPin size={10} />
+                    <span>{factory.city}</span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => router.push('/')}
@@ -197,30 +233,23 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            {/* Email */}
             <div className="space-y-2">
               <Label htmlFor="email">Email address</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="you@company.com"
+                placeholder={factory ? `you@${factory.code.toLowerCase()}.com.sa` : 'you@company.com'}
                 autoComplete="email"
                 className="h-11"
                 {...register('email')}
               />
-              {errors.email && (
-                <p className="text-xs text-destructive">{errors.email.message}</p>
-              )}
+              {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
             </div>
 
-            {/* Password */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Password</Label>
-                <Link
-                  href="/forgot-password"
-                  className="text-xs text-primary hover:text-primary/80 transition-colors"
-                >
+                <Link href="/forgot-password" className="text-xs text-primary hover:text-primary/80 transition-colors">
                   Forgot password?
                 </Link>
               </div>
@@ -238,19 +267,12 @@ export default function LoginPage() {
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              {errors.password && (
-                <p className="text-xs text-destructive">{errors.password.message}</p>
-              )}
+              {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
             </div>
 
-            {/* Remember me */}
             <div className="flex items-center gap-2">
               <Checkbox id="rememberMe" {...register('rememberMe')} />
               <Label htmlFor="rememberMe" className="text-sm font-normal cursor-pointer">
@@ -258,7 +280,6 @@ export default function LoginPage() {
               </Label>
             </div>
 
-            {/* Error */}
             <AnimatePresence>
               {error && (
                 <motion.div
@@ -273,12 +294,7 @@ export default function LoginPage() {
               )}
             </AnimatePresence>
 
-            {/* Submit */}
-            <Button
-              type="submit"
-              className="w-full h-11 font-semibold"
-              disabled={isLoading}
-            >
+            <Button type="submit" className="w-full h-11 font-semibold" disabled={isLoading}>
               {isLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -290,7 +306,6 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          {/* SSO */}
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-border" />
@@ -305,7 +320,6 @@ export default function LoginPage() {
             Single Sign-On (SSO)
           </Button>
 
-          {/* Security note */}
           <p className="text-center text-xs text-muted-foreground">
             Protected by enterprise-grade security.
             <br />

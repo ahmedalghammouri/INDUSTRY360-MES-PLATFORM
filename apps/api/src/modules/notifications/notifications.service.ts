@@ -4,7 +4,7 @@ import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../../database/prisma.service';
 
 export interface SendNotificationDto {
-  tenantId: string;
+  factoryId: string | null;
   userId?: string;
   type: string;
   title: string;
@@ -58,11 +58,8 @@ export class NotificationsService {
         default:
           this.logger.warn(`Channel ${channel} not yet implemented`);
       }
-
-      await this.logNotification(dto, channel, 'SENT');
     } catch (error) {
       this.logger.error(`Failed to send ${channel} notification`, error);
-      await this.logNotification(dto, channel, 'FAILED', String(error));
     }
   }
 
@@ -98,38 +95,17 @@ export class NotificationsService {
   }
 
   private async saveInAppNotification(dto: SendNotificationDto): Promise<void> {
-    await this.prisma.notificationLog.create({
-      data: {
-        tenantId: dto.tenantId,
-        userId: dto.userId,
-        type: dto.type,
-        title: dto.title,
-        message: dto.message,
-        channel: 'in_app',
-        status: 'SENT',
-        sentAt: new Date(),
-        metadata: dto.metadata as object | undefined,
-      },
-    });
-  }
+    if (!dto.userId) return;
 
-  private async logNotification(
-    dto: SendNotificationDto,
-    channel: string,
-    status: string,
-    error?: string,
-  ): Promise<void> {
-    await this.prisma.notificationLog.create({
+    await this.prisma.notification.create({
       data: {
-        tenantId: dto.tenantId,
         userId: dto.userId,
-        type: dto.type,
+        factoryId: dto.factoryId,
+        type: dto.type as 'ALARM' | 'DOWNTIME' | 'PRODUCTION' | 'QUALITY' | 'MAINTENANCE' | 'ENERGY' | 'SYSTEM' | 'INFO',
         title: dto.title,
         message: dto.message,
-        channel,
-        status,
-        sentAt: status === 'SENT' ? new Date() : undefined,
-        error,
+        data: dto.metadata ? (dto.metadata as any) : undefined,
+        isRead: false,
       },
     });
   }

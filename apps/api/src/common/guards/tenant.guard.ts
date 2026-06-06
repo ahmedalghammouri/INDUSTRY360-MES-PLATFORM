@@ -14,15 +14,16 @@ export class TenantGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<{
-      user?: { tenantId: string };
+      user?: { factoryId: string | null };
       headers: Record<string, string>;
-      tenantId?: string;
+      factoryId?: string | null;
     }>();
     const user = request.user;
     if (!user) return true;
 
-    const tenantId = user.tenantId || request.headers['x-tenant-id'];
-    request.tenantId = tenantId;
+    // factoryId is null for SUPER_ADMIN (access all factories)
+    const factoryId = user.factoryId ?? request.headers['x-factory-id'] ?? null;
+    request.factoryId = factoryId;
 
     return true;
   }

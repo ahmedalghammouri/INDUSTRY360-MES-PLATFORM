@@ -4,14 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../../../database/prisma.service';
-
-interface JwtPayload {
-  sub: string;
-  email: string;
-  role: string;
-  tenantId: string;
-  permissions: string[];
-}
+import type { JwtPayload } from '../auth.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -23,20 +16,22 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: config.get<string>('jwt.secret'),
-      issuer: 'industry360-mes',
-      audience: 'industry360-mes-users',
     });
   }
 
   async validate(payload: JwtPayload) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub, deletedAt: null },
+    const user = await this.prisma.user.findFirst({
+      where: { id: payload.sub, deletedAt: null, isActive: true },
     });
 
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException('User account is not active');
-    }
+    if (!user) throw new UnauthorizedException('User account is not active');
 
-    return { ...user, permissions: payload.permissions };
+    // Attach full payload so guards can read factoryId and role
+    return {
+      ...user,
+      factoryId: payload.factoryId,
+      factoryCode: payload.factoryCode,
+      enterpriseId: payload.enterpriseId,
+    };
   }
 }

@@ -417,7 +417,7 @@ export function Sidebar() {
         isCollapsed && 'justify-center',
       )}>
         <Avatar className="w-8 h-8 shrink-0">
-          <AvatarImage src={user?.avatar} />
+          <AvatarImage src={user?.avatarUrl} />
           <AvatarFallback className="bg-primary/20 text-primary text-xs font-bold">
             {user?.name?.substring(0, 2).toUpperCase() || 'US'}
           </AvatarFallback>

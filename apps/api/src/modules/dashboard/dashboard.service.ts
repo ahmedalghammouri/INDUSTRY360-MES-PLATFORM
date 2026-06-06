@@ -5,12 +5,12 @@ import { PrismaService } from '../../database/prisma.service';
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getOverview(tenantId: string) {
+  async getOverview(factoryId: string | null) {
     const [kpis, machines, productionStatus, alarms] = await Promise.all([
-      this.getKPIs(tenantId),
-      this.getMachineStatus(tenantId),
-      this.getProductionStatus(tenantId),
-      this.getActiveAlarms(tenantId),
+      this.getKPIs(factoryId),
+      this.getMachineStatus(factoryId),
+      this.getProductionStatus(factoryId),
+      this.getActiveAlarms(factoryId),
     ]);
 
     return {
@@ -21,31 +21,32 @@ export class DashboardService {
       productionTrend: this.generateProductionTrend(),
       qualityTrend: this.generateQualityTrend(),
       downtimePareto: this.generateDowntimePareto(),
-      shiftSummary: await this.getCurrentShiftSummary(tenantId),
+      shiftSummary: await this.getCurrentShiftSummary(factoryId),
     };
   }
 
-  private async getKPIs(tenantId: string) {
-    // Aggregate OEE and KPIs from recent production records
+  private async getKPIs(factoryId: string | null) {
     const now = new Date();
     const dayStart = new Date(now.setHours(0, 0, 0, 0));
 
-    const productionRecords = await this.prisma.productionRecord.findMany({
-      where: { tenantId, createdAt: { gte: dayStart } },
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    const oeeRecords = await this.prisma.oEERecord.findMany({
+      where: { ...factoryFilter, recordDate: { gte: dayStart } },
     });
 
-    if (productionRecords.length === 0) {
+    if (oeeRecords.length === 0) {
       return this.getMockKPIs();
     }
 
-    const avgOEE = productionRecords.reduce((sum, r) => sum + (r.oee ?? 0), 0) / productionRecords.length;
-    const avgAvailability = productionRecords.reduce((sum, r) => sum + (r.availability ?? 0), 0) / productionRecords.length;
-    const avgPerformance = productionRecords.reduce((sum, r) => sum + (r.performance ?? 0), 0) / productionRecords.length;
-    const avgQuality = productionRecords.reduce((sum, r) => sum + (r.quality ?? 0), 0) / productionRecords.length;
-    const totalOutput = productionRecords.reduce((sum, r) => sum + (r.actualQty ?? 0), 0);
+    const avgOEE = oeeRecords.reduce((sum, r) => sum + (r.oee ?? 0), 0) / oeeRecords.length;
+    const avgAvailability = oeeRecords.reduce((sum, r) => sum + (r.availability ?? 0), 0) / oeeRecords.length;
+    const avgPerformance = oeeRecords.reduce((sum, r) => sum + (r.performance ?? 0), 0) / oeeRecords.length;
+    const avgQuality = oeeRecords.reduce((sum, r) => sum + (r.quality ?? 0), 0) / oeeRecords.length;
+    const totalOutput = oeeRecords.reduce((sum, r) => sum + (r.totalOutput ?? 0), 0);
 
-    const activeAlarms = await this.prisma.alarm.count({
-      where: { tenantId, status: 'ACTIVE', acknowledgedAt: null },
+    const activeAlarms = await this.prisma.alarmEvent.count({
+      where: { ...factoryFilter, acknowledgedAt: null, resolvedAt: null },
     });
 
     return {
@@ -64,47 +65,60 @@ export class DashboardService {
     };
   }
 
-  private async getMachineStatus(tenantId: string) {
-    const equipment = await this.prisma.equipment.findMany({
-      where: { tenantId, deletedAt: null },
+  private async getMachineStatus(factoryId: string | null) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    const machines = await this.prisma.machine.findMany({
+      where: { ...factoryFilter, isActive: true },
       include: {
-        latestStatus: true,
-        activeWorkOrders: { include: { workOrder: true } },
+        currentStatus: true,
+        workOrders: {
+          where: { status: 'IN_PROGRESS' },
+          select: { orderNumber: true },
+          take: 1,
+        },
+        line: {
+          include: {
+            area: { select: { name: true } },
+          },
+        },
       },
       take: 20,
     });
 
-    return equipment.map((eq) => ({
-      id: eq.id,
-      name: eq.name,
-      code: eq.code,
-      state: eq.latestStatus?.state ?? 'OFFLINE',
-      oee: eq.latestStatus?.oee ?? 0,
-      currentOrder: eq.activeWorkOrders[0]?.workOrder?.orderNumber,
-      throughput: eq.latestStatus?.throughput ?? 0,
-      runtime: eq.latestStatus?.runtimeMinutes ?? 0,
-      lastUpdate: eq.latestStatus?.updatedAt?.toISOString() ?? new Date().toISOString(),
-      area: eq.areaName ?? 'Unknown',
+    return machines.map((m) => ({
+      id: m.id,
+      name: m.name,
+      code: m.code,
+      state: m.currentStatus?.state ?? 'OFFLINE',
+      oee: m.currentStatus?.oee ?? 0,
+      currentOrder: m.workOrders[0]?.orderNumber,
+      throughput: m.currentStatus?.actualSpeed ?? 0,
+      runtime: m.currentStatus?.runtimeMinutes ?? 0,
+      lastUpdate: m.currentStatus?.updatedAt?.toISOString() ?? new Date().toISOString(),
+      area: m.line?.area?.name ?? 'Unknown',
     }));
   }
 
-  private async getProductionStatus(tenantId: string) {
-    const [totalLines, activeWOs] = await Promise.all([
-      this.prisma.equipment.count({ where: { tenantId, type: 'PRODUCTION_LINE', deletedAt: null } }),
-      this.prisma.workOrder.count({ where: { tenantId, status: 'IN_PROGRESS' } }),
+  private async getProductionStatus(factoryId: string | null) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    const [totalMachines, activeWOs] = await Promise.all([
+      this.prisma.machine.count({ where: { ...factoryFilter, isActive: true } }),
+      this.prisma.workOrder.count({ where: { ...factoryFilter, status: 'IN_PROGRESS' } }),
     ]);
 
     const completedToday = await this.prisma.workOrder.count({
       where: {
-        tenantId,
+        ...factoryFilter,
         status: 'COMPLETED',
-        completedAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+        actualEnd: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
       },
     });
 
     return {
-      runningLines: Math.min(activeWOs, totalLines),
-      totalLines,
+      runningLines: Math.min(activeWOs, totalMachines),
+      totalLines: totalMachines,
       activeOrders: activeWOs,
       completedToday,
       plannedOutput: 1200,
@@ -112,29 +126,36 @@ export class DashboardService {
     };
   }
 
-  private async getActiveAlarms(tenantId: string) {
-    return this.prisma.alarm.findMany({
-      where: { tenantId, status: 'ACTIVE' },
+  private async getActiveAlarms(factoryId: string | null) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    return this.prisma.alarmEvent.findMany({
+      where: { ...factoryFilter, resolvedAt: null },
       orderBy: [{ severity: 'desc' }, { triggeredAt: 'desc' }],
       take: 10,
-      include: { equipment: { select: { name: true } } },
+      include: { machine: { select: { name: true } } },
     }).then((alarms) =>
       alarms.map((a) => ({
         id: a.id,
         code: a.code,
         description: a.description,
         severity: a.severity,
-        machine: a.equipment?.name ?? 'Unknown',
+        machine: a.machine?.name ?? 'Unknown',
         triggeredAt: a.triggeredAt.toISOString(),
         acknowledged: !!a.acknowledgedAt,
       })),
     );
   }
 
-  private async getCurrentShiftSummary(tenantId: string) {
-    const activeShift = await this.prisma.shiftLog.findFirst({
-      where: { tenantId, endTime: null },
-      include: { shift: true, operator: true },
+  private async getCurrentShiftSummary(factoryId: string | null) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    const activeShift = await this.prisma.shiftInstance.findFirst({
+      where: { ...factoryFilter, status: 'IN_PROGRESS' },
+      include: {
+        shiftTemplate: true,
+        operator: true,
+      },
       orderBy: { startTime: 'desc' },
     });
 
@@ -143,15 +164,15 @@ export class DashboardService {
     const elapsed = (Date.now() - activeShift.startTime.getTime()) / 60_000;
 
     return {
-      shiftName: activeShift.shift?.name ?? 'Day Shift',
+      shiftName: activeShift.shiftTemplate?.name ?? 'Day Shift',
       operator: activeShift.operator?.name ?? 'Operator',
       startTime: activeShift.startTime.toISOString(),
       elapsed: Math.round(elapsed),
-      output: activeShift.actualOutput ?? 0,
-      target: activeShift.targetOutput ?? 400,
+      output: activeShift.actualQty ?? 0,
+      target: activeShift.targetQty ?? 400,
       oee: activeShift.oee ?? 82.5,
       downtime: activeShift.downtimeMinutes ?? 0,
-      defects: activeShift.defectCount ?? 0,
+      defects: activeShift.scrapQty ?? 0,
     };
   }
 
@@ -161,7 +182,7 @@ export class DashboardService {
       h.setHours(h.getHours() - (11 - i));
       return `${h.getHours()}:00`;
     });
-    return hours.map((time, i) => ({
+    return hours.map((time) => ({
       time,
       actual: 80 + Math.round(Math.random() * 40),
       target: 100,

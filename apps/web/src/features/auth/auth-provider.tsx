@@ -12,7 +12,7 @@ const isPublicRoute = (pathname: string) =>
   pathname.startsWith('/reset-password');
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, accessToken, setAuth, logout } = useAuthStore();
+  const { isAuthenticated, accessToken, refreshToken, setAuth, logout } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
   const refreshAttempted = useRef(false);
@@ -27,10 +27,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (!isAuthenticated && !isPublic) {
-      if (!refreshAttempted.current) {
+      if (!refreshAttempted.current && refreshToken) {
         refreshAttempted.current = true;
         authService
-          .refreshToken()
+          .refreshToken(refreshToken)
           .then((data) => {
             if (data) {
               setAuth(data.user, data.accessToken, data.refreshToken);
@@ -42,14 +42,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             router.replace('/');
           });
       } else {
-        // refresh already attempted or explicit logout — return to factory selector
         router.replace('/');
       }
     }
-  }, [isAuthenticated, pathname, router, setAuth, logout]);
+  }, [isAuthenticated, pathname, router, setAuth, logout, refreshToken]);
 
   useEffect(() => {
-    if (!accessToken) return;
+    if (!accessToken || !refreshToken) return;
 
     const decoded = parseJwt(accessToken);
     if (!decoded) return;
@@ -62,7 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const timer = setTimeout(() => {
       authService
-        .refreshToken()
+        .refreshToken(refreshToken)
         .then((data) => {
           if (data) setAuth(data.user, data.accessToken, data.refreshToken);
           else {
@@ -77,7 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, delay);
 
     return () => clearTimeout(timer);
-  }, [accessToken, setAuth, logout]);
+  }, [accessToken, refreshToken, setAuth, logout]);
 
   return <>{children}</>;
 }

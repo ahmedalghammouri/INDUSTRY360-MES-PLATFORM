@@ -3,7 +3,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 
 export class LoginDto {
-  @ApiProperty({ example: 'operator@industry360.sa' })
+  @ApiProperty({ example: 'issa.masadeh@sidco.com.sa' })
   @IsEmail()
   @Transform(({ value }: { value: string }) => value.toLowerCase().trim())
   email!: string;
@@ -12,6 +12,12 @@ export class LoginDto {
   @IsString()
   @MinLength(6)
   password!: string;
+
+  @ApiProperty({ example: 'SIDCO', required: false, description: 'Factory code from the factory selector. Required for non-SUPER_ADMIN users.' })
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }: { value: string }) => value?.toUpperCase().trim())
+  factoryCode?: string;
 
   @ApiProperty({ required: false })
   @IsOptional()

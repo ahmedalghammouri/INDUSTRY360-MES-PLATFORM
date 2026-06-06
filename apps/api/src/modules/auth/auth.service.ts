@@ -1,23 +1,20 @@
 import {
-  Injectable, UnauthorizedException, BadRequestException,
-  Logger, ConflictException,
+  Injectable, UnauthorizedException, BadRequestException, Logger, ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
-import * as speakeasy from 'speakeasy';
-import * as QRCode from 'qrcode';
 
 import { PrismaService } from '../../database/prisma.service';
-import { UsersService } from '../users/users.service';
 import type { User } from '@prisma/client';
 
-interface TokenPayload {
+export interface JwtPayload {
   sub: string;
   email: string;
   role: string;
-  tenantId: string;
-  permissions: string[];
+  enterpriseId: string;
+  factoryId: string | null;
+  factoryCode: string | null;
 }
 
 export interface AuthTokens {
@@ -31,17 +28,27 @@ export class AuthService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
   ) {}
 
-  async validateUser(email: string, password: string): Promise<User | null> {
-    const user = await this.prisma.user.findUnique({
+  // Validates credentials — factoryCode optional (SUPER_ADMIN can omit or specify any)
+  async validateUser(email: string, password: string, factoryCode?: string): Promise<User | null> {
+    const user = await this.prisma.user.findFirst({
       where: { email: email.toLowerCase(), deletedAt: null },
     });
 
     if (!user || !user.isActive) return null;
+
+    // Check account lock
+    if (user.lockedAt) {
+      const lockDuration = 30 * 60 * 1000; // 30 minutes
+      if (new Date().getTime() - user.lockedAt.getTime() < lockDuration) {
+        return null;
+      }
+      // Auto-unlock after 30 min
+      await this.prisma.user.update({ where: { id: user.id }, data: { lockedAt: null, failedLoginAttempts: 0 } });
+    }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
@@ -49,7 +56,15 @@ export class AuthService {
       return null;
     }
 
-    // Reset failed attempts on success
+    // Factory validation — non-SUPER_ADMIN must belong to the requested factory
+    if (factoryCode && user.role !== 'SUPER_ADMIN') {
+      const factory = await this.prisma.factory.findUnique({ where: { code: factoryCode.toUpperCase() } });
+      if (!factory || user.factoryId !== factory.id) {
+        this.logger.warn(`User ${email} attempted login to factory ${factoryCode} but is assigned elsewhere`);
+        return null;
+      }
+    }
+
     await this.prisma.user.update({
       where: { id: user.id },
       data: { failedLoginAttempts: 0, lastLoginAt: new Date() },
@@ -58,124 +73,96 @@ export class AuthService {
     return user;
   }
 
-  async login(user: User): Promise<{ user: object; accessToken: string; refreshToken: string; mfaRequired?: boolean }> {
-    if (user.mfaEnabled) {
-      // Issue short-lived MFA token
-      const mfaToken = this.jwtService.sign(
-        { sub: user.id, phase: 'mfa' },
-        { expiresIn: '5m' },
-      );
-      return { user: this.sanitizeUser(user), accessToken: '', refreshToken: '', mfaRequired: true, ...{ mfaToken } };
+  async login(
+    user: User,
+    factoryCode?: string,
+  ): Promise<{ user: object; accessToken: string; refreshToken: string }> {
+    // Determine effective factory for this session
+    let effectiveFactoryId: string | null = user.factoryId;
+    let effectiveFactoryCode: string | null = null;
+
+    if (factoryCode) {
+      const factory = await this.prisma.factory.findUnique({ where: { code: factoryCode.toUpperCase() } });
+      if (factory) {
+        effectiveFactoryId = factory.id;
+        effectiveFactoryCode = factory.code;
+      }
+    } else if (user.factoryId) {
+      const factory = await this.prisma.factory.findUnique({ where: { id: user.factoryId } });
+      effectiveFactoryCode = factory?.code ?? null;
     }
 
-    const tokens = await this.generateTokens(user);
-    await this.createSession(user.id, tokens.refreshToken);
+    // SUPER_ADMIN without factoryCode → no factory context (sees enterprise dashboard)
+    if (user.role === 'SUPER_ADMIN' && !effectiveFactoryCode) {
+      effectiveFactoryId = null;
+    }
 
-    this.logger.log(`User ${user.email} logged in successfully`);
+    const tokens = await this.generateTokens(user, effectiveFactoryId, effectiveFactoryCode);
+    await this.createSession(user.id, tokens.refreshToken, effectiveFactoryId);
+
+    this.logger.log(`User ${user.email} logged in (factory: ${effectiveFactoryCode ?? 'all'})`);
+
+    // Return enriched user profile with factory info
+    const userWithFactory = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      include: { factory: true, enterprise: true },
+    });
 
     return {
-      user: this.sanitizeUser(user),
+      user: this.sanitizeUser(userWithFactory!),
       ...tokens,
     };
   }
 
-  async verifyMFA(userId: string, otp: string): Promise<{ user: object } & AuthTokens> {
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-
-    if (!user.mfaSecret) throw new BadRequestException('MFA not configured');
-
-    const isValid = speakeasy.totp.verify({
-      secret: user.mfaSecret,
-      encoding: 'base32',
-      token: otp,
-      window: 1,
-    });
-
-    if (!isValid) throw new UnauthorizedException('Invalid OTP code');
-
-    const tokens = await this.generateTokens(user);
-    await this.createSession(user.id, tokens.refreshToken);
-
-    return { user: this.sanitizeUser(user), ...tokens };
-  }
-
-  async refreshTokens(refreshToken: string): Promise<AuthTokens> {
+  async refreshTokens(refreshToken: string): Promise<AuthTokens & { user: object }> {
     try {
-      const payload = this.jwtService.verify<TokenPayload>(refreshToken, {
+      const payload = this.jwtService.verify<JwtPayload>(refreshToken, {
         secret: this.config.get<string>('jwt.refreshSecret'),
       });
 
-      const session = await this.prisma.userSession.findFirst({
-        where: {
-          userId: payload.sub,
-          refreshToken: await bcrypt.hash(refreshToken, 6),
-          expiresAt: { gt: new Date() },
-          isRevoked: false,
-        },
+      const sessions = await this.prisma.userSession.findMany({
+        where: { userId: payload.sub, expiresAt: { gt: new Date() }, isRevoked: false },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
       });
 
-      if (!session) throw new UnauthorizedException('Invalid or expired refresh token');
+      // Verify token hash against stored sessions
+      let validSession: typeof sessions[0] | null = null;
+      for (const session of sessions) {
+        const match = await bcrypt.compare(refreshToken, session.refreshToken);
+        if (match) { validSession = session; break; }
+      }
 
-      const user = await this.prisma.user.findUniqueOrThrow({ where: { id: payload.sub } });
-      const tokens = await this.generateTokens(user);
+      if (!validSession) throw new UnauthorizedException('Invalid or expired refresh token');
+
+      const user = await this.prisma.user.findUniqueOrThrow({
+        where: { id: payload.sub },
+        include: { factory: true, enterprise: true },
+      });
+
+      const tokens = await this.generateTokens(user, payload.factoryId, payload.factoryCode);
 
       // Rotate refresh token
       await this.prisma.userSession.update({
-        where: { id: session.id },
+        where: { id: validSession.id },
         data: {
           refreshToken: await bcrypt.hash(tokens.refreshToken, 6),
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         },
       });
 
-      return tokens;
+      return { user: this.sanitizeUser(user), ...tokens };
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
   }
 
-  async logout(userId: string, refreshToken: string): Promise<void> {
+  async logout(userId: string): Promise<void> {
     await this.prisma.userSession.updateMany({
       where: { userId },
       data: { isRevoked: true },
     });
     this.logger.log(`User ${userId} logged out`);
-  }
-
-  async setupMFA(userId: string): Promise<{ qrCode: string; secret: string }> {
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-
-    const secret = speakeasy.generateSecret({
-      name: `INDUSTRY360 MES (${user.email})`,
-      length: 32,
-    });
-
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { mfaSecret: secret.base32 },
-    });
-
-    const qrCode = await QRCode.toDataURL(secret.otpauth_url!);
-    return { qrCode, secret: secret.base32 };
-  }
-
-  async enableMFA(userId: string, otp: string): Promise<void> {
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!user.mfaSecret) throw new BadRequestException('MFA setup not initiated');
-
-    const isValid = speakeasy.totp.verify({
-      secret: user.mfaSecret,
-      encoding: 'base32',
-      token: otp,
-      window: 1,
-    });
-
-    if (!isValid) throw new BadRequestException('Invalid OTP - please try again');
-
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { mfaEnabled: true },
-    });
   }
 
   async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
@@ -187,28 +174,37 @@ export class AuthService {
     const newHash = await bcrypt.hash(newPassword, 12);
     await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        passwordHash: newHash,
-        passwordChangedAt: new Date(),
-      },
+      data: { passwordHash: newHash, passwordChangedAt: new Date() },
     });
 
-    // Revoke all sessions on password change
-    await this.prisma.userSession.updateMany({
-      where: { userId },
-      data: { isRevoked: true },
+    await this.prisma.userSession.updateMany({ where: { userId }, data: { isRevoked: true } });
+  }
+
+  // Returns list of factories available for login (for factory selector population)
+  async getFactoriesForSelector(): Promise<Array<{
+    id: string; code: string; name: string; nameAr: string | null;
+    city: string | null; lat: number | null; lng: number | null;
+    color: string; glowColor: string; isActive: boolean;
+  }>> {
+    return this.prisma.factory.findMany({
+      where: { isActive: true },
+      select: { id: true, code: true, name: true, nameAr: true, city: true, lat: true, lng: true, color: true, glowColor: true, isActive: true },
+      orderBy: { code: 'asc' },
     });
   }
 
-  private async generateTokens(user: User): Promise<AuthTokens> {
-    const permissions = await this.getUserPermissions(user.id);
-
-    const payload: TokenPayload = {
+  private async generateTokens(
+    user: User,
+    factoryId: string | null,
+    factoryCode: string | null,
+  ): Promise<AuthTokens> {
+    const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
-      tenantId: user.tenantId,
-      permissions,
+      enterpriseId: user.enterpriseId,
+      factoryId,
+      factoryCode,
     };
 
     const [accessToken, refreshToken] = await Promise.all([
@@ -224,33 +220,24 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  private async createSession(userId: string, refreshToken: string): Promise<void> {
+  private async createSession(userId: string, refreshToken: string, factoryId?: string | null): Promise<void> {
     const hashedToken = await bcrypt.hash(refreshToken, 6);
     await this.prisma.userSession.create({
       data: {
         userId,
         refreshToken: hashedToken,
+        factoryId: factoryId ?? null,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
 
-    // Clean old sessions
+    // Clean expired / revoked sessions
     await this.prisma.userSession.deleteMany({
       where: {
         userId,
         OR: [{ expiresAt: { lt: new Date() } }, { isRevoked: true }],
       },
     });
-  }
-
-  private async getUserPermissions(userId: string): Promise<string[]> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        rolePermissions: { include: { permission: true } },
-      },
-    });
-    return user?.rolePermissions.map((rp) => rp.permission.code) ?? [];
   }
 
   private async recordFailedLogin(userId: string): Promise<void> {
@@ -262,13 +249,13 @@ export class AuthService {
     if (user.failedLoginAttempts >= 5) {
       await this.prisma.user.update({
         where: { id: userId },
-        data: { isActive: false, lockedAt: new Date() },
+        data: { lockedAt: new Date() },
       });
       this.logger.warn(`Account locked for user ${userId} after 5 failed attempts`);
     }
   }
 
-  sanitizeUser(user: User) {
+  sanitizeUser(user: any) {
     const { passwordHash, mfaSecret, ...safeUser } = user;
     return safeUser;
   }

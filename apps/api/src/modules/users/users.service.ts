@@ -6,12 +6,14 @@ import { PrismaService } from '../../database/prisma.service';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(tenantId: string, filters: { search?: string; role?: string; page?: number; limit?: number }) {
+  async findAll(factoryId: string | null, filters: {
+    search?: string; role?: string; page?: number; limit?: number;
+  }) {
     const { search, role, page = 1, limit = 20 } = filters;
 
-    const where = {
-      tenantId,
-      deletedAt: null as null,
+    const where: any = {
+      deletedAt: null,
+      ...(factoryId && { factoryId }),
       ...(role && { role }),
       ...(search && {
         OR: [
@@ -27,8 +29,10 @@ export class UsersService {
         where,
         select: {
           id: true, name: true, email: true, role: true,
-          department: true, isActive: true, lastLoginAt: true,
-          createdAt: true, avatarUrl: true,
+          department: true, jobTitle: true, phone: true,
+          isActive: true, lastLoginAt: true, createdAt: true,
+          avatarUrl: true, factoryId: true,
+          factory: { select: { code: true, name: true } },
         },
         orderBy: { name: 'asc' },
         skip: (page - 1) * limit,
@@ -42,38 +46,55 @@ export class UsersService {
   async findById(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: { rolePermissions: { include: { permission: true } } },
+      include: {
+        factory: { select: { id: true, code: true, name: true, color: true } },
+        enterprise: { select: { id: true, code: true, name: true } },
+      },
     });
     if (!user) throw new NotFoundException('User not found');
     const { passwordHash, mfaSecret, ...safe } = user;
     return safe;
   }
 
-  async create(tenantId: string, data: {
-    email: string; name: string; role: string;
-    department?: string; siteId?: string; password: string;
+  async create(data: {
+    enterpriseId: string;
+    factoryId?: string | null;
+    email: string;
+    name: string;
+    role: string;
+    department?: string;
+    jobTitle?: string;
+    phone?: string;
+    password: string;
   }) {
     const exists = await this.prisma.user.findUnique({ where: { email: data.email } });
     if (exists) throw new ConflictException('Email already registered');
 
     const passwordHash = await bcrypt.hash(data.password, 12);
-    return this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
-        tenantId,
+        enterpriseId: data.enterpriseId,
+        factoryId: data.factoryId ?? null,
         email: data.email.toLowerCase(),
         name: data.name,
-        role: data.role,
+        role: data.role as any,
         department: data.department,
-        siteId: data.siteId,
+        jobTitle: data.jobTitle,
+        phone: data.phone,
         passwordHash,
-        language: 'en',
-        timezone: 'UTC',
       },
     });
+    const { passwordHash: _, mfaSecret, ...safe } = user;
+    return safe;
   }
 
-  async update(id: string, data: { name?: string; role?: string; department?: string; isActive?: boolean }) {
-    return this.prisma.user.update({ where: { id }, data });
+  async update(id: string, data: {
+    name?: string; role?: string; department?: string;
+    jobTitle?: string; phone?: string; isActive?: boolean; factoryId?: string | null;
+  }) {
+    const user = await this.prisma.user.update({ where: { id }, data: data as any });
+    const { passwordHash, mfaSecret, ...safe } = user;
+    return safe;
   }
 
   async deactivate(id: string) {

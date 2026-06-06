@@ -4,13 +4,12 @@ import { PrismaService } from '../../database/prisma.service';
 import type { WorkOrderStatus, Prisma } from '@prisma/client';
 
 export interface CreateWorkOrderDto {
-  productId: string;
-  equipmentId: string;
+  skuId: string;
+  machineId: string;
   plannedQty: number;
   plannedStart: Date;
   plannedEnd: Date;
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  recipeId?: string;
   notes?: string;
 }
 
@@ -18,7 +17,7 @@ export interface WorkOrderFilters {
   search?: string;
   status?: WorkOrderStatus;
   priority?: string;
-  equipmentId?: string;
+  machineId?: string;
   dateFrom?: Date;
   dateTo?: Date;
   page?: number;
@@ -34,26 +33,27 @@ export class ProductionService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async createWorkOrder(tenantId: string, userId: string, dto: CreateWorkOrderDto) {
-    const product = await this.prisma.product.findFirst({
-      where: { id: dto.productId, tenantId },
-    });
-    if (!product) throw new NotFoundException('Product not found');
+  async createWorkOrder(factoryId: string | null, userId: string, dto: CreateWorkOrderDto) {
+    const factoryFilter = factoryId ? { factoryId } : {};
 
-    const equipment = await this.prisma.equipment.findFirst({
-      where: { id: dto.equipmentId, tenantId },
+    const sku = await this.prisma.sKU.findFirst({
+      where: { id: dto.skuId, ...factoryFilter },
     });
-    if (!equipment) throw new NotFoundException('Equipment not found');
+    if (!sku) throw new NotFoundException('SKU not found');
 
-    const orderNumber = await this.generateOrderNumber(tenantId);
+    const machine = await this.prisma.machine.findFirst({
+      where: { id: dto.machineId, ...factoryFilter },
+    });
+    if (!machine) throw new NotFoundException('Machine not found');
+
+    const orderNumber = await this.generateOrderNumber(factoryId);
 
     const workOrder = await this.prisma.workOrder.create({
       data: {
-        tenantId,
+        factoryId: factoryId ?? machine.factoryId,
         orderNumber,
-        productId: dto.productId,
-        equipmentId: dto.equipmentId,
-        recipeId: dto.recipeId,
+        skuId: dto.skuId,
+        machineId: dto.machineId,
         status: 'PLANNED',
         priority: dto.priority,
         plannedQty: dto.plannedQty,
@@ -63,34 +63,34 @@ export class ProductionService {
         createdById: userId,
       },
       include: {
-        product: true,
-        equipment: true,
-        recipe: true,
+        sku: true,
+        machine: true,
       },
     });
 
-    this.eventEmitter.emit('production.work-order.created', { workOrder, tenantId });
+    this.eventEmitter.emit('production.work-order.created', { workOrder, factoryId });
     this.logger.log(`Work order ${orderNumber} created`);
 
     return workOrder;
   }
 
-  async findWorkOrders(tenantId: string, filters: WorkOrderFilters) {
-    const { search, status, priority, equipmentId, dateFrom, dateTo, page = 1, limit = 20 } = filters;
+  async findWorkOrders(factoryId: string | null, filters: WorkOrderFilters) {
+    const { search, status, priority, machineId, dateFrom, dateTo, page = 1, limit = 20 } = filters;
+    const factoryFilter = factoryId ? { factoryId } : {};
 
     const where: Prisma.WorkOrderWhereInput = {
-      tenantId,
+      ...factoryFilter,
       deletedAt: null,
       ...(status && { status }),
       ...(priority && { priority: priority as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' }),
-      ...(equipmentId && { equipmentId }),
+      ...(machineId && { machineId }),
       ...(dateFrom && { plannedStart: { gte: dateFrom } }),
       ...(dateTo && { plannedEnd: { lte: dateTo } }),
       ...(search && {
         OR: [
           { orderNumber: { contains: search, mode: 'insensitive' as const } },
-          { product: { name: { contains: search, mode: 'insensitive' as const } } },
-          { equipment: { name: { contains: search, mode: 'insensitive' as const } } },
+          { sku: { name: { contains: search, mode: 'insensitive' as const } } },
+          { machine: { name: { contains: search, mode: 'insensitive' as const } } },
         ],
       }),
     };
@@ -100,9 +100,9 @@ export class ProductionService {
       this.prisma.workOrder.findMany({
         where,
         include: {
-          product: { select: { name: true, code: true } },
-          equipment: { select: { name: true, code: true } },
-          assignedOperator: { select: { name: true } },
+          sku: { select: { name: true, code: true } },
+          machine: { select: { name: true, code: true } },
+          operator: { select: { name: true } },
         },
         orderBy: [{ priority: 'desc' }, { plannedStart: 'asc' }],
         skip: (page - 1) * limit,
@@ -114,8 +114,8 @@ export class ProductionService {
       data: data.map((wo) => ({
         id: wo.id,
         orderNumber: wo.orderNumber,
-        productName: wo.product.name,
-        productCode: wo.product.code,
+        productName: wo.sku?.name ?? '',
+        productCode: wo.sku?.code ?? '',
         status: wo.status,
         priority: wo.priority,
         plannedQty: wo.plannedQty,
@@ -124,8 +124,8 @@ export class ProductionService {
         actualStart: wo.actualStart?.toISOString(),
         plannedEnd: wo.plannedEnd.toISOString(),
         actualEnd: wo.actualEnd?.toISOString(),
-        machine: wo.equipment.name,
-        operator: wo.assignedOperator?.name ?? '',
+        machine: wo.machine?.name ?? '',
+        operator: wo.operator?.name ?? '',
         oee: wo.oee,
         progress: this.calcProgress(wo),
       })),
@@ -136,9 +136,11 @@ export class ProductionService {
     };
   }
 
-  async startWorkOrder(tenantId: string, userId: string, workOrderId: string) {
+  async startWorkOrder(factoryId: string | null, userId: string, workOrderId: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
     const wo = await this.prisma.workOrder.findFirst({
-      where: { id: workOrderId, tenantId },
+      where: { id: workOrderId, ...factoryFilter },
     });
     if (!wo) throw new NotFoundException('Work order not found');
     if (wo.status !== 'PLANNED') throw new BadRequestException('Work order cannot be started');
@@ -152,20 +154,18 @@ export class ProductionService {
       },
     });
 
-    this.eventEmitter.emit('production.work-order.started', { workOrder: updated, tenantId });
+    this.eventEmitter.emit('production.work-order.started', { workOrder: updated, factoryId });
     return updated;
   }
 
-  async completeWorkOrder(tenantId: string, userId: string, workOrderId: string, actualQty: number) {
+  async completeWorkOrder(factoryId: string | null, userId: string, workOrderId: string, actualQty: number) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
     const wo = await this.prisma.workOrder.findFirst({
-      where: { id: workOrderId, tenantId },
+      where: { id: workOrderId, ...factoryFilter },
     });
     if (!wo) throw new NotFoundException('Work order not found');
     if (wo.status !== 'IN_PROGRESS') throw new BadRequestException('Work order is not in progress');
-
-    const cycleTimeMinutes = wo.actualStart
-      ? (Date.now() - wo.actualStart.getTime()) / 60_000
-      : 0;
 
     const updated = await this.prisma.workOrder.update({
       where: { id: workOrderId },
@@ -174,26 +174,27 @@ export class ProductionService {
         actualQty,
         actualEnd: new Date(),
         completedById: userId,
-        cycleTimeMinutes,
       },
     });
 
-    this.eventEmitter.emit('production.work-order.completed', { workOrder: updated, tenantId });
+    this.eventEmitter.emit('production.work-order.completed', { workOrder: updated, factoryId });
     return updated;
   }
 
-  async getKPIs(tenantId: string) {
+  async getKPIs(factoryId: string | null) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
     const [oeeData, totalOrders, inProgressOrders, completedOrders] = await Promise.all([
-      this.prisma.productionRecord.aggregate({
+      this.prisma.oEERecord.aggregate({
         where: {
-          tenantId,
-          createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+          ...factoryFilter,
+          recordDate: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
         },
         _avg: { oee: true, availability: true, performance: true, quality: true },
       }),
-      this.prisma.workOrder.count({ where: { tenantId, deletedAt: null } }),
-      this.prisma.workOrder.count({ where: { tenantId, status: 'IN_PROGRESS' } }),
-      this.prisma.workOrder.count({ where: { tenantId, status: 'COMPLETED' } }),
+      this.prisma.workOrder.count({ where: { ...factoryFilter, deletedAt: null } }),
+      this.prisma.workOrder.count({ where: { ...factoryFilter, status: 'IN_PROGRESS' } }),
+      this.prisma.workOrder.count({ where: { ...factoryFilter, status: 'COMPLETED' } }),
     ]);
 
     return {
@@ -214,12 +215,13 @@ export class ProductionService {
     return Math.min(Math.round((wo.actualQty / wo.plannedQty) * 100), 100);
   }
 
-  private async generateOrderNumber(tenantId: string): Promise<string> {
+  private async generateOrderNumber(factoryId: string | null): Promise<string> {
     const today = new Date();
     const prefix = `WO-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+    const factoryFilter = factoryId ? { factoryId } : {};
 
     const lastOrder = await this.prisma.workOrder.findFirst({
-      where: { tenantId, orderNumber: { startsWith: prefix } },
+      where: { ...factoryFilter, orderNumber: { startsWith: prefix } },
       orderBy: { orderNumber: 'desc' },
     });
 

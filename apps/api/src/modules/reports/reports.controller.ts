@@ -1,6 +1,12 @@
-import { Controller, Get, Query, Request } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ReportsService } from './reports.service';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+
+interface RequestUser {
+  id: string;
+  factoryId: string | null;
+}
 
 @ApiTags('Reports')
 @ApiBearerAuth('JWT-auth')
@@ -15,26 +21,28 @@ export class ReportsController {
   }
 
   @Get('production')
+  @ApiOperation({ summary: 'Get production report for date range' })
   async getProductionReport(
-    @Request() req: { user: { tenantId: string } },
+    @CurrentUser() user: RequestUser,
     @Query('from') from: string,
     @Query('to') to: string,
   ) {
     return this.reportsService.getProductionReport(
-      req.user.tenantId,
+      user.factoryId,
       new Date(from || Date.now() - 7 * 24 * 3600000),
       new Date(to || Date.now()),
     );
   }
 
   @Get('quality')
+  @ApiOperation({ summary: 'Get quality report for date range' })
   async getQualityReport(
-    @Request() req: { user: { tenantId: string } },
+    @CurrentUser() user: RequestUser,
     @Query('from') from: string,
     @Query('to') to: string,
   ) {
     return this.reportsService.getQualityReport(
-      req.user.tenantId,
+      user.factoryId,
       new Date(from || Date.now() - 7 * 24 * 3600000),
       new Date(to || Date.now()),
     );

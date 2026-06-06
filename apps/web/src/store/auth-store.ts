@@ -5,15 +5,30 @@ import { immer } from 'zustand/middleware/immer';
 export interface User {
   id: string;
   name: string;
+  nameAr?: string;
   email: string;
   role: string;
-  permissions: string[];
-  tenantId: string;
-  siteId?: string;
-  avatar?: string;
+  enterpriseId: string;
+  factoryId: string | null;
+  factoryCode: string | null;
   department?: string;
+  jobTitle?: string;
+  phone?: string;
+  avatarUrl?: string;
   language: 'en' | 'ar';
   timezone: string;
+  // Factory embedded in user profile response
+  factory?: {
+    id: string;
+    code: string;
+    name: string;
+    nameAr?: string;
+    city?: string;
+    color: string;
+    glowColor: string;
+    lat?: number;
+    lng?: number;
+  } | null;
 }
 
 interface AuthState {
@@ -30,8 +45,9 @@ interface AuthActions {
   setTokens: (accessToken: string, refreshToken: string) => void;
   logout: () => void;
   setLoading: (loading: boolean) => void;
-  hasPermission: (permission: string) => boolean;
   hasRole: (role: string | string[]) => boolean;
+  isSuperAdmin: () => boolean;
+  canAccessFactory: (factoryId: string) => boolean;
 }
 
 export const useAuthStore = create<AuthState & AuthActions>()(
@@ -53,9 +69,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       },
 
       setUser: (user) => {
-        set((state) => {
-          state.user = user;
-        });
+        set((state) => { state.user = user; });
       },
 
       setTokens: (accessToken, refreshToken) => {
@@ -75,16 +89,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       },
 
       setLoading: (loading) => {
-        set((state) => {
-          state.isLoading = loading;
-        });
-      },
-
-      hasPermission: (permission: string) => {
-        const { user } = get();
-        if (!user) return false;
-        if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
-        return user.permissions?.includes(permission) ?? false;
+        set((state) => { state.isLoading = loading; });
       },
 
       hasRole: (role: string | string[]) => {
@@ -92,6 +97,17 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         if (!user) return false;
         const roles = Array.isArray(role) ? role : [role];
         return roles.includes(user.role);
+      },
+
+      isSuperAdmin: () => {
+        return get().user?.role === 'SUPER_ADMIN';
+      },
+
+      canAccessFactory: (factoryId: string) => {
+        const { user } = get();
+        if (!user) return false;
+        if (user.role === 'SUPER_ADMIN') return true;
+        return user.factoryId === factoryId;
       },
     })),
     {

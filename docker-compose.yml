@@ -165,9 +165,9 @@ services:
       redis:
         condition: service_healthy
     command: >
-      sh -c "npx prisma migrate deploy &&
-             (npx prisma db seed || true) &&
-             npm run start:dev"
+      sh -c "npx prisma db push --accept-data-loss &&
+             (npx prisma db seed 2>/dev/null || true) &&
+             pnpm start:dev"
 
   web:
     build:

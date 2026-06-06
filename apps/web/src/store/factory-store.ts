@@ -1,23 +1,47 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { FACTORIES, Factory } from '@/features/factory-selector/factories';
+
+// Matches the Factory interface from both the static data and the API response
+export interface FactoryBrief {
+  id: string;
+  code: string;
+  name: string;
+  nameAr?: string | null;
+  city?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  color: string;
+  glowColor: string;
+  isActive: boolean;
+}
 
 interface FactoryState {
   selectedFactoryId: string | null;
-  selectedFactory: Factory | null;
-  setFactory: (id: string) => void;
+  selectedFactory: FactoryBrief | null;
+  allFactories: FactoryBrief[];
+}
+
+interface FactoryActions {
+  setFactory: (factory: FactoryBrief) => void;
+  setFactories: (factories: FactoryBrief[]) => void;
   clearFactory: () => void;
 }
 
-export const useFactoryStore = create<FactoryState>()(
+export const useFactoryStore = create<FactoryState & FactoryActions>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       selectedFactoryId: null,
       selectedFactory: null,
-      setFactory: (id) => {
-        const factory = FACTORIES.find((f) => f.id === id) ?? null;
-        set({ selectedFactoryId: id, selectedFactory: factory });
+      allFactories: [],
+
+      setFactory: (factory) => {
+        set({ selectedFactoryId: factory.id, selectedFactory: factory });
       },
+
+      setFactories: (factories) => {
+        set({ allFactories: factories });
+      },
+
       clearFactory: () => set({ selectedFactoryId: null, selectedFactory: null }),
     }),
     {

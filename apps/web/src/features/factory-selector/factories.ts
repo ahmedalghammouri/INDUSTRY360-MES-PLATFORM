@@ -12,6 +12,7 @@ export interface Factory {
   lng: number;
   color: string;
   glowColor: string;
+  isActive?: boolean;
   kpis: FactoryKPI;
 }
 

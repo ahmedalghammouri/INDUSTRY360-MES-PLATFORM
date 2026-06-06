@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { FACTORIES, Factory } from './factories';
 import { SaudiMap } from './saudi-map';
+import { authService } from '@/services/auth.service';
+import { useFactoryStore } from '@/store/factory-store';
 
 function AnimatedNumber({ value, decimals = 1 }: { value: number; decimals?: number }) {
   const [display, setDisplay] = useState(0);
@@ -99,6 +101,7 @@ function GlobalStats() {
 
 export function FactorySelector() {
   const router = useRouter();
+  const { setFactories } = useFactoryStore();
   const [selected, setSelected] = useState<Factory | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -113,12 +116,34 @@ export function FactorySelector() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, []);
 
+  // Fetch factories from API and populate store for login page context
+  useEffect(() => {
+    authService.getFactories().then((apiFactories) => {
+      setFactories(
+        apiFactories.map((f) => ({
+          id: f.id,
+          code: f.code,
+          name: f.name,
+          nameAr: f.nameAr,
+          city: f.city ?? undefined,
+          lat: f.lat ?? undefined,
+          lng: f.lng ?? undefined,
+          color: f.color,
+          glowColor: f.glowColor,
+          isActive: f.isActive,
+        })),
+      );
+    }).catch(() => {
+      // API unavailable — login page will fall back to static FACTORIES
+    });
+  }, [setFactories]);
+
   const active = selected ?? (hovered ? FACTORIES.find((f) => f.id === hovered) ?? null : null);
 
   function handleSelect(factory: Factory) {
     setSelected(factory);
     setTimeout(() => {
-      router.push(`/login?factory=${factory.id}`);
+      router.push(`/login?factory=${factory.code}`);
     }, 600);
   }
 
