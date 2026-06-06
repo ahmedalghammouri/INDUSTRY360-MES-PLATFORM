@@ -32,6 +32,9 @@ import {
   Activity,
   Map,
   LogOut,
+  Layers3,
+  BoxesIcon,
+  Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSidebarStore } from '@/store/ui-store';
@@ -109,6 +112,24 @@ const navItems: NavItem[] = [
       { label: 'Tag Browser', href: '/iot/tags', icon: Network },
       { label: 'Drivers', href: '/iot/drivers', icon: Radio },
       { label: 'Data Streams', href: '/iot/streams', icon: Activity },
+    ],
+  },
+  {
+    label: 'Inventory',
+    icon: Package,
+    children: [
+      { label: 'Overview', href: '/inventory', icon: Boxes },
+      { label: 'Spare Parts', href: '/inventory/spare-parts', icon: Package },
+      { label: 'Products (SKUs)', href: '/inventory/products', icon: BoxesIcon },
+      { label: 'Material Lots', href: '/inventory/materials', icon: Layers3 },
+    ],
+  },
+  {
+    label: 'Energy',
+    icon: Zap,
+    children: [
+      { label: 'Overview', href: '/energy', icon: Activity },
+      { label: 'Meters', href: '/energy/meters', icon: Gauge },
     ],
   },
   {

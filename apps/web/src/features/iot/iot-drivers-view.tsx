@@ -1,22 +1,78 @@
 'use client';
 
-import React from 'react';
-import { Plus, Download, Settings, CheckCircle, XCircle } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-
+import React, { useState } from 'react';
+import { Plus, Download, Settings, CheckCircle, XCircle, Pencil, Trash2, MoreVertical } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { toast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 
 export function IotDriversView() {
+  const qc = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
+  const [editDriver, setEditDriver] = useState<any | null>(null);
+  const [deleteDriver, setDeleteDriver] = useState<any | null>(null);
+  const { register, handleSubmit, reset, setValue } = useForm();
+
   const { data: drivers, isLoading } = useQuery({
     queryKey: ['iot', 'drivers'],
     queryFn: () => api.get('/iot/drivers'),
     staleTime: 30_000,
   });
 
-  const driverList = drivers?.data ?? [];
+  const createMutation = useMutation({
+    mutationFn: (dto: any) => api.post('/iot/drivers', dto),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['iot', 'drivers'] });
+      toast({ title: 'Driver created successfully' });
+      setShowForm(false);
+      reset();
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, ...dto }: any) => api.patch(`/iot/drivers/${id}`, dto),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['iot', 'drivers'] });
+      toast({ title: 'Driver updated successfully' });
+      setEditDriver(null);
+      setShowForm(false);
+      reset();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/iot/drivers/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['iot', 'drivers'] });
+      toast({ title: 'Driver deleted successfully' });
+      setDeleteDriver(null);
+    },
+  });
+
+  const handleEdit = (driver: any) => {
+    setEditDriver(driver);
+    setValue('protocol', driver.protocol);
+    setValue('version', driver.version);
+    setValue('description', driver.description);
+    setShowForm(true);
+  };
+
+  const onSubmit = (data: any) => {
+    if (editDriver) {
+      updateMutation.mutate({ id: editDriver.id, ...data });
+    } else {
+      createMutation.mutate(data);
+    }
+  };
+
+  const driverList = (drivers as any)?.data ?? [];
 
   return (
     <div className="flex flex-col h-full">
@@ -32,7 +88,7 @@ export function IotDriversView() {
             <Download size={13} />
             Export
           </Button>
-          <Button size="sm" className="gap-1.5 h-8 text-xs">
+          <Button size="sm" className="gap-1.5 h-8 text-xs" onClick={() => { setShowForm(true); setEditDriver(null); reset(); }}>
             <Plus size={13} />
             Add Driver
           </Button>
@@ -59,7 +115,7 @@ export function IotDriversView() {
                 {isLoading ? (
                   Array.from({ length: 6 }).map((_, i) => (
                     <TableRow key={i} className="border-border/20">
-                      {Array.from({ length: 6 }).map((_, j) => (
+                      {Array.from({ length: 7 }).map((_, j) => (
                         <TableCell key={j}>
                           <div className="shimmer h-3.5 rounded w-20" />
                         </TableCell>
@@ -68,7 +124,7 @@ export function IotDriversView() {
                   ))
                 ) : driverList.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
                       No drivers found
                     </TableCell>
                   </TableRow>
@@ -78,7 +134,7 @@ export function IotDriversView() {
                       <TableCell className="font-mono text-xs font-semibold text-primary">{driver.protocol}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{driver.version}</TableCell>
                       <TableCell className="text-xs">{driver.description}</TableCell>
-                      <TableCell className="text-xs font-semibold">{driver.deviceCount}</TableCell>
+                      <TableCell className="text-xs font-semibold">{driver.deviceCount || 0}</TableCell>
                       <TableCell>
                         <Badge 
                           variant={driver.status === 'ACTIVE' ? 'default' : 'secondary'}
@@ -89,9 +145,22 @@ export function IotDriversView() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="icon" className="h-7 w-7">
-                          <Settings size={13} />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7">
+                              <MoreVertical size={13} />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleEdit(driver)}>
+                              <Pencil size={12} className="mr-2" />Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => setDeleteDriver(driver)} className="text-destructive">
+                              <Trash2 size={12} className="mr-2" />Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))
@@ -101,6 +170,51 @@ export function IotDriversView() {
           </div>
         </div>
       </div>
+
+      {/* Create/Edit Dialog */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card rounded-xl p-6 w-full max-w-md space-y-4">
+            <h3 className="font-semibold text-lg">{editDriver ? 'Edit Driver' : 'Add IoT Driver'}</h3>
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+              <div>
+                <Label>Protocol *</Label>
+                <Input {...register('protocol', { required: true })} placeholder="MODBUS_TCP" className="mt-1" />
+              </div>
+              <div>
+                <Label>Version *</Label>
+                <Input {...register('version', { required: true })} placeholder="1.0.0" className="mt-1" />
+              </div>
+              <div>
+                <Label>Description *</Label>
+                <Input {...register('description', { required: true })} placeholder="Modbus TCP/IP driver" className="mt-1" />
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditDriver(null); }}>Cancel</Button>
+                <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
+                  {createMutation.isPending || updateMutation.isPending ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Dialog */}
+      {deleteDriver && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card rounded-xl p-6 w-full max-w-sm space-y-4">
+            <h3 className="font-semibold">Delete Driver</h3>
+            <p className="text-sm text-muted-foreground">Are you sure you want to delete <strong>{deleteDriver.protocol}</strong>?</p>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setDeleteDriver(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={() => deleteMutation.mutate(deleteDriver.id)} disabled={deleteMutation.isPending}>
+                {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

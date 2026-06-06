@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   RefreshCw,
@@ -49,6 +49,11 @@ const itemVariants = {
 export function DashboardView() {
   const { data, isLoading, refetch } = useDashboardData();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [dateLabel, setDateLabel] = useState('');
+
+  useEffect(() => {
+    setDateLabel(format(new Date(), 'EEEE, MMMM d, yyyy'));
+  }, []);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -63,7 +68,7 @@ export function DashboardView() {
         <div>
           <h1 className="text-lg font-bold text-foreground">Operations Center</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {format(new Date(), 'EEEE, MMMM d, yyyy')} · Real-time overview
+            {dateLabel || ' '} · Real-time overview
           </p>
         </div>
         <div className="flex items-center gap-2">

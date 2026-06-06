@@ -2,28 +2,28 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Search, Download, ChevronRight, BookOpen, FlaskConical, Settings2, Copy, Lock, Unlock } from 'lucide-react';
+import { Plus, Search, Download, BookOpen, FlaskConical, Settings2, Copy, Lock, Unlock, MoreHorizontal, Pencil, Trash2, Package } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { DeleteDialog } from '@/components/ui/delete-dialog';
+import { useToast } from '@/components/ui/use-toast';
+import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
+
+interface SKU { id: string; name: string; code: string; itemNumber?: string; brand?: string; weight?: number }
 
 interface Recipe {
   id: string; code: string; name: string; product: string; version: string;
   status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED' | 'LOCKED';
   cycleTime: number; yield: number; steps: number; materials: number;
-  lastModified: string; modifiedBy: string;
+  lastModified: string; modifiedBy?: string;
 }
-
-const RECIPES: Recipe[] = [
-  { id:'1', code:'RCP-001', name:'Valve Assembly Standard',   product:'Valve Assembly A1',  version:'v3.2', status:'ACTIVE',   cycleTime:12.5, yield:99.2, steps:18, materials:7,  lastModified:'2026-05-10', modifiedBy:'Eng. Hassan' },
-  { id:'2', code:'RCP-002', name:'Pump Housing Full Cycle',   product:'Pump Housing B3',    version:'v1.8', status:'ACTIVE',   cycleTime:22.0, yield:98.8, steps:24, materials:11, lastModified:'2026-05-08', modifiedBy:'Eng. Fatima' },
-  { id:'3', code:'RCP-003', name:'Gear Set Machining',        product:'Gear Set C2',        version:'v4.1', status:'LOCKED',   cycleTime:35.0, yield:99.5, steps:32, materials:4,  lastModified:'2026-04-22', modifiedBy:'Eng. Hassan' },
-  { id:'4', code:'RCP-004', name:'Motor Bracket Stamping',    product:'Motor Bracket D1',   version:'v2.0', status:'ACTIVE',   cycleTime:8.0,  yield:97.4, steps:12, materials:3,  lastModified:'2026-05-12', modifiedBy:'Eng. Omar'   },
-  { id:'5', code:'RCP-005', name:'Coupling Flange v2 Beta',   product:'Coupling Flange A3', version:'v2.0b',status:'DRAFT',    cycleTime:16.0, yield:0,    steps:20, materials:8,  lastModified:'2026-05-15', modifiedBy:'Eng. Sara'   },
-  { id:'6', code:'RCP-006', name:'Bearing Housing Legacy',    product:'Bearing Housing E2', version:'v1.0', status:'ARCHIVED', cycleTime:28.0, yield:96.1, steps:26, materials:9,  lastModified:'2025-11-30', modifiedBy:'Eng. Khalid' },
-  { id:'7', code:'RCP-007', name:'Impeller Precision Set',    product:'Impeller Set C4',    version:'v1.3', status:'ACTIVE',   cycleTime:19.5, yield:99.0, steps:22, materials:6,  lastModified:'2026-05-01', modifiedBy:'Eng. Hassan' },
-];
 
 const STATUS_CONFIG = {
   ACTIVE:   { label:'Active',   color:'text-green-400',  bg:'bg-green-500/10' },
@@ -33,12 +33,117 @@ const STATUS_CONFIG = {
 };
 
 export function ProductionRecipesView() {
-  const [search, setSearch] = useState('');
-  const filtered = RECIPES.filter(r =>
+  const { toast } = useToast()
+  const qc = useQueryClient()
+  const [search, setSearch] = useState('')
+  const [formOpen, setFormOpen] = useState(false)
+  const [editRecipe, setEditRecipe] = useState<Recipe | null>(null)
+  const [deleteDialog, setDeleteDialog] = useState<{ id: string; name: string } | null>(null)
+  const [form, setForm] = useState({
+    code: '', name: '', product: '', version: '', status: 'DRAFT', cycleTime: '', yieldPct: '', steps: '', materials: '',
+  })
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['production', 'recipes', search],
+    queryFn: () => api.get('/production/recipes', {
+      params: { search: search || undefined, limit: 50 },
+    }),
+    staleTime: 30_000,
+  })
+
+  const { data: skusData } = useQuery({
+    queryKey: ['inventory', 'products', 'recipes-dropdown'],
+    queryFn: () => api.get('/inventory/products', { params: { limit: 200 } }),
+    staleTime: 120_000,
+    enabled: formOpen,
+  })
+  const skus: SKU[] = (skusData as any)?.data ?? []
+
+  const recipes: Recipe[] = (data as any)?.data ?? [];
+
+  const createMutation = useMutation({
+    mutationFn: (dto: any) => api.post('/production/recipes', dto),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production', 'recipes'] })
+      toast({ title: 'Recipe created successfully' })
+      handleCloseForm()
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to create recipe', variant: 'destructive' }),
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: any }) => api.patch(`/production/recipes/${id}`, dto),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production', 'recipes'] })
+      toast({ title: 'Recipe updated successfully' })
+      handleCloseForm()
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to update recipe', variant: 'destructive' }),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/production/recipes/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production', 'recipes'] })
+      toast({ title: 'Recipe deleted successfully' })
+      setDeleteDialog(null)
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to delete recipe', variant: 'destructive' }),
+  })
+
+  const handleOpenCreate = () => {
+    setEditRecipe(null)
+    setForm({ code: '', name: '', product: '', version: '', status: 'DRAFT', cycleTime: '', yieldPct: '', steps: '', materials: '' })
+    setFormOpen(true)
+  };
+
+  const handleOpenEdit = (recipe: Recipe) => {
+    setEditRecipe(recipe)
+    setForm({
+      code: recipe.code,
+      name: recipe.name,
+      product: recipe.product,
+      version: recipe.version,
+      status: recipe.status,
+      cycleTime: String(recipe.cycleTime),
+      yieldPct: String(recipe.yield),
+      steps: String(recipe.steps),
+      materials: String(recipe.materials),
+    })
+    setFormOpen(true)
+  };
+
+  const handleCloseForm = () => {
+    setFormOpen(false)
+    setEditRecipe(null)
+  };
+
+  const handleSubmit = () => {
+    const dto = {
+      code: form.code,
+      name: form.name,
+      product: form.product,
+      version: form.version,
+      status: form.status,
+      cycleTime: parseFloat(form.cycleTime),
+      yield: parseFloat(form.yieldPct || '0'),
+      steps: parseInt(form.steps),
+      materials: parseInt(form.materials || '0'),
+    };
+    if (editRecipe) {
+      updateMutation.mutate({ id: editRecipe.id, dto })
+    } else {
+      createMutation.mutate(dto)
+    }
+  };
+
+  const isValid = !!(form.code && form.name && form.product && form.version && form.cycleTime && form.steps)
+
+  const filtered = recipes.filter(r =>
     r.name.toLowerCase().includes(search.toLowerCase()) ||
     r.code.toLowerCase().includes(search.toLowerCase()) ||
     r.product.toLowerCase().includes(search.toLowerCase()),
-  );
+  )
 
   return (
     <div className="flex flex-col h-full">
@@ -49,7 +154,7 @@ export function ProductionRecipesView() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs"><Download size={13} />Export</Button>
-          <Button size="sm" className="gap-1.5 h-8 text-xs"><Plus size={13} />New Recipe</Button>
+          <Button size="sm" className="gap-1.5 h-8 text-xs" onClick={handleOpenCreate}><Plus size={13} />New Recipe</Button>
         </div>
       </div>
 
@@ -57,10 +162,10 @@ export function ProductionRecipesView() {
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label:'Total Recipes', value: RECIPES.length, icon: BookOpen, color:'text-brand-400' },
-            { label:'Active',        value: RECIPES.filter(r=>r.status==='ACTIVE').length,   icon: FlaskConical, color:'text-green-400' },
-            { label:'Draft',         value: RECIPES.filter(r=>r.status==='DRAFT').length,    icon: Settings2,    color:'text-amber-400' },
-            { label:'Locked',        value: RECIPES.filter(r=>r.status==='LOCKED').length,   icon: Lock,         color:'text-purple-400'},
+            { label:'Total Recipes', value: recipes.length, icon: BookOpen, color:'text-brand-400' },
+            { label:'Active',        value: recipes.filter(r=>r.status==='ACTIVE').length,   icon: FlaskConical, color:'text-green-400' },
+            { label:'Draft',         value: recipes.filter(r=>r.status==='DRAFT').length,    icon: Settings2,    color:'text-amber-400' },
+            { label:'Locked',        value: recipes.filter(r=>r.status==='LOCKED').length,   icon: Lock,         color:'text-purple-400'},
           ].map((s, i) => {
             const Icon = s.icon;
             return (
@@ -69,7 +174,7 @@ export function ProductionRecipesView() {
                 <Icon className={cn('w-8 h-8', s.color)} />
                 <div><div className="text-2xl font-bold">{s.value}</div><div className="text-xs text-muted-foreground">{s.label}</div></div>
               </motion.div>
-            );
+            )
           })}
         </div>
 
@@ -83,7 +188,14 @@ export function ProductionRecipesView() {
 
         {/* Recipe cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map((recipe, i) => {
+          {isLoading ? (
+            Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="industrial-card rounded-xl p-4"><div className="shimmer h-32 rounded" /></div>
+            ))
+          ) : filtered.length === 0 ? (
+            <div className="col-span-full text-center py-12 text-muted-foreground">No recipes found</div>
+          ) : (
+            filtered.map((recipe, i) => {
             const cfg = STATUS_CONFIG[recipe.status];
             return (
               <motion.div key={recipe.id} initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ delay:i*0.04 }}
@@ -124,17 +236,108 @@ export function ProductionRecipesView() {
                 )}
 
                 <div className="flex items-center justify-between pt-2 border-t border-border/30">
-                  <span className="text-[10px] text-muted-foreground">Modified {recipe.lastModified} by {recipe.modifiedBy}</span>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" className="h-6 w-6"><Copy size={11}/></Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6"><ChevronRight size={11}/></Button>
-                  </div>
+                  <span className="text-[10px] text-muted-foreground">Modified {recipe.lastModified.slice(0, 10)}{recipe.modifiedBy ? ` by ${recipe.modifiedBy}` : ''}</span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-6 w-6"><MoreHorizontal size={11}/></Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleOpenEdit(recipe)}>
+                        <Pencil className="w-3 h-3 mr-2" />Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem><Copy className="w-3 h-3 mr-2" />Duplicate</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-destructive" onClick={() => setDeleteDialog({ id: recipe.id, name: recipe.name })}>
+                        <Trash2 className="w-3 h-3 mr-2" />Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </motion.div>
-            );
-          })}
+            )
+          })
+          )}
         </div>
       </div>
+
+      <FormDialog
+        open={formOpen}
+        onClose={handleCloseForm}
+        title={editRecipe ? 'Edit Recipe' : 'Create Recipe'}
+        onSubmit={handleSubmit}
+        isSubmitting={createMutation.isPending || updateMutation.isPending}
+        isValid={isValid}
+      >
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label>Recipe Code *</Label>
+            <Input value={form.code} onChange={e => setForm(v => ({ ...v, code: e.target.value }))} className="mt-1" placeholder="RCP-001" />
+          </div>
+          <div>
+            <Label>Version *</Label>
+            <Input value={form.version} onChange={e => setForm(v => ({ ...v, version: e.target.value }))} className="mt-1" placeholder="v1.0" />
+          </div>
+          <div className="col-span-2">
+            <Label>Recipe Name *</Label>
+            <Input value={form.name} onChange={e => setForm(v => ({ ...v, name: e.target.value }))} className="mt-1" />
+          </div>
+          <div className="col-span-2">
+            <Label className="flex items-center gap-1.5"><Package size={11} className="text-muted-foreground" />Product / SKU *</Label>
+            <Select value={form.product} onValueChange={v => setForm(f => ({ ...f, product: v }))}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select a product..." /></SelectTrigger>
+              <SelectContent className="max-h-60">
+                {skus.length === 0
+                  ? <SelectItem value="_none" disabled>No products available</SelectItem>
+                  : skus.map(sku => (
+                    <SelectItem key={sku.id} value={sku.name}>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-medium">{sku.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{sku.itemNumber ?? sku.code}{sku.brand ? ` · ${sku.brand}` : ''}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Status *</Label>
+            <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v as any }))}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DRAFT">Draft</SelectItem>
+                <SelectItem value="ACTIVE">Active</SelectItem>
+                <SelectItem value="LOCKED">Locked</SelectItem>
+                <SelectItem value="ARCHIVED">Archived</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Cycle Time (s) *</Label>
+            <Input type="number" value={form.cycleTime} onChange={e => setForm(v => ({ ...v, cycleTime: e.target.value }))} className="mt-1" />
+          </div>
+          <div>
+            <Label>Expected Yield (%)</Label>
+            <Input type="number" value={form.yieldPct} onChange={e => setForm(v => ({ ...v, yieldPct: e.target.value }))} className="mt-1" />
+          </div>
+          <div>
+            <Label>Steps *</Label>
+            <Input type="number" value={form.steps} onChange={e => setForm(v => ({ ...v, steps: e.target.value }))} className="mt-1" />
+          </div>
+          <div>
+            <Label>Materials</Label>
+            <Input type="number" value={form.materials} onChange={e => setForm(v => ({ ...v, materials: e.target.value }))} className="mt-1" />
+          </div>
+        </div>
+      </FormDialog>
+
+      <DeleteDialog
+        open={!!deleteDialog}
+        onClose={() => setDeleteDialog(null)}
+        onConfirm={() => deleteDialog && deleteMutation.mutate(deleteDialog.id)}
+        title={`Delete recipe ${deleteDialog?.name}?`}
+        description="This will permanently delete this recipe and all related data."
+        isDeleting={deleteMutation.isPending}
+      />
     </div>
-  );
+  )
 }

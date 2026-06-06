@@ -1,118 +1,141 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Building2,
-  MapPin,
-  Layers,
-  Cpu,
-  Activity,
-  ChevronRight,
-  ChevronDown,
-  Circle,
+  Building2, Layers, Cpu, Activity, ChevronRight, ChevronDown, Circle,
+  Plus, Pencil, Trash2, MoreVertical, X, Settings, AlertTriangle,
 } from 'lucide-react';
-import { useState } from 'react';
-import { apiClient } from '@/services/api.client';
+import { api } from '@/services/api.client';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { toast } from '@/components/ui/use-toast';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuTrigger, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 
 interface HierarchyNode {
   id: string;
   name: string;
-  type: 'enterprise' | 'site' | 'area' | 'workcell' | 'equipment';
-  status?: string;
+  type: 'FACTORY' | 'AREA' | 'PRODUCTION_LINE' | 'MACHINE';
+  code?: string;
+  machineType?: string;
+  state?: string;
+  oee?: number;
   children?: HierarchyNode[];
-  metadata?: Record<string, string | number>;
 }
 
-const typeConfig = {
-  enterprise: { icon: Building2, color: 'text-brand-400', bg: 'bg-brand-500/20', label: 'Enterprise' },
-  site: { icon: MapPin, color: 'text-purple-400', bg: 'bg-purple-500/20', label: 'Site' },
-  area: { icon: Layers, color: 'text-blue-400', bg: 'bg-blue-500/20', label: 'Area' },
-  workcell: { icon: Activity, color: 'text-cyan-400', bg: 'bg-cyan-500/20', label: 'Work Cell' },
-  equipment: { icon: Cpu, color: 'text-green-400', bg: 'bg-green-500/20', label: 'Equipment' },
+interface Area { id: string; name: string; code: string; type: string }
+interface Line { id: string; name: string; code: string; type: string; areaId: string }
+
+const TYPE_CFG = {
+  FACTORY:         { icon: Building2, color: 'text-brand-400',  bg: 'bg-brand-500/20',  label: 'Factory'         },
+  AREA:            { icon: Layers,    color: 'text-blue-400',   bg: 'bg-blue-500/20',   label: 'Area'            },
+  PRODUCTION_LINE: { icon: Activity,  color: 'text-cyan-400',   bg: 'bg-cyan-500/20',   label: 'Production Line' },
+  MACHINE:         { icon: Cpu,       color: 'text-green-400',  bg: 'bg-green-500/20',  label: 'Machine'         },
+} as const;
+
+const STATE_COLORS: Record<string, string> = {
+  RUNNING: 'text-green-400', IDLE: 'text-amber-400', FAULT: 'text-red-400',
+  MAINTENANCE: 'text-blue-400', OFFLINE: 'text-gray-400',
 };
 
-const statusColors: Record<string, string> = {
-  RUNNING: 'text-green-400',
-  IDLE: 'text-amber-400',
-  FAULT: 'text-red-400',
-  MAINTENANCE: 'text-blue-400',
-  OFFLINE: 'text-gray-400',
+const AREA_TYPES = ['MAKING', 'PACKING', 'FILLING', 'UTILITY', 'WAREHOUSE', 'LABORATORY', 'OFFICE'];
+const LINE_TYPES = ['PACKING', 'FILLING', 'MAKING', 'BLOW_MOLDING', 'BLOW_FILM', 'AEROSOL', 'CUTTING_SEALING', 'UTILITY'];
+const MACHINE_TYPES = [
+  'MACHINE', 'FILLING_MACHINE', 'CARTONING_MACHINE', 'CHECKWEIGHER', 'ROBOT', 'WRAPPING_MACHINE',
+  'PALLETIZER', 'BLOW_MOLDING', 'CONVEYOR', 'COMPRESSOR', 'BOILER', 'TRANSFORMER',
+  'CHILLER', 'PUMP', 'MIXER', 'REACTOR', 'SENSOR', 'GATEWAY', 'HMI',
+];
+const CRITICALITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+
+type NodeType = 'AREA' | 'PRODUCTION_LINE' | 'MACHINE';
+
+const EMPTY_FORM = {
+  type: 'MACHINE' as NodeType,
+  name: '', code: '',
+  areaType: 'PACKING', lineType: 'PACKING',
+  machineType: 'MACHINE', criticality: 'MEDIUM',
+  areaId: '__none__', lineId: '__none__',
+  manufacturer: '', designCapacity: '',
 };
 
-function TreeNode({ node, depth = 0 }: { node: HierarchyNode; depth?: number }) {
+function TreeNode({
+  node, depth = 0, onEdit, onDelete,
+}: { node: HierarchyNode; depth?: number; onEdit: (n: HierarchyNode) => void; onDelete: (n: HierarchyNode) => void }) {
   const [expanded, setExpanded] = useState(depth < 2);
-  const config = typeConfig[node.type];
-  const Icon = config.icon;
+  const cfg = TYPE_CFG[node.type] ?? TYPE_CFG.MACHINE;
+  const Icon = cfg.icon;
   const hasChildren = node.children && node.children.length > 0;
 
   return (
     <div>
-      <motion.div
-        initial={{ opacity: 0, x: -10 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: depth * 0.05 }}
-        className={cn(
-          'flex items-center gap-2 py-2 px-3 rounded-lg cursor-pointer group',
-          'hover:bg-white/5 transition-colors',
-        )}
-        style={{ paddingLeft: `${depth * 20 + 12}px` }}
+      <div
+        className={cn('flex items-center gap-2 py-2 px-3 rounded-lg group cursor-pointer hover:bg-white/5 transition-colors')}
+        style={{ paddingLeft: `${depth * 24 + 12}px` }}
         onClick={() => hasChildren && setExpanded(!expanded)}
       >
-        {hasChildren ? (
-          <span className="text-muted-foreground w-4">
-            {expanded ? (
-              <ChevronDown className="w-3 h-3" />
-            ) : (
-              <ChevronRight className="w-3 h-3" />
-            )}
-          </span>
-        ) : (
-          <span className="w-4" />
-        )}
+        <span className="text-muted-foreground w-4 shrink-0">
+          {hasChildren
+            ? expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />
+            : null}
+        </span>
 
-        <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center', config.bg)}>
-          <Icon className={cn('w-3.5 h-3.5', config.color)} />
+        <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center shrink-0', cfg.bg)}>
+          <Icon className={cn('w-3.5 h-3.5', cfg.color)} />
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium truncate">{node.name}</span>
-            <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4">
-              {config.label}
-            </Badge>
+            <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 shrink-0">{cfg.label}</Badge>
+            {node.code && <span className="text-[10px] font-mono text-muted-foreground">{node.code}</span>}
           </div>
-          {node.metadata && (
-            <div className="flex gap-3 mt-0.5">
-              {Object.entries(node.metadata).map(([k, v]) => (
-                <span key={k} className="text-[11px] text-muted-foreground">
-                  {k}: {v}
-                </span>
-              ))}
-            </div>
+          {node.machineType && (
+            <div className="text-[11px] text-muted-foreground mt-0.5">{node.machineType.replace(/_/g, ' ')}</div>
           )}
         </div>
 
-        {node.status && (
-          <div className="flex items-center gap-1.5">
-            <Circle
-              className={cn('w-2 h-2 fill-current', statusColors[node.status] || 'text-gray-400')}
-            />
-            <span
-              className={cn('text-xs', statusColors[node.status] || 'text-muted-foreground')}
-            >
-              {node.status}
-            </span>
+        {node.state && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Circle className={cn('w-2 h-2 fill-current', STATE_COLORS[node.state] ?? 'text-gray-400')} />
+            {node.oee != null && (
+              <span className="text-[10px] text-muted-foreground font-mono">{node.oee.toFixed(1)}%</span>
+            )}
           </div>
         )}
-      </motion.div>
+
+        {node.type !== 'FACTORY' && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild onClick={e => e.stopPropagation()}>
+              <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 shrink-0">
+                <MoreVertical className="w-3 h-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="text-xs">
+              <DropdownMenuItem onClick={e => { e.stopPropagation(); onEdit(node); }}>
+                <Pencil className="w-3 h-3 mr-2" /> Edit
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={e => { e.stopPropagation(); onDelete(node); }} className="text-destructive">
+                <Trash2 className="w-3 h-3 mr-2" /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
 
       {expanded && hasChildren && (
         <div>
-          {node.children!.map((child) => (
-            <TreeNode key={child.id} node={child} depth={depth + 1} />
+          {node.children!.map(child => (
+            <TreeNode key={child.id} node={child} depth={depth + 1} onEdit={onEdit} onDelete={onDelete} />
           ))}
         </div>
       )}
@@ -120,139 +143,146 @@ function TreeNode({ node, depth = 0 }: { node: HierarchyNode; depth?: number }) 
   );
 }
 
-const MOCK_HIERARCHY: HierarchyNode = {
-  id: '1',
-  name: 'Industry360 Manufacturing',
-  type: 'enterprise',
-  metadata: { Sites: 1, Areas: 3, Equipment: 8 },
-  children: [
-    {
-      id: '2',
-      name: 'Riyadh Plant',
-      type: 'site',
-      metadata: { Areas: 3, 'Work Cells': 5 },
-      children: [
-        {
-          id: '3',
-          name: 'Mixing Area',
-          type: 'area',
-          metadata: { Cells: 2, Equipment: 3 },
-          children: [
-            {
-              id: '5',
-              name: 'Mixing Cell 01',
-              type: 'workcell',
-              children: [
-                { id: '10', name: 'Mixer M-101', type: 'equipment', status: 'RUNNING', metadata: { OEE: '87.3%', 'Cycle Time': '45s' } },
-                { id: '11', name: 'Mixer M-102', type: 'equipment', status: 'IDLE', metadata: { OEE: '0%', 'Last Run': '2h ago' } },
-              ],
-            },
-            {
-              id: '6',
-              name: 'Mixing Cell 02',
-              type: 'workcell',
-              children: [
-                { id: '12', name: 'Blender B-201', type: 'equipment', status: 'RUNNING', metadata: { OEE: '91.2%' } },
-              ],
-            },
-          ],
-        },
-        {
-          id: '4',
-          name: 'Filling Area',
-          type: 'area',
-          metadata: { Cells: 2, Equipment: 3 },
-          children: [
-            {
-              id: '7',
-              name: 'Filling Line 01',
-              type: 'workcell',
-              children: [
-                { id: '13', name: 'Filler F-301', type: 'equipment', status: 'RUNNING', metadata: { OEE: '78.5%' } },
-                { id: '14', name: 'Capper C-302', type: 'equipment', status: 'FAULT', metadata: { Fault: 'Jam detected' } },
-              ],
-            },
-            {
-              id: '8',
-              name: 'Filling Line 02',
-              type: 'workcell',
-              children: [
-                { id: '15', name: 'Filler F-401', type: 'equipment', status: 'MAINTENANCE' },
-              ],
-            },
-          ],
-        },
-        {
-          id: '9',
-          name: 'Packaging Area',
-          type: 'area',
-          metadata: { Cells: 1, Equipment: 2 },
-          children: [
-            {
-              id: '16',
-              name: 'Packaging Line 01',
-              type: 'workcell',
-              children: [
-                { id: '17', name: 'Wrapper W-501', type: 'equipment', status: 'RUNNING', metadata: { OEE: '82.1%' } },
-                { id: '18', name: 'Palletizer P-502', type: 'equipment', status: 'RUNNING', metadata: { OEE: '94.7%' } },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ],
-};
-
-const SUMMARY_STATS = [
-  { label: 'Total Equipment', value: '8', icon: Cpu, color: 'text-brand-400' },
-  { label: 'Running', value: '5', icon: Activity, color: 'text-green-400' },
-  { label: 'In Fault', value: '1', icon: Circle, color: 'text-red-400' },
-  { label: 'In Maintenance', value: '1', icon: Activity, color: 'text-blue-400' },
-];
-
 export function HierarchyView() {
-  const { data: tree } = useQuery({
+  const qc = useQueryClient();
+  const [formOpen, setFormOpen] = useState(false);
+  const [editNode, setEditNode] = useState<HierarchyNode | null>(null);
+  const [deleteNode, setDeleteNode] = useState<HierarchyNode | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+
+  const { data: tree, isLoading } = useQuery({
     queryKey: ['hierarchy-tree'],
-    queryFn: () => apiClient.get('/hierarchy/tree').then((r) => r.data.data),
-    placeholderData: MOCK_HIERARCHY,
+    queryFn: () => api.get('/hierarchy/tree'),
+    staleTime: 30_000,
   });
 
-  const hierarchyData = tree || MOCK_HIERARCHY;
+  const { data: areasData } = useQuery({
+    queryKey: ['hierarchy', 'areas'],
+    queryFn: () => api.get('/hierarchy/areas'),
+    staleTime: 60_000,
+    enabled: formOpen,
+  });
+
+  const { data: linesData } = useQuery({
+    queryKey: ['hierarchy', 'lines', form.areaId],
+    queryFn: () => api.get('/hierarchy/lines', { params: { areaId: form.areaId || undefined } }),
+    staleTime: 60_000,
+    enabled: formOpen && form.type === 'MACHINE',
+  });
+
+  const areas: Area[] = (areasData as any) ?? [];
+  const lines: Line[] = (linesData as any) ?? [];
+
+  const createMutation = useMutation({
+    mutationFn: (dto: any) => api.post('/hierarchy', dto),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hierarchy-tree'] });
+      qc.invalidateQueries({ queryKey: ['hierarchy', 'areas'] });
+      qc.invalidateQueries({ queryKey: ['hierarchy', 'lines'] });
+      toast({ title: 'Node created successfully' });
+      setFormOpen(false);
+      setForm(EMPTY_FORM);
+    },
+    onError: (e: any) => toast({ title: 'Failed to create node', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: any }) => api.patch(`/hierarchy/${id}`, dto),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hierarchy-tree'] });
+      qc.invalidateQueries({ queryKey: ['hierarchy', 'areas'] });
+      toast({ title: 'Node updated successfully' });
+      setEditNode(null);
+    },
+    onError: (e: any) => toast({ title: 'Failed to update node', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: ({ id, type }: { id: string; type: string }) =>
+      api.delete(`/hierarchy/${id}`, { data: { type } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hierarchy-tree'] });
+      toast({ title: 'Node removed from hierarchy' });
+      setDeleteNode(null);
+    },
+    onError: (e: any) => toast({ title: 'Delete failed', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const openCreate = () => {
+    setEditNode(null);
+    setForm(EMPTY_FORM);
+    setFormOpen(true);
+  };
+
+  const openEdit = (node: HierarchyNode) => {
+    setEditNode(node);
+    setForm({
+      ...EMPTY_FORM,
+      type: node.type as NodeType,
+      name: node.name,
+      code: node.code ?? '',
+      machineType: node.machineType ?? 'MACHINE',
+    });
+    setFormOpen(true);
+  };
+
+  const none = '__none__';
+  const val = (v: string) => (v === none || v === '' ? undefined : v);
+
+  const handleSubmit = () => {
+    const dto: any = { type: form.type, name: form.name };
+    if (!editNode) dto.code = form.code;
+
+    if (form.type === 'AREA') {
+      dto.areaType = form.areaType;
+    } else if (form.type === 'PRODUCTION_LINE') {
+      dto.lineType = form.lineType;
+      dto.areaId = val(form.areaId);
+    } else if (form.type === 'MACHINE') {
+      dto.machineType = form.machineType;
+      dto.criticality = form.criticality;
+      if (val(form.areaId)) dto.areaId = val(form.areaId);
+      if (val(form.lineId)) dto.lineId = val(form.lineId);
+      if (form.manufacturer) dto.manufacturer = form.manufacturer;
+      if (form.designCapacity) dto.designCapacity = form.designCapacity;
+    }
+
+    if (editNode) {
+      updateMutation.mutate({ id: editNode.id, dto });
+    } else {
+      createMutation.mutate(dto);
+    }
+  };
+
+  const isValid = !!form.name && (editNode ? true : !!form.code) &&
+    (form.type !== 'PRODUCTION_LINE' || (!!form.areaId && form.areaId !== none));
+
+  const nodes: HierarchyNode[] = Array.isArray(tree)
+    ? tree as HierarchyNode[]
+    : tree ? [tree as HierarchyNode] : [];
+
+  const nodeTypeLabel = (t: NodeType) => TYPE_CFG[t]?.label ?? t;
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Plant Hierarchy</h1>
-        <p className="text-muted-foreground text-sm mt-1">ISA-95 enterprise hierarchy structure</p>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Plant Hierarchy</h1>
+          <p className="text-muted-foreground text-sm mt-1">ISA-95 enterprise hierarchy structure</p>
+        </div>
+        <Button onClick={openCreate} className="gap-2">
+          <Plus className="w-4 h-4" /> Add Node
+        </Button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {SUMMARY_STATS.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div key={stat.label} className="glass-card rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center">
-                  <Icon className={cn('w-4 h-4', stat.color)} />
-                </div>
-                <div>
-                  <div className="text-2xl font-bold">{stat.value}</div>
-                  <div className="text-xs text-muted-foreground">{stat.label}</div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
+      {/* Tree */}
       <div className="glass-card rounded-xl p-4">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            Hierarchy Tree
-          </h2>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            {Object.entries(typeConfig).map(([type, cfg]) => {
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Hierarchy Tree</h2>
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            {(Object.keys(TYPE_CFG) as (keyof typeof TYPE_CFG)[]).map(type => {
+              const cfg = TYPE_CFG[type];
               const Icon = cfg.icon;
               return (
                 <div key={type} className="flex items-center gap-1.5">
@@ -263,8 +293,231 @@ export function HierarchyView() {
             })}
           </div>
         </div>
-        <TreeNode node={hierarchyData} depth={0} />
+
+        {isLoading ? (
+          <div className="space-y-2">
+            {Array.from({ length: 6 }).map((_, i) => <div key={i} className="shimmer h-10 rounded" />)}
+          </div>
+        ) : nodes.length === 0 ? (
+          <div className="text-center py-16 text-muted-foreground">
+            <Building2 className="w-12 h-12 mx-auto mb-3 opacity-20" />
+            <p className="text-sm">No hierarchy configured yet</p>
+          </div>
+        ) : (
+          nodes.map(node => (
+            <TreeNode key={node.id} node={node} depth={0} onEdit={openEdit} onDelete={setDeleteNode} />
+          ))
+        )}
       </div>
+
+      {/* Create / Edit Dialog */}
+      <Dialog open={formOpen} onOpenChange={open => { if (!open) { setFormOpen(false); setEditNode(null); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="w-4 h-4 text-brand-400" />
+              {editNode ? `Edit ${nodeTypeLabel(editNode.type as NodeType)}` : 'Add Hierarchy Node'}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {editNode
+                ? `Update the details for "${editNode.name}".`
+                : 'Add an Area, Production Line, or Machine to your plant hierarchy.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            {/* Node Type — only when creating */}
+            {!editNode && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Node Type <span className="text-destructive">*</span></Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['AREA', 'PRODUCTION_LINE', 'MACHINE'] as NodeType[]).map(t => {
+                    const cfg = TYPE_CFG[t];
+                    const Icon = cfg.icon;
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, type: t }))}
+                        className={cn(
+                          'flex flex-col items-center gap-1.5 p-3 rounded-xl border text-xs font-medium transition-all',
+                          form.type === t
+                            ? 'border-brand-500 bg-brand-500/10 text-brand-400'
+                            : 'border-border hover:border-border/70 text-muted-foreground hover:bg-muted/30',
+                        )}
+                      >
+                        <Icon className={cn('w-5 h-5', form.type === t ? cfg.color : '')} />
+                        {cfg.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Common: Name */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className={cn('space-y-1.5', !editNode ? '' : 'col-span-2')}>
+                <Label className="text-xs font-medium">Name <span className="text-destructive">*</span></Label>
+                <Input
+                  value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder={form.type === 'AREA' ? 'e.g. Packing Area' : form.type === 'PRODUCTION_LINE' ? 'e.g. Packing Line 1' : 'e.g. Big Betti'}
+                  className="h-9"
+                />
+              </div>
+
+              {!editNode && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Code <span className="text-destructive">*</span></Label>
+                  <Input
+                    value={form.code}
+                    onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+                    placeholder={form.type === 'AREA' ? 'PACKING' : form.type === 'PRODUCTION_LINE' ? 'PL-01' : 'M1-001'}
+                    className="h-9 font-mono"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* AREA specific */}
+            {form.type === 'AREA' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Area Type</Label>
+                <Select value={form.areaType} onValueChange={v => setForm(f => ({ ...f, areaType: v }))}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {AREA_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* PRODUCTION_LINE specific */}
+            {form.type === 'PRODUCTION_LINE' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Area <span className="text-destructive">*</span></Label>
+                  <Select value={form.areaId} onValueChange={v => setForm(f => ({ ...f, areaId: v }))}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Select area..." /></SelectTrigger>
+                    <SelectContent>
+                      {areas.length === 0
+                        ? <SelectItem value="_" disabled>No areas available</SelectItem>
+                        : areas.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Line Type</Label>
+                  <Select value={form.lineType} onValueChange={v => setForm(f => ({ ...f, lineType: v }))}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {LINE_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {/* MACHINE specific */}
+            {form.type === 'MACHINE' && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Machine Type</Label>
+                    <Select value={form.machineType} onValueChange={v => setForm(f => ({ ...f, machineType: v }))}>
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent className="max-h-52">
+                        {MACHINE_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Criticality</Label>
+                    <Select value={form.criticality} onValueChange={v => setForm(f => ({ ...f, criticality: v }))}>
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CRITICALITIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Area</Label>
+                    <Select value={form.areaId} onValueChange={v => setForm(f => ({ ...f, areaId: v, lineId: '__none__' }))}>
+                      <SelectTrigger className="h-9"><SelectValue placeholder="Select area..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {areas.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Production Line</Label>
+                    <Select value={form.lineId} onValueChange={v => setForm(f => ({ ...f, lineId: v }))} disabled={!form.areaId}>
+                      <SelectTrigger className="h-9"><SelectValue placeholder={form.areaId ? 'Select line...' : 'Select area first'} /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {lines.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Manufacturer</Label>
+                    <Input value={form.manufacturer} onChange={e => setForm(f => ({ ...f, manufacturer: e.target.value }))} className="h-9" placeholder="e.g. Siemens" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Design Capacity (units/hr)</Label>
+                    <Input type="number" value={form.designCapacity} onChange={e => setForm(f => ({ ...f, designCapacity: e.target.value }))} className="h-9" placeholder="e.g. 2700" />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => { setFormOpen(false); setEditNode(null); }}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!isValid || createMutation.isPending || updateMutation.isPending}
+              onClick={handleSubmit}
+            >
+              {createMutation.isPending || updateMutation.isPending
+                ? (editNode ? 'Saving...' : 'Creating...')
+                : (editNode ? 'Save Changes' : 'Create Node')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!deleteNode} onOpenChange={open => !open && setDeleteNode(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="w-4 h-4" /> Remove Node
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove <strong>{deleteNode?.name}</strong> from the hierarchy?
+              This will deactivate the node and hide it from all views.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteNode(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteMutation.isPending}
+              onClick={() => deleteNode && deleteMutation.mutate({ id: deleteNode.id, type: deleteNode.type })}
+            >
+              {deleteMutation.isPending ? 'Removing...' : 'Remove Node'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

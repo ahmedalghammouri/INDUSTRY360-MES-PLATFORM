@@ -1,7 +1,24 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  Controller, Get, Post, Patch, Delete, Body, Param, Query,
+  HttpCode, HttpStatus, ParseUUIDPipe,
+} from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery, ApiResponse } from '@nestjs/swagger';
+
 import { QualityService } from './quality.service';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { AuditLog } from '../../common/decorators/audit-log.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import {
+  CreateInspectionDto,
+  UpdateInspectionDto,
+  CreateNCRDto,
+  UpdateNCRDto,
+  UpdateNCRStatusDto,
+  CreateCAPADto,
+  UpdateCAPADto,
+  AddCAPAActionDto,
+  VerifyCAPADto,
+} from './dto/quality.dto';
 
 interface RequestUser {
   id: string;
@@ -14,41 +31,349 @@ interface RequestUser {
 export class QualityController {
   constructor(private readonly qualityService: QualityService) {}
 
+  // ────────────────────────────────────────────────────────────
+  // KPIs
+  // ────────────────────────────────────────────────────────────
+
   @Get('kpis')
   @ApiOperation({ summary: 'Get quality KPIs for current day' })
   async getKPIs(@CurrentUser() user: RequestUser) {
     return this.qualityService.getKPIs(user.factoryId);
   }
 
+  // ────────────────────────────────────────────────────────────
+  // INSPECTIONS
+  // ────────────────────────────────────────────────────────────
+
+  @Get('inspections')
+  @ApiOperation({ summary: 'List inspection results' })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'type', required: false })
+  @ApiQuery({ name: 'result', required: false })
+  @ApiQuery({ name: 'workOrderId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
+  @ApiQuery({ name: 'dateFrom', required: false })
+  @ApiQuery({ name: 'dateTo', required: false })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async findInspections(
+    @CurrentUser() user: RequestUser,
+    @Query('search') search?: string,
+    @Query('type') type?: string,
+    @Query('result') result?: string,
+    @Query('workOrderId') workOrderId?: string,
+    @Query('machineId') machineId?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+  ) {
+    return this.qualityService.findInspections(user.factoryId, {
+      search,
+      type,
+      result,
+      workOrderId,
+      machineId,
+      dateFrom,
+      dateTo,
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+    });
+  }
+
+  @Get('inspections/:id')
+  @ApiOperation({ summary: 'Get inspection by ID' })
+  async getInspectionById(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.getInspectionById(user.factoryId, id);
+  }
+
+  @Post('inspections')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_INSPECTION_CREATE')
+  @ApiOperation({ summary: 'Create a new inspection result' })
+  @ApiResponse({ status: 201 })
+  async createInspection(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateInspectionDto,
+  ) {
+    return this.qualityService.createInspection(user.factoryId, user.id, dto);
+  }
+
+  @Patch('inspections/:id')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_INSPECTION_UPDATE')
+  @ApiOperation({ summary: 'Update an inspection result' })
+  async updateInspection(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateInspectionDto,
+  ) {
+    return this.qualityService.updateInspection(user.factoryId, id, dto);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // NCRs
+  // ────────────────────────────────────────────────────────────
+
   @Get('ncr')
   @ApiOperation({ summary: 'List non-conformance reports' })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'severity', required: false })
+  @ApiQuery({ name: 'dateFrom', required: false })
+  @ApiQuery({ name: 'dateTo', required: false })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   async findNCRs(
     @CurrentUser() user: RequestUser,
     @Query('search') search?: string,
     @Query('status') status?: string,
+    @Query('severity') severity?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
   ) {
     return this.qualityService.findNCRs(user.factoryId, {
       search,
       status,
+      severity,
+      dateFrom,
+      dateTo,
       page: parseInt(page, 10),
       limit: parseInt(limit, 10),
     });
   }
 
-  @Get('inspections')
-  @ApiOperation({ summary: 'List inspection results' })
-  async findInspections(
+  @Get('ncr/:id')
+  @ApiOperation({ summary: 'Get NCR by ID with linked CAPAs' })
+  async getNCRById(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.getNCRById(user.factoryId, id);
+  }
+
+  @Post('ncr')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_NCR_CREATE')
+  @ApiOperation({ summary: 'Create a non-conformance report' })
+  @ApiResponse({ status: 201 })
+  async createNCR(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateNCRDto,
+  ) {
+    return this.qualityService.createNCR(user.factoryId, user.id, dto);
+  }
+
+  @Patch('ncr/:id')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_NCR_UPDATE')
+  @ApiOperation({ summary: 'Update NCR details' })
+  async updateNCR(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateNCRDto,
+  ) {
+    return this.qualityService.updateNCR(user.factoryId, id, dto);
+  }
+
+  @Patch('ncr/:id/status')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_NCR_STATUS')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Transition NCR workflow status (OPEN → IN_REVIEW → CAPA_PENDING → RESOLVED → CLOSED)' })
+  async updateNCRStatus(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateNCRStatusDto,
+  ) {
+    return this.qualityService.updateNCRStatus(user.factoryId, id, user.id, dto);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // CAPAs
+  // ────────────────────────────────────────────────────────────
+
+  @Get('capa')
+  @ApiOperation({ summary: 'List corrective/preventive actions' })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'type', required: false })
+  @ApiQuery({ name: 'ncrId', required: false })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async findCAPAs(
     @CurrentUser() user: RequestUser,
     @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('type') type?: string,
+    @Query('ncrId') ncrId?: string,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
   ) {
-    return this.qualityService.findInspections(user.factoryId, {
+    return this.qualityService.findCAPAs(user.factoryId, {
       search,
+      status,
+      type,
+      ncrId,
       page: parseInt(page, 10),
       limit: parseInt(limit, 10),
+    });
+  }
+
+  @Get('capa/:id')
+  @ApiOperation({ summary: 'Get CAPA by ID with actions' })
+  async getCAPAById(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.getCAPAById(user.factoryId, id);
+  }
+
+  @Post('capa')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_CAPA_CREATE')
+  @ApiOperation({ summary: 'Create a corrective/preventive action (optionally linked to NCR)' })
+  @ApiResponse({ status: 201 })
+  async createCAPA(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateCAPADto,
+  ) {
+    return this.qualityService.createCAPA(user.factoryId, user.id, dto);
+  }
+
+  @Patch('capa/:id')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_CAPA_UPDATE')
+  @ApiOperation({ summary: 'Update CAPA details' })
+  async updateCAPA(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateCAPADto,
+  ) {
+    return this.qualityService.updateCAPA(user.factoryId, id, dto);
+  }
+
+  @Post('capa/:id/actions')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_CAPA_ACTION_ADD')
+  @ApiOperation({ summary: 'Add an action item to a CAPA' })
+  async addCAPAAction(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddCAPAActionDto,
+  ) {
+    return this.qualityService.addCAPAAction(user.factoryId, id, dto);
+  }
+
+  @Patch('capa/:capaId/actions/:actionId/complete')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_CAPA_ACTION_COMPLETE')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark a CAPA action as completed' })
+  async completeCAPAAction(
+    @CurrentUser() user: RequestUser,
+    @Param('capaId', ParseUUIDPipe) capaId: string,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+  ) {
+    return this.qualityService.completeCAPAAction(user.factoryId, capaId, actionId);
+  }
+
+  @Patch('capa/:id/verify')
+  @RequirePermissions('quality:approve')
+  @AuditLog('QUALITY_CAPA_VERIFY')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify CAPA effectiveness (all actions must be completed)' })
+  async verifyCAPA(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerifyCAPADto,
+  ) {
+    return this.qualityService.verifyCAPA(user.factoryId, id, user.id, dto);
+  }
+
+  @Patch('capa/:id/close')
+  @RequirePermissions('quality:approve')
+  @AuditLog('QUALITY_CAPA_CLOSE')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Close a verified CAPA' })
+  async closeCAPA(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.closeCAPA(user.factoryId, id);
+  }
+
+  @Delete('capa/:id')
+  @RequirePermissions('quality:write')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete an open CAPA' })
+  async deleteCAPA(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.deleteCAPA(user.factoryId, id);
+  }
+
+  @Delete('ncr/:id')
+  @RequirePermissions('quality:write')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete an open NCR' })
+  async deleteNCR(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.deleteNCR(user.factoryId, id);
+  }
+
+  @Delete('inspections/:id')
+  @RequirePermissions('quality:write')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete an inspection result' })
+  async deleteInspection(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.deleteInspection(user.factoryId, id);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // SPC — STATISTICAL PROCESS CONTROL
+  // ────────────────────────────────────────────────────────────
+
+  @Get('spc')
+  @ApiOperation({ summary: 'List SPC parameters (quality plan parameters with control limits)' })
+  @ApiQuery({ name: 'machineId', required: false })
+  @ApiQuery({ name: 'skuId', required: false })
+  async getSPCParameters(
+    @CurrentUser() user: RequestUser,
+    @Query('machineId') machineId?: string,
+    @Query('skuId') skuId?: string,
+  ) {
+    return this.qualityService.getSPCParameters(user.factoryId, { machineId, skuId });
+  }
+
+  @Get('spc/measurements')
+  @ApiOperation({ summary: 'Get SPC measurement data for a parameter' })
+  @ApiQuery({ name: 'parameterId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getSPCMeasurements(
+    @CurrentUser() user: RequestUser,
+    @Query('parameterId') parameterId?: string,
+    @Query('machineId') machineId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('limit') limit = '50',
+  ) {
+    return this.qualityService.getSPCMeasurements(user.factoryId, {
+      parameterId, machineId, from, to, limit: parseInt(limit, 10),
     });
   }
 }

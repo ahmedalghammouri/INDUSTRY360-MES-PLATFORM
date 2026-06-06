@@ -23,7 +23,7 @@ export function IotStreamsView() {
     refetchInterval: 30_000,
   });
 
-  const streamList = streams?.data ?? [];
+  const streamList = (streams as any)?.data ?? [];
 
   return (
     <div className="flex flex-col h-full">
@@ -48,10 +48,10 @@ export function IotStreamsView() {
 
       <div className="flex-1 overflow-auto p-6 space-y-5">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <KPICard title="Total Streams" value={kpis?.total ?? 0} isLoading={isLoading} />
-          <KPICard title="Active" value={kpis?.active ?? 0} colorMode="success" isLoading={isLoading} />
-          <KPICard title="Paused" value={kpis?.paused ?? 0} colorMode="warning" isLoading={isLoading} />
-          <KPICard title="Messages/sec" value={kpis?.messagesPerSec ?? 0} isLoading={isLoading} />
+          <KPICard title="Total Streams" value={(kpis as any)?.total ?? 0} isLoading={isLoading} />
+          <KPICard title="Active" value={(kpis as any)?.active ?? 0} colorMode="default" isLoading={isLoading} />
+          <KPICard title="Paused" value={(kpis as any)?.paused ?? 0} colorMode="alarm" isLoading={isLoading} />
+          <KPICard title="Messages/sec" value={(kpis as any)?.messagesPerSec ?? 0} isLoading={isLoading} />
         </div>
 
         <div className="industrial-card p-4">

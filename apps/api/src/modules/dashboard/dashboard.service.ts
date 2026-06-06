@@ -13,15 +13,20 @@ export class DashboardService {
       this.getActiveAlarms(factoryId),
     ]);
 
+    const [productionTrend, downtimePareto, shiftSummary] = await Promise.all([
+      this.getProductionTrend(factoryId),
+      this.getDowntimePareto(factoryId),
+      this.getCurrentShiftSummary(factoryId),
+    ]);
+
     return {
       kpis,
       machines,
       productionStatus,
       alarms,
-      productionTrend: this.generateProductionTrend(),
-      qualityTrend: this.generateQualityTrend(),
-      downtimePareto: this.generateDowntimePareto(),
-      shiftSummary: await this.getCurrentShiftSummary(factoryId),
+      productionTrend,
+      downtimePareto,
+      shiftSummary,
     };
   }
 
@@ -176,43 +181,51 @@ export class DashboardService {
     };
   }
 
-  private generateProductionTrend() {
+  private async getProductionTrend(factoryId: string | null) {
+    const factoryFilter = factoryId ? { factoryId } : {};
     const hours = Array.from({ length: 12 }, (_, i) => {
-      const h = new Date();
-      h.setHours(h.getHours() - (11 - i));
-      return `${h.getHours()}:00`;
+      const d = new Date();
+      d.setHours(d.getHours() - (11 - i), 0, 0, 0);
+      return d;
     });
-    return hours.map((time) => ({
-      time,
-      actual: 80 + Math.round(Math.random() * 40),
-      target: 100,
-      efficiency: 75 + Math.round(Math.random() * 20),
-    }));
+    return Promise.all(
+      hours.map(async (h) => {
+        const next = new Date(h.getTime() + 3_600_000);
+        const completed = await this.prisma.workOrder.count({
+          where: { ...factoryFilter, status: 'COMPLETED', actualEnd: { gte: h, lt: next } },
+        });
+        return { time: `${h.getHours()}:00`, actual: completed, target: 1 };
+      }),
+    );
   }
 
-  private generateQualityTrend() {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days.map((time) => ({
-      time,
-      fpy: 95 + Math.random() * 4,
-      rework: 1 + Math.random() * 2,
-      scrap: 0.2 + Math.random() * 0.8,
-    }));
-  }
+  private async getDowntimePareto(factoryId: string | null) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
 
-  private generateDowntimePareto() {
-    const reasons = [
-      { reason: 'Mechanical Failure', duration: 145, frequency: 12 },
-      { reason: 'Material Shortage', duration: 98, frequency: 8 },
-      { reason: 'Operator Break', duration: 72, frequency: 24 },
-      { reason: 'Changeover', duration: 54, frequency: 6 },
-      { reason: 'Quality Hold', duration: 38, frequency: 4 },
-    ];
-    const total = reasons.reduce((s, r) => s + r.duration, 0);
+    const events = await this.prisma.downtimeEvent.findMany({
+      where: { ...factoryFilter, startTime: { gte: dayStart }, durationMinutes: { not: null } },
+      select: { category: true, durationMinutes: true },
+    });
+
+    const grouped: Record<string, { duration: number; frequency: number }> = {};
+    for (const e of events) {
+      const key = e.category ?? 'UNKNOWN';
+      if (!grouped[key]) grouped[key] = { duration: 0, frequency: 0 };
+      grouped[key].duration += e.durationMinutes ?? 0;
+      grouped[key].frequency += 1;
+    }
+
+    const sorted = Object.entries(grouped)
+      .map(([reason, v]) => ({ reason, ...v }))
+      .sort((a, b) => b.duration - a.duration);
+
+    const total = sorted.reduce((s, r) => s + r.duration, 0);
     let cum = 0;
-    return reasons.map((r) => {
+    return sorted.map((r) => {
       cum += r.duration;
-      return { ...r, cumulative: Math.round((cum / total) * 100) };
+      return { ...r, cumulative: total > 0 ? Math.round((cum / total) * 100) : 0 };
     });
   }
 

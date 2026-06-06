@@ -186,3 +186,19 @@ INDUSTRY360 MES PLATFORM/
 ---
 
 *© 2026 INDUSTRY360 — Enterprise Manufacturing Intelligence for Saudi Arabia*
+
+mes-api  |     mohammed.yousef@sidco.com.sa  → PRODUCTION_SUPERVISOR
+mes-api  |     operator@sidco.com.sa          → OPERATOR
+mes-api  |     maintenance@sidco.com.sa       → MAINTENANCE_TECHNICIAN
+mes-api  |     quality@sidco.com.sa           → QUALITY_ENGINEER
+mes-api  | 
+mes-api  |   Platform: http://localhost:3000
+mes-api  |   API Docs: http://localhost:3001/api/docs
+mes-api  | 
+mes-api  | 🌱  The seed command has been executed.
+mes-api  | 
+mes-api  | > @industry360/api@1.0.0 start:dev /app
+mes-api  | > nest start --watch
+mes-api  | 
+mes-api  | [2J[3J[H[[90m9:11:58 PM[0m] Starting compilation in watch mode...
+mes-api  |

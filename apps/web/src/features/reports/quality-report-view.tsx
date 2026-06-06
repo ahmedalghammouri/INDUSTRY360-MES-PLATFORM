@@ -38,10 +38,10 @@ export function QualityReportView() {
 
       <div className="flex-1 overflow-auto p-6 space-y-5">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <KPICard title="First Pass Yield" value={reportData?.fpy ?? 0} unit="%" colorMode="success" isLoading={isLoading} />
-          <KPICard title="Defect Rate" value={reportData?.defectRate ?? 0} unit="%" colorMode="error" isLoading={isLoading} />
-          <KPICard title="Inspections" value={reportData?.inspections ?? 0} isLoading={isLoading} />
-          <KPICard title="NCRs" value={reportData?.ncrs ?? 0} colorMode="warning" isLoading={isLoading} />
+          <KPICard title="First Pass Yield" value={(reportData as any)?.fpy ?? 0} unit="%" colorMode="default" isLoading={isLoading} />
+          <KPICard title="Defect Rate" value={(reportData as any)?.defectRate ?? 0} unit="%" colorMode="alarm" isLoading={isLoading} />
+          <KPICard title="Inspections" value={(reportData as any)?.inspections ?? 0} isLoading={isLoading} />
+          <KPICard title="NCRs" value={(reportData as any)?.ncrs ?? 0} colorMode="alarm" isLoading={isLoading} />
         </div>
 
         <div className="industrial-card p-4">

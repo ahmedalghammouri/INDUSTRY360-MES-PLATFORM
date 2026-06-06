@@ -1,10 +1,13 @@
 import {
   Injectable, UnauthorizedException, BadRequestException, Logger, ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
 
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import type { User } from '@prisma/client';
 
@@ -30,6 +33,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // Validates credentials — factoryCode optional (SUPER_ADMIN can omit or specify any)
@@ -117,7 +121,7 @@ export class AuthService {
   async refreshTokens(refreshToken: string): Promise<AuthTokens & { user: object }> {
     try {
       const payload = this.jwtService.verify<JwtPayload>(refreshToken, {
-        secret: this.config.get<string>('jwt.refreshSecret'),
+        secret: this.config.get<string>('JWT_REFRESH_SECRET') ?? this.config.get<string>('jwt.refreshSecret'),
       });
 
       const sessions = await this.prisma.userSession.findMany({
@@ -147,7 +151,7 @@ export class AuthService {
         where: { id: validSession.id },
         data: {
           refreshToken: await bcrypt.hash(tokens.refreshToken, 6),
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         },
       });
 
@@ -180,6 +184,78 @@ export class AuthService {
     await this.prisma.userSession.updateMany({ where: { userId }, data: { isRevoked: true } });
   }
 
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.prisma.user.findFirst({
+      where: { email: email.toLowerCase(), deletedAt: null, isActive: true },
+    });
+
+    // Always return success to prevent user enumeration attacks
+    if (!user) return;
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetToken: hashedToken,
+        passwordResetExpiry: expiry,
+      },
+    });
+
+    const baseUrl = this.config.get<string>('APP_URL', 'http://localhost:3000');
+    const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
+
+    this.logger.log(`Password reset requested for ${email}, reset URL generated`);
+
+    // Import lazily to avoid circular dep — notifications service sends the email
+    this.eventEmitter.emit('auth.password-reset.requested', {
+      email: user.email,
+      name: user.name,
+      resetToken,
+      resetUrl,
+    });
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        passwordResetToken: hashedToken,
+        passwordResetExpiry: { gt: new Date() },
+        deletedAt: null,
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired password reset token');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        passwordResetToken: null,
+        passwordResetExpiry: null,
+        passwordChangedAt: new Date(),
+        failedLoginAttempts: 0,
+        lockedAt: null,
+      },
+    });
+
+    // Revoke all sessions for security
+    await this.prisma.userSession.updateMany({
+      where: { userId: user.id },
+      data: { isRevoked: true },
+    });
+
+    this.logger.log(`Password reset completed for user ${user.email}`);
+  }
+
   // Returns list of factories available for login (for factory selector population)
   async getFactoriesForSelector(): Promise<Array<{
     id: string; code: string; name: string; nameAr: string | null;
@@ -209,11 +285,11 @@ export class AuthService {
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
-        expiresIn: this.config.get<string>('jwt.expiresIn', '15m'),
+        expiresIn: this.config.get<string>('JWT_EXPIRES_IN') ?? this.config.get<string>('jwt.expiresIn') ?? '8h',
       }),
       this.jwtService.signAsync(payload, {
-        secret: this.config.get<string>('jwt.refreshSecret'),
-        expiresIn: this.config.get<string>('jwt.refreshExpiresIn', '7d'),
+        secret: this.config.get<string>('JWT_REFRESH_SECRET') ?? this.config.get<string>('jwt.refreshSecret'),
+        expiresIn: this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? this.config.get<string>('jwt.refreshExpiresIn') ?? '30d',
       }),
     ]);
 
@@ -227,7 +303,7 @@ export class AuthService {
         userId,
         refreshToken: hashedToken,
         factoryId: factoryId ?? null,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       },
     });
 

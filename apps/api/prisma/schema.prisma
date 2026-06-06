@@ -1630,6 +1630,8 @@ model User {
   notifyEmail         Boolean   @default(true)
   notifyWhatsapp      Boolean   @default(false)
   notifySMS           Boolean   @default(false)
+  passwordResetToken  String?   @unique
+  passwordResetExpiry DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   deletedAt           DateTime?

@@ -18,6 +18,8 @@ import { IotModule } from './modules/iot/iot.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { HierarchyModule } from './modules/hierarchy/hierarchy.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { EnergyModule } from './modules/energy/energy.module';
 import { WebSocketGatewayModule } from './gateways/websocket.module';
 import { HealthModule } from './modules/health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -88,6 +90,8 @@ import { configuration } from './config/configuration';
     ReportsModule,
     NotificationsModule,
     HierarchyModule,
+    InventoryModule,
+    EnergyModule,
     WebSocketGatewayModule,
     HealthModule,
   ],

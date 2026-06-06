@@ -12,6 +12,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ForgotPasswordDto, ResetPasswordDto } from './dto/reset-password.dto';
 import type { User } from '@prisma/client';
 
 @ApiTags('Authentication')
@@ -65,9 +66,32 @@ export class AuthController {
 
   @Patch('change-password')
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Change user password' })
+  @ApiOperation({ summary: 'Change user password (requires current password)' })
   async changePassword(@CurrentUser() user: User, @Body() dto: ChangePasswordDto) {
     await this.authService.changePassword(user.id, dto.currentPassword, dto.newPassword);
     return { message: 'Password changed successfully' };
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Request password reset email (rate-limited: 3/min)' })
+  @ApiResponse({ status: 200, description: 'Reset email sent if account exists (always 200 to prevent enumeration)' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    await this.authService.forgotPassword(dto.email);
+    return { message: 'If an account exists for this email, a reset link has been sent.' };
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Reset password using token from email' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired token' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    await this.authService.resetPassword(dto.token, dto.newPassword);
+    return { message: 'Password reset successfully. Please log in with your new password.' };
   }
 }

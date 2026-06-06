@@ -39,10 +39,10 @@ export function MaintenanceReportView() {
 
       <div className="flex-1 overflow-auto p-6 space-y-5">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <KPICard title="MTBF" value={reportData?.mtbf ?? 0} unit="hrs" isLoading={isLoading} />
-          <KPICard title="MTTR" value={reportData?.mttr ?? 0} unit="hrs" isLoading={isLoading} />
-          <KPICard title="Work Orders" value={reportData?.totalWO ?? 0} isLoading={isLoading} />
-          <KPICard title="Completion Rate" value={reportData?.completionRate ?? 0} unit="%" colorMode="success" isLoading={isLoading} />
+          <KPICard title="MTBF" value={(reportData as any)?.mtbf ?? 0} unit="hrs" isLoading={isLoading} />
+          <KPICard title="MTTR" value={(reportData as any)?.mttr ?? 0} unit="hrs" isLoading={isLoading} />
+          <KPICard title="Work Orders" value={(reportData as any)?.totalWO ?? 0} isLoading={isLoading} />
+          <KPICard title="Completion Rate" value={(reportData as any)?.completionRate ?? 0} unit="%" colorMode="default" isLoading={isLoading} />
         </div>
 
         <div className="industrial-card p-4">

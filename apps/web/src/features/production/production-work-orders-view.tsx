@@ -1,68 +1,233 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Plus, Download, Filter, Search, Play, Pause, Square, Eye, MoreHorizontal, ChevronDown } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-
+import {
+  Plus, Download, Filter, Search, Play, Pause,
+  CheckCircle, Pencil, Trash2, XCircle, ChevronDown,
+  Factory, Cpu, User, Clock, BarChart3, Package,
+} from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { DeleteDialog } from '@/components/ui/delete-dialog';
+import { TableRowActions } from '@/components/ui/table-row-actions';
+import { MachineTreePicker } from '@/components/ui/machine-tree-picker';
 import { api } from '@/services/api.client';
 import { cn, formatDate, formatPercent } from '@/lib/utils';
 
-const STATUS_COLORS = {
-  PLANNED: 'secondary',
-  IN_PROGRESS: 'default',
-  COMPLETED: 'default',
-  ON_HOLD: 'outline',
-  CANCELLED: 'destructive',
-} as const;
-
-const STATUS_LABELS = {
-  PLANNED: 'Planned',
-  IN_PROGRESS: 'In Progress',
-  COMPLETED: 'Completed',
-  ON_HOLD: 'On Hold',
-  CANCELLED: 'Cancelled',
+const STATUS_COLORS: Record<string, 'secondary' | 'default' | 'outline' | 'destructive'> = {
+  PLANNED: 'secondary', RELEASED: 'secondary', IN_PROGRESS: 'default',
+  COMPLETED: 'default', ON_HOLD: 'outline', CANCELLED: 'destructive',
 };
+const STATUS_LABELS: Record<string, string> = {
+  PLANNED: 'Planned', RELEASED: 'Released', IN_PROGRESS: 'In Progress',
+  COMPLETED: 'Completed', ON_HOLD: 'On Hold', CANCELLED: 'Cancelled',
+};
+const PRIORITY_CLS: Record<string, string> = {
+  CRITICAL: 'border-red-500 text-red-400', HIGH: 'border-orange-500 text-orange-400',
+  MEDIUM: 'border-yellow-500 text-yellow-400', LOW: 'border-slate-500 text-slate-400',
+};
+
+interface WorkOrder {
+  id: string; orderNumber: string; status: string; priority: string;
+  productName: string; productCode: string; machine: string; machineCode: string;
+  line: string; operator: string; supervisor: string;
+  plannedQty: number; actualQty: number; goodQty: number; scrapQty: number; reworkQty?: number;
+  progress: number; oee?: number; availability?: number; performance?: number; quality?: number;
+  plannedStart: string; plannedEnd: string; actualStart?: string; actualEnd?: string;
+}
+
+interface WorkOrderDetail extends WorkOrder {
+  sku?: { name: string; code: string; itemNumber?: string };
+  machine_obj?: { name: string; code: string; area?: { name: string }; line?: { name: string } };
+  operator_obj?: { name: string; email: string };
+  supervisor_obj?: { name: string; email: string };
+  productionOrder?: { orderNumber: string; sapOrderNumber?: string };
+  batchRecords?: { id: string; batchNumber: string; status: string }[];
+  downtimeMinutes?: number; notes?: string;
+}
+
+const EMPTY_FORM = {
+  skuId: '__none__', machineId: '', machineName: '', operatorId: '__none__',
+  plannedQty: '', plannedStart: '', plannedEnd: '', priority: 'MEDIUM', notes: '',
+};
+
+function MetricCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
+  return (
+    <div className="industrial-card rounded-lg p-3 text-center">
+      <div className={cn('text-xl font-bold tabular-nums', color)}>{value}</div>
+      <div className="text-[10px] text-muted-foreground mt-0.5">{label}</div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value?: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 py-2 border-b border-border/20 last:border-0">
+      <span className="text-[11px] text-muted-foreground w-28 shrink-0 pt-0.5">{label}</span>
+      <span className="text-xs font-medium flex-1">{value ?? <span className="text-muted-foreground">—</span>}</span>
+    </div>
+  );
+}
 
 export function ProductionWorkOrdersView() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [viewId, setViewId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editWO, setEditWO] = useState<WorkOrder | null>(null);
+  const [editForm, setEditForm] = useState({ plannedQty: '', priority: 'MEDIUM', notes: '' });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [holdDialog, setHoldDialog] = useState<{ woId: string; orderNumber: string } | null>(null);
+  const [holdReason, setHoldReason] = useState('');
+  const [completeDialog, setCompleteDialog] = useState<{ woId: string; orderNumber: string; plannedQty: number } | null>(null);
+  const [completeForm, setCompleteForm] = useState({ actualQty: '', goodQty: '' });
+  const [cancelDialog, setCancelDialog] = useState<{ woId: string; orderNumber: string } | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [deleteDialog, setDeleteDialog] = useState<{ id: string; orderNumber: string } | null>(null);
 
-  const { data: workOrders, isLoading } = useQuery({
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: workOrdersData, isLoading } = useQuery({
     queryKey: ['production', 'work-orders', { search, status: statusFilter }],
     queryFn: () => api.get('/production/work-orders', {
-      params: { search, status: statusFilter, limit: 50 },
+      params: { search: search || undefined, status: statusFilter || undefined, limit: 50 },
     }),
     staleTime: 15_000,
   });
+  const orders: WorkOrder[] = (workOrdersData as any)?.data ?? [];
 
-  const orders = workOrders?.data ?? [];
+  const { data: woDetail, isLoading: detailLoading } = useQuery({
+    queryKey: ['production', 'work-orders', viewId],
+    queryFn: () => api.get(`/production/work-orders/${viewId}`),
+    enabled: !!viewId,
+    staleTime: 30_000,
+  });
+  const detail = woDetail as WorkOrderDetail | undefined;
+
+  const { data: skusData } = useQuery({
+    queryKey: ['inventory', 'products', 'wo-form'],
+    queryFn: () => api.get('/inventory/products', { params: { limit: 200 } }),
+    staleTime: 300_000, enabled: formOpen,
+  });
+  const { data: usersData } = useQuery({
+    queryKey: ['users', 'wo-form'],
+    queryFn: () => api.get('/users', { params: { limit: 100 } }),
+    staleTime: 300_000, enabled: formOpen,
+  });
+
+  const skus: any[] = (skusData as any)?.data ?? (skusData as any) ?? [];
+  const users: any[] = (usersData as any)?.data ?? (usersData as any) ?? [];
+
+  const createMutation = useMutation({
+    mutationFn: (dto: any) => api.post('/production/work-orders', dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] });
+      toast({ title: 'Work order created' });
+      setFormOpen(false); setForm(EMPTY_FORM);
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to create', variant: 'destructive' }),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: any }) => api.patch(`/production/work-orders/${id}`, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] });
+      toast({ title: 'Work order updated' }); setEditWO(null);
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const startMutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/production/work-orders/${id}/start`),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] }); toast({ title: 'Work order started' }); },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const releaseMutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/production/work-orders/${id}/release`),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] }); toast({ title: 'Work order resumed' }); },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const holdMutation = useMutation({
+    mutationFn: ({ woId, reason }: { woId: string; reason: string }) => api.patch(`/production/work-orders/${woId}/hold`, { reason }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] });
+      setHoldDialog(null); setHoldReason(''); toast({ title: 'Work order placed on hold' });
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: ({ woId, dto }: { woId: string; dto: any }) => api.patch(`/production/work-orders/${woId}/complete`, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] });
+      setCompleteDialog(null); setCompleteForm({ actualQty: '', goodQty: '' });
+      toast({ title: 'Work order completed' });
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: ({ woId, reason }: { woId: string; reason: string }) => api.patch(`/production/work-orders/${woId}/cancel`, { reason }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] });
+      setCancelDialog(null); setCancelReason(''); toast({ title: 'Work order cancelled' });
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/production/work-orders/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] });
+      toast({ title: 'Work order deleted' }); setDeleteDialog(null);
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const handleCreate = () => {
+    if (form.skuId === '__none__' || !form.machineId || !form.plannedQty) return;
+    createMutation.mutate({
+      skuId: form.skuId, machineId: form.machineId,
+      operatorId: form.operatorId !== '__none__' ? form.operatorId : undefined,
+      plannedQty: parseInt(form.plannedQty, 10), priority: form.priority,
+      plannedStart: form.plannedStart ? new Date(form.plannedStart).toISOString() : new Date().toISOString(),
+      plannedEnd: form.plannedEnd ? new Date(form.plannedEnd).toISOString() : new Date(Date.now() + 86400000).toISOString(),
+      notes: form.notes || undefined,
+    });
+  };
+
+  const oeeColor = (v?: number) => v == null ? '' : v >= 85 ? 'text-green-400' : v >= 65 ? 'text-yellow-400' : 'text-red-400';
 
   return (
     <div className="flex flex-col h-full">
+      {/* ── Header ── */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
         <div>
           <h1 className="text-lg font-bold">Work Orders</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Manage production work orders
-          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Manage production work orders</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
-            <Download size={13} />
-            Export
-          </Button>
-          <Button size="sm" className="gap-1.5 h-8 text-xs">
-            <Plus size={13} />
-            New Work Order
+          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs"><Download size={13} />Export</Button>
+          <Button size="sm" className="gap-1.5 h-8 text-xs" onClick={() => { setForm(EMPTY_FORM); setFormOpen(true); }}>
+            <Plus size={13} />New Work Order
           </Button>
         </div>
       </div>
 
+      {/* ── Table ── */}
       <div className="flex-1 overflow-auto p-6">
         <div className="industrial-card p-4">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -70,27 +235,18 @@ export function ProductionWorkOrdersView() {
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search orders..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="h-8 pl-7 w-48 text-xs"
-                />
+                <Input placeholder="Search orders…" value={search} onChange={e => setSearch(e.target.value)} className="h-8 pl-7 w-48 text-xs" />
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
-                    <Filter size={12} />
-                    {statusFilter || 'All Status'}
-                    <ChevronDown size={11} />
+                    <Filter size={12} />{statusFilter ? STATUS_LABELS[statusFilter] : 'All Status'}<ChevronDown size={11} />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                   <DropdownMenuItem onClick={() => setStatusFilter(null)}>All Status</DropdownMenuItem>
-                  {Object.keys(STATUS_LABELS).map((s) => (
-                    <DropdownMenuItem key={s} onClick={() => setStatusFilter(s)}>
-                      {STATUS_LABELS[s as keyof typeof STATUS_LABELS]}
-                    </DropdownMenuItem>
+                  {Object.keys(STATUS_LABELS).map(s => (
+                    <DropdownMenuItem key={s} onClick={() => setStatusFilter(s)}>{STATUS_LABELS[s]}</DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -101,110 +257,453 @@ export function ProductionWorkOrdersView() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border/30">
-                  <TableHead className="text-[11px] font-semibold">Order #</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Product</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Status</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Progress</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Quantity</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Machine</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Planned End</TableHead>
-                  <TableHead className="text-[11px] font-semibold">OEE</TableHead>
-                  <TableHead />
+                  {['Order #', 'Product', 'Status', 'Priority', 'Progress', 'Qty', 'Machine', 'Planned End', 'OEE', ''].map(h => (
+                    <TableHead key={h} className="text-[11px] font-semibold">{h}</TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  Array.from({ length: 10 }).map((_, i) => (
+                  Array.from({ length: 8 }).map((_, i) => (
                     <TableRow key={i} className="border-border/20">
-                      {Array.from({ length: 9 }).map((_, j) => (
-                        <TableCell key={j}>
-                          <div className="shimmer h-3.5 rounded w-20" />
-                        </TableCell>
+                      {Array.from({ length: 10 }).map((_, j) => (
+                        <TableCell key={j}><div className="shimmer h-3.5 rounded w-20" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : orders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
-                      No work orders found
-                    </TableCell>
+                    <TableCell colSpan={10} className="text-center py-12 text-muted-foreground text-sm">No work orders found</TableCell>
                   </TableRow>
-                ) : (
-                  orders.map((order: any) => (
-                    <TableRow key={order.id} className="border-border/20 hover:bg-muted/20 cursor-pointer">
-                      <TableCell className="font-mono text-xs font-semibold text-primary">
-                        {order.orderNumber}
-                      </TableCell>
+                ) : orders.map(order => {
+                  const progress = order.progress ?? (order.plannedQty > 0 ? Math.min(Math.round((order.actualQty / order.plannedQty) * 100), 100) : 0);
+                  const canEdit = !['COMPLETED', 'CANCELLED'].includes(order.status);
+                  const canDelete = ['PLANNED', 'RELEASED', 'ON_HOLD', 'CANCELLED'].includes(order.status);
+                  return (
+                    <TableRow key={order.id} className="border-border/20 hover:bg-muted/20">
+                      <TableCell className="font-mono text-xs font-semibold text-primary">{order.orderNumber}</TableCell>
                       <TableCell>
-                        <div className="text-xs font-medium truncate max-w-[120px]">{order.productName}</div>
+                        <div className="text-xs font-medium truncate max-w-[120px]">{order.productName || '—'}</div>
                         <div className="text-[10px] text-muted-foreground">{order.productCode}</div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={STATUS_COLORS[order.status as keyof typeof STATUS_COLORS]} className="text-[10px] h-5">
-                          {STATUS_LABELS[order.status as keyof typeof STATUS_LABELS]}
+                        <Badge variant={STATUS_COLORS[order.status] ?? 'secondary'} className="text-[10px] h-5">
+                          {STATUS_LABELS[order.status] ?? order.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={cn('text-[10px] h-5', PRIORITY_CLS[order.priority] ?? '')}>
+                          {order.priority}
                         </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2 min-w-[80px]">
                           <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className="h-full bg-primary rounded-full" style={{ width: `${order.progress}%` }} />
+                            <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${progress}%` }} />
                           </div>
-                          <span className="text-[10px] text-muted-foreground whitespace-nowrap">{order.progress}%</span>
+                          <span className="text-[10px] text-muted-foreground whitespace-nowrap">{progress}%</span>
                         </div>
                       </TableCell>
                       <TableCell className="text-xs">
                         <span className="font-semibold">{order.actualQty}</span>
                         <span className="text-muted-foreground">/{order.plannedQty}</span>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{order.machine}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{formatDate(order.plannedEnd)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        <div>{order.machine || '—'}</div>
+                        {order.machineCode && <div className="text-[10px]">{order.machineCode}</div>}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {order.plannedEnd ? formatDate(order.plannedEnd) : '—'}
+                      </TableCell>
                       <TableCell>
                         {order.oee != null && (
-                          <span className={cn(
-                            'text-xs font-semibold',
-                            order.oee >= 85 ? 'text-success-400' : order.oee >= 65 ? 'text-brand-400' : 'text-warning-400',
-                          )}>
+                          <span className={cn('text-xs font-semibold tabular-nums', oeeColor(order.oee))}>
                             {formatPercent(order.oee)}
                           </span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7">
-                              <MoreHorizontal size={13} />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem className="gap-2 text-xs">
-                              <Eye size={12} /> View Details
-                            </DropdownMenuItem>
-                            {order.status === 'PLANNED' && (
-                              <DropdownMenuItem className="gap-2 text-xs text-success-400">
-                                <Play size={12} /> Start Order
-                              </DropdownMenuItem>
-                            )}
-                            {order.status === 'IN_PROGRESS' && (
-                              <>
-                                <DropdownMenuItem className="gap-2 text-xs text-warning-400">
-                                  <Pause size={12} /> Hold
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="gap-2 text-xs text-brand-400">
-                                  <Square size={12} /> Complete
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        <TableRowActions
+                          onView={() => setViewId(order.id)}
+                          onEdit={canEdit ? () => { setEditWO(order); setEditForm({ plannedQty: String(order.plannedQty), priority: order.priority, notes: '' }); } : undefined}
+                          onDelete={canDelete ? () => setDeleteDialog({ id: order.id, orderNumber: order.orderNumber }) : undefined}
+                          extraActions={[
+                            {
+                              label: 'Start Order',
+                              icon: Play,
+                              onClick: () => startMutation.mutate(order.id),
+                              variant: 'success',
+                              hidden: !['PLANNED', 'RELEASED'].includes(order.status),
+                            },
+                            {
+                              label: 'Resume',
+                              icon: Play,
+                              onClick: () => releaseMutation.mutate(order.id),
+                              variant: 'success',
+                              hidden: order.status !== 'ON_HOLD',
+                            },
+                            {
+                              label: 'Complete',
+                              icon: CheckCircle,
+                              onClick: () => { setCompleteDialog({ woId: order.id, orderNumber: order.orderNumber, plannedQty: order.plannedQty }); setCompleteForm({ actualQty: String(order.plannedQty), goodQty: '' }); },
+                              variant: 'success',
+                              hidden: order.status !== 'IN_PROGRESS',
+                            },
+                            {
+                              label: 'Hold',
+                              icon: Pause,
+                              onClick: () => setHoldDialog({ woId: order.id, orderNumber: order.orderNumber }),
+                              variant: 'warning',
+                              hidden: order.status !== 'IN_PROGRESS',
+                            },
+                            {
+                              label: 'Cancel',
+                              icon: XCircle,
+                              onClick: () => { setCancelDialog({ woId: order.id, orderNumber: order.orderNumber }); setCancelReason(''); },
+                              variant: 'destructive',
+                              separator: true,
+                              hidden: !['PLANNED', 'RELEASED', 'IN_PROGRESS', 'ON_HOLD'].includes(order.status),
+                            },
+                          ]}
+                        />
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
         </div>
       </div>
+
+      {/* ══════════════════════════════════════════════
+          DETAIL SHEET
+      ══════════════════════════════════════════════ */}
+      <Sheet open={!!viewId} onOpenChange={o => !o && setViewId(null)}>
+        <SheetContent className="w-full max-w-xl">
+          <SheetHeader>
+            {detail ? (
+              <>
+                <div className="flex items-center gap-3 pr-6">
+                  <div className="flex-1">
+                    <SheetTitle className="font-mono text-sm">{detail.orderNumber}</SheetTitle>
+                    <SheetDescription className="mt-0.5">{detail.productName || (detail as any).sku?.name || '—'}</SheetDescription>
+                  </div>
+                  <Badge variant={STATUS_COLORS[(detail as any).status] ?? 'secondary'}>
+                    {STATUS_LABELS[(detail as any).status] ?? (detail as any).status}
+                  </Badge>
+                  <Badge variant="outline" className={cn('text-[10px]', PRIORITY_CLS[(detail as any).priority] ?? '')}>
+                    {(detail as any).priority}
+                  </Badge>
+                </div>
+              </>
+            ) : (
+              <SheetTitle>Work Order Details</SheetTitle>
+            )}
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+            {detailLoading ? (
+              <div className="space-y-3">
+                {Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer h-4 rounded w-full" />)}
+              </div>
+            ) : detail ? (
+              <>
+                {/* OEE Metrics */}
+                {((detail as any).oee != null) && (
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">OEE Metrics</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      <MetricCard label="OEE" value={`${(detail as any).oee?.toFixed(1)}%`} color={oeeColor((detail as any).oee)} />
+                      <MetricCard label="Availability" value={`${(detail as any).availability?.toFixed(1)}%`} />
+                      <MetricCard label="Performance" value={`${(detail as any).performance?.toFixed(1)}%`} />
+                      <MetricCard label="Quality" value={`${(detail as any).quality?.toFixed(1)}%`} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Progress Bar */}
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Production Progress</p>
+                  <div className="industrial-card rounded-lg p-3 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary rounded-full transition-all"
+                          style={{ width: `${Math.min(Math.round(((detail as any).actualQty / (detail as any).plannedQty) * 100), 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-semibold tabular-nums">
+                        {Math.min(Math.round(((detail as any).actualQty / (detail as any).plannedQty) * 100), 100)}%
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      {[
+                        { label: 'Planned', value: (detail as any).plannedQty },
+                        { label: 'Actual', value: (detail as any).actualQty },
+                        { label: 'Good', value: (detail as any).goodQty, color: 'text-green-400' },
+                        { label: 'Scrap', value: (detail as any).scrapQty, color: 'text-red-400' },
+                      ].map(m => (
+                        <div key={m.label}>
+                          <div className={cn('text-base font-bold tabular-nums', m.color)}>{m.value ?? 0}</div>
+                          <div className="text-[10px] text-muted-foreground">{m.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Details */}
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Order Details</p>
+                  <div className="industrial-card rounded-lg px-3">
+                    <DetailRow label="Product" value={(detail as any).sku?.name ?? (detail as any).productName} />
+                    <DetailRow label="SKU Code" value={(detail as any).sku?.code ?? (detail as any).productCode} />
+                    <DetailRow label="Item #" value={(detail as any).sku?.itemNumber} />
+                    <DetailRow label="Machine" value={
+                      (detail as any).machine?.name
+                        ? `${(detail as any).machine.name} (${(detail as any).machine.code})`
+                        : (detail as any).machine
+                    } />
+                    <DetailRow label="Production Line" value={(detail as any).line?.name ?? (detail as any).line} />
+                    <DetailRow label="Area" value={(detail as any).machine?.area?.name} />
+                    <DetailRow label="Operator" value={(detail as any).operator?.name ?? (detail as any).operator} />
+                    <DetailRow label="Supervisor" value={(detail as any).supervisor?.name ?? (detail as any).supervisor} />
+                  </div>
+                </div>
+
+                {/* Timeline */}
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Timeline</p>
+                  <div className="industrial-card rounded-lg px-3">
+                    <DetailRow label="Planned Start" value={(detail as any).plannedStart ? formatDate((detail as any).plannedStart) : undefined} />
+                    <DetailRow label="Planned End" value={(detail as any).plannedEnd ? formatDate((detail as any).plannedEnd) : undefined} />
+                    <DetailRow label="Actual Start" value={(detail as any).actualStart ? formatDate((detail as any).actualStart) : undefined} />
+                    <DetailRow label="Actual End" value={(detail as any).actualEnd ? formatDate((detail as any).actualEnd) : undefined} />
+                    <DetailRow label="Downtime" value={(detail as any).downtimeMinutes != null ? `${(detail as any).downtimeMinutes} min` : undefined} />
+                  </div>
+                </div>
+
+                {/* Linked batches */}
+                {(detail as any).batchRecords?.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Linked Batches</p>
+                    <div className="space-y-1.5">
+                      {(detail as any).batchRecords.map((b: any) => (
+                        <div key={b.id} className="industrial-card rounded-lg px-3 py-2 flex items-center justify-between">
+                          <span className="font-mono text-xs text-primary">{b.batchNumber}</span>
+                          <Badge variant="outline" className="text-[10px] h-4">{b.status}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Notes */}
+                {(detail as any).notes && (
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Notes</p>
+                    <div className="industrial-card rounded-lg px-3 py-2">
+                      <p className="text-xs text-muted-foreground">{(detail as any).notes}</p>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </div>
+
+          {/* Quick actions */}
+          {detail && (
+            <div className="px-6 py-3 border-t border-border/50 flex items-center gap-2 shrink-0">
+              {['PLANNED', 'RELEASED'].includes((detail as any).status) && (
+                <Button size="sm" className="gap-1.5 text-xs h-7 bg-green-600 hover:bg-green-700" onClick={() => { startMutation.mutate((detail as any).id); setViewId(null); }}>
+                  <Play size={11} />Start
+                </Button>
+              )}
+              {(detail as any).status === 'ON_HOLD' && (
+                <Button size="sm" className="gap-1.5 text-xs h-7 bg-green-600 hover:bg-green-700" onClick={() => { releaseMutation.mutate((detail as any).id); setViewId(null); }}>
+                  <Play size={11} />Resume
+                </Button>
+              )}
+              {(detail as any).status === 'IN_PROGRESS' && (
+                <>
+                  <Button size="sm" className="gap-1.5 text-xs h-7 bg-green-600 hover:bg-green-700"
+                    onClick={() => { setViewId(null); setCompleteDialog({ woId: (detail as any).id, orderNumber: (detail as any).orderNumber, plannedQty: (detail as any).plannedQty }); setCompleteForm({ actualQty: String((detail as any).plannedQty), goodQty: '' }); }}>
+                    <CheckCircle size={11} />Complete
+                  </Button>
+                  <Button size="sm" variant="outline" className="gap-1.5 text-xs h-7"
+                    onClick={() => { setViewId(null); setHoldDialog({ woId: (detail as any).id, orderNumber: (detail as any).orderNumber }); }}>
+                    <Pause size={11} />Hold
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* ══ Create Form ══ */}
+      <FormDialog open={formOpen} onClose={() => setFormOpen(false)} title="Create Work Order"
+        onSubmit={handleCreate} isSubmitting={createMutation.isPending}
+        isValid={form.skuId !== '__none__' && !!form.machineId && !!form.plannedQty}>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <Label>Product (SKU) *</Label>
+            <Select value={form.skuId} onValueChange={v => setForm(f => ({ ...f, skuId: v }))}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select product…" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— Select product —</SelectItem>
+                {skus.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name} ({s.code ?? s.sku ?? ''})</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="col-span-2">
+            <Label>Machine *</Label>
+            <div className="mt-1">
+              <MachineTreePicker
+                value={form.machineId}
+                valueName={form.machineName}
+                placeholder="Browse hierarchy to select machine…"
+                onSelect={(id, _type, name) => setForm(f => ({ ...f, machineId: id, machineName: name }))}
+                onClear={() => setForm(f => ({ ...f, machineId: '', machineName: '' }))}
+              />
+            </div>
+          </div>
+          <div className="col-span-2">
+            <Label>Operator</Label>
+            <Select value={form.operatorId} onValueChange={v => setForm(f => ({ ...f, operatorId: v }))}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Assign operator…" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— Unassigned —</SelectItem>
+                {users.map((u: any) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Priority</Label>
+            <Select value={form.priority} onValueChange={v => setForm(f => ({ ...f, priority: v }))}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>{['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Planned Quantity *</Label>
+            <Input type="number" min={1} value={form.plannedQty} onChange={e => setForm(v => ({ ...v, plannedQty: e.target.value }))} className="mt-1" />
+          </div>
+          <div>
+            <Label>Planned Start</Label>
+            <Input type="datetime-local" value={form.plannedStart} onChange={e => setForm(v => ({ ...v, plannedStart: e.target.value }))} className="mt-1" />
+          </div>
+          <div>
+            <Label>Planned End</Label>
+            <Input type="datetime-local" value={form.plannedEnd} onChange={e => setForm(v => ({ ...v, plannedEnd: e.target.value }))} className="mt-1" />
+          </div>
+          <div className="col-span-2">
+            <Label>Notes</Label>
+            <Input value={form.notes} onChange={e => setForm(v => ({ ...v, notes: e.target.value }))} placeholder="Optional notes…" className="mt-1" />
+          </div>
+        </div>
+      </FormDialog>
+
+      {/* ══ Edit Dialog ══ */}
+      <Dialog open={!!editWO} onOpenChange={o => !o && setEditWO(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">Edit — {editWO?.orderNumber}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label>Planned Quantity</Label>
+              <Input type="number" min={1} value={editForm.plannedQty} onChange={e => setEditForm(f => ({ ...f, plannedQty: e.target.value }))} className="mt-1" />
+            </div>
+            <div>
+              <Label>Priority</Label>
+              <Select value={editForm.priority} onValueChange={v => setEditForm(f => ({ ...f, priority: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>{['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Notes</Label>
+              <Input value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} placeholder="Update notes…" className="mt-1" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEditWO(null)}>Cancel</Button>
+            <Button size="sm" disabled={!editForm.plannedQty || updateMutation.isPending}
+              onClick={() => editWO && updateMutation.mutate({ id: editWO.id, dto: { plannedQty: parseInt(editForm.plannedQty, 10), priority: editForm.priority, notes: editForm.notes || undefined } })}>
+              {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══ Complete Dialog ══ */}
+      <Dialog open={!!completeDialog} onOpenChange={o => !o && setCompleteDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">Complete — {completeDialog?.orderNumber}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label>Actual Quantity Produced *</Label>
+              <Input type="number" min={0} value={completeForm.actualQty} onChange={e => setCompleteForm(f => ({ ...f, actualQty: e.target.value }))} placeholder={`Planned: ${completeDialog?.plannedQty}`} className="mt-1" />
+            </div>
+            <div>
+              <Label>Good Quantity <span className="text-muted-foreground text-[10px]">(defaults to actual)</span></Label>
+              <Input type="number" min={0} value={completeForm.goodQty} onChange={e => setCompleteForm(f => ({ ...f, goodQty: e.target.value }))} placeholder="Leave blank = same as actual" className="mt-1" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setCompleteDialog(null)}>Cancel</Button>
+            <Button size="sm" disabled={!completeForm.actualQty || completeMutation.isPending} className="bg-green-600 hover:bg-green-700"
+              onClick={() => completeDialog && completeMutation.mutate({ woId: completeDialog.woId, dto: { actualQty: parseInt(completeForm.actualQty, 10), goodQty: completeForm.goodQty ? parseInt(completeForm.goodQty, 10) : undefined } })}>
+              {completeMutation.isPending ? 'Completing…' : 'Mark Complete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══ Hold Dialog ══ */}
+      <Dialog open={!!holdDialog} onOpenChange={o => !o && setHoldDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">Hold — {holdDialog?.orderNumber}</DialogTitle></DialogHeader>
+          <div className="py-2">
+            <Label className="text-xs">Reason for hold *</Label>
+            <Input placeholder="e.g. Waiting for material…" value={holdReason} onChange={e => setHoldReason(e.target.value)} className="mt-1" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setHoldDialog(null)}>Cancel</Button>
+            <Button size="sm" disabled={holdReason.length < 5 || holdMutation.isPending}
+              onClick={() => holdDialog && holdMutation.mutate({ woId: holdDialog.woId, reason: holdReason })}>
+              Confirm Hold
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══ Cancel Dialog ══ */}
+      <Dialog open={!!cancelDialog} onOpenChange={o => !o && setCancelDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">Cancel — {cancelDialog?.orderNumber}</DialogTitle></DialogHeader>
+          <div className="py-2">
+            <Label className="text-xs">Reason for cancellation *</Label>
+            <Input placeholder="e.g. Material shortage, schedule change…" value={cancelReason} onChange={e => setCancelReason(e.target.value)} className="mt-1" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setCancelDialog(null)}>Back</Button>
+            <Button variant="destructive" size="sm" disabled={cancelReason.length < 5 || cancelMutation.isPending}
+              onClick={() => cancelDialog && cancelMutation.mutate({ woId: cancelDialog.woId, reason: cancelReason })}>
+              {cancelMutation.isPending ? 'Cancelling…' : 'Confirm Cancel'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══ Delete Dialog ══ */}
+      <DeleteDialog
+        open={!!deleteDialog} onClose={() => setDeleteDialog(null)}
+        onConfirm={() => deleteDialog && deleteMutation.mutate(deleteDialog.id)}
+        title={`Delete ${deleteDialog?.orderNumber}?`}
+        description="This will permanently delete the work order."
+        isDeleting={deleteMutation.isPending}
+      />
     </div>
   );
 }
