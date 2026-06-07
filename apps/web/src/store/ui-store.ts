@@ -17,7 +17,7 @@ export const useSidebarStore = create<SidebarStore>()(
       collapse: () => set((s) => { s.isCollapsed = true; }),
       expand: () => set((s) => { s.isCollapsed = false; }),
     })),
-    { name: 'industry360-sidebar' },
+    { name: 'star-mes-sidebar' },
   ),
 );
 

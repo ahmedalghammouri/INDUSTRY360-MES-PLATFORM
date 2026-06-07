@@ -1,8 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Plus, Search, Download, BookOpen, FlaskConical, Settings2, Copy, Lock, Unlock, MoreHorizontal, Pencil, Trash2, Package } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Plus, Search, BookOpen, FlaskConical, CheckCircle2, Clock3,
+  ChevronDown, ChevronRight, Copy, Trash2, Pencil, X, MoreHorizontal,
+  Package, Beaker, Send, ShieldCheck, Archive, Info, DollarSign,
+} from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,334 +14,822 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { FormDialog } from '@/components/ui/form-dialog';
-import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
+import { TablePagination } from '@/components/ui/table-pagination';
 
-interface SKU { id: string; name: string; code: string; itemNumber?: string; brand?: string; weight?: number }
+// ── Types ─────────────────────────────────────────────────────
 
-interface Recipe {
-  id: string; code: string; name: string; product: string; version: string;
-  status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED' | 'LOCKED';
-  cycleTime: number; yield: number; steps: number; materials: number;
-  lastModified: string; modifiedBy?: string;
+type RecipeStatus = 'DRAFT' | 'REVIEW' | 'APPROVED' | 'OBSOLETE';
+
+interface RecipeIngredient {
+  id: string;
+  recipeId: string;
+  rawMaterialId: string;
+  phase?: string;
+  quantityPer: number;
+  unit: string;
+  scrapFactor: number;
+  isOptional: boolean;
+  notes?: string;
+  sortOrder: number;
+  rawMaterial: { id: string; code: string; name: string; unit: string; unitCost?: number };
 }
 
-const STATUS_CONFIG = {
-  ACTIVE:   { label:'Active',   color:'text-green-400',  bg:'bg-green-500/10' },
-  DRAFT:    { label:'Draft',    color:'text-amber-400',  bg:'bg-amber-500/10' },
-  ARCHIVED: { label:'Archived', color:'text-slate-400',  bg:'bg-slate-500/10' },
-  LOCKED:   { label:'Locked',   color:'text-purple-400', bg:'bg-purple-500/10'},
+interface Recipe {
+  id: string;
+  code: string;
+  version: string;
+  name: string;
+  description?: string;
+  status: RecipeStatus;
+  skuId: string;
+  processId?: string;
+  batchSize?: number;
+  batchUnit?: string;
+  yieldPct?: number;
+  cycleTimeSecs?: number;
+  shelfLifeDays?: number;
+  storageConditions?: string;
+  approvedAt?: string;
+  approvedById?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  notes?: string;
+  estimatedMaterialCost?: number;
+  sku: { id: string; code: string; name: string; itemNumber?: string; brand?: string };
+  process?: { id: string; name: string; version: string };
+  approvedBy?: { id: string; name: string };
+  ingredients: RecipeIngredient[];
+  _count: { workOrders: number; ingredients: number };
+}
+
+// ── Status config ─────────────────────────────────────────────
+
+const STATUS: Record<RecipeStatus, { label: string; color: string; bg: string; border: string }> = {
+  DRAFT:    { label: 'Draft',    color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20' },
+  REVIEW:   { label: 'Review',   color: 'text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/20' },
+  APPROVED: { label: 'Approved', color: 'text-green-400',  bg: 'bg-green-500/10',  border: 'border-green-500/20' },
+  OBSOLETE: { label: 'Obsolete', color: 'text-slate-400',  bg: 'bg-slate-500/10',  border: 'border-slate-500/20' },
 };
 
+// ── Empty forms ───────────────────────────────────────────────
+
+const EMPTY_RECIPE_FORM = () => ({
+  skuId: '', processId: '', code: '', version: '1.0',
+  name: '', description: '',
+  batchSize: '', batchUnit: 'kg', yieldPct: '', cycleTimeSecs: '',
+  shelfLifeDays: '', storageConditions: '', notes: '',
+});
+
+const EMPTY_ING_FORM = () => ({
+  rawMaterialId: '', phase: '', quantityPer: '', unit: '', scrapFactor: '0', isOptional: false, notes: '', sortOrder: '0',
+});
+
+// ── Main view ─────────────────────────────────────────────────
+
 export function ProductionRecipesView() {
-  const { toast } = useToast()
-  const qc = useQueryClient()
-  const [search, setSearch] = useState('')
-  const [formOpen, setFormOpen] = useState(false)
-  const [editRecipe, setEditRecipe] = useState<Recipe | null>(null)
-  const [deleteDialog, setDeleteDialog] = useState<{ id: string; name: string } | null>(null)
-  const [form, setForm] = useState({
-    code: '', name: '', product: '', version: '', status: 'DRAFT', cycleTime: '', yieldPct: '', steps: '', materials: '',
-  })
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<RecipeStatus | 'ALL'>('ALL');
+  const [page, setPage] = useState(1);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Create recipe dialog
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState(EMPTY_RECIPE_FORM());
+
+  // Clone dialog
+  const [cloneTarget, setCloneTarget] = useState<{ id: string; name: string } | null>(null);
+  const [cloneVersion, setCloneVersion] = useState('');
+
+  // Add ingredient dialog
+  const [ingTarget, setIngTarget] = useState<{ recipeId: string; status: RecipeStatus } | null>(null);
+  const [ingForm, setIngForm] = useState(EMPTY_ING_FORM());
+
+  // ── Queries ───────────────────────────────────────────────
 
   const { data, isLoading } = useQuery({
-    queryKey: ['production', 'recipes', search],
+    queryKey: ['production', 'recipes', search, statusFilter, page],
     queryFn: () => api.get('/production/recipes', {
-      params: { search: search || undefined, limit: 50 },
+      params: {
+        search: search || undefined,
+        status: statusFilter !== 'ALL' ? statusFilter : undefined,
+        page,
+        limit: 20,
+      },
     }),
     staleTime: 30_000,
-  })
+  });
 
   const { data: skusData } = useQuery({
-    queryKey: ['inventory', 'products', 'recipes-dropdown'],
-    queryFn: () => api.get('/inventory/products', { params: { limit: 200 } }),
-    staleTime: 120_000,
-    enabled: formOpen,
-  })
-  const skus: SKU[] = (skusData as any)?.data ?? []
+    queryKey: ['products-list'],
+    queryFn: () => api.get('/inventory/products?limit=200'),
+    staleTime: 60_000,
+    enabled: createOpen,
+  });
+
+  const { data: processesData } = useQuery({
+    queryKey: ['manufacturing-processes-list'],
+    queryFn: () => api.get('/inventory/manufacturing-processes?limit=200'),
+    staleTime: 60_000,
+    enabled: createOpen,
+  });
+
+  const { data: rawMatsData } = useQuery({
+    queryKey: ['raw-materials-list'],
+    queryFn: () => api.get('/inventory/raw-materials?limit=500'),
+    staleTime: 60_000,
+    enabled: !!ingTarget,
+  });
 
   const recipes: Recipe[] = (data as any)?.data ?? [];
+  const total: number = (data as any)?.total ?? 0;
+  const skus: any[] = (skusData as any)?.data ?? [];
+  const processes: any[] = (processesData as any)?.data ?? [];
+  const rawMaterials: any[] = (rawMatsData as any)?.data ?? [];
 
-  const createMutation = useMutation({
+  // ── Mutations ─────────────────────────────────────────────
+
+  const createMut = useMutation({
     mutationFn: (dto: any) => api.post('/production/recipes', dto),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['production', 'recipes'] })
-      toast({ title: 'Recipe created successfully' })
-      handleCloseForm()
+      qc.invalidateQueries({ queryKey: ['production', 'recipes'] });
+      toast({ title: 'Recipe created' });
+      setCreateOpen(false);
+      setForm(EMPTY_RECIPE_FORM());
     },
-    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to create recipe', variant: 'destructive' }),
-  })
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
 
-  const updateMutation = useMutation({
-    mutationFn: ({ id, dto }: { id: string; dto: any }) => api.patch(`/production/recipes/${id}`, dto),
+  const submitMut = useMutation({
+    mutationFn: (id: string) => api.post(`/production/recipes/${id}/submit`, {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production', 'recipes'] }); toast({ title: 'Submitted for review' }); },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const approveMut = useMutation({
+    mutationFn: (id: string) => api.post(`/production/recipes/${id}/approve`, {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production', 'recipes'] }); toast({ title: 'Recipe approved' }); },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const obsoleteMut = useMutation({
+    mutationFn: (id: string) => api.post(`/production/recipes/${id}/obsolete`, {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production', 'recipes'] }); toast({ title: 'Recipe obsoleted' }); },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const cloneMut = useMutation({
+    mutationFn: ({ id, version }: { id: string; version: string }) =>
+      api.post(`/production/recipes/${id}/clone`, { version }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['production', 'recipes'] })
-      toast({ title: 'Recipe updated successfully' })
-      handleCloseForm()
+      qc.invalidateQueries({ queryKey: ['production', 'recipes'] });
+      toast({ title: 'Recipe cloned as new DRAFT' });
+      setCloneTarget(null);
+      setCloneVersion('');
     },
-    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to update recipe', variant: 'destructive' }),
-  })
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
 
-  const deleteMutation = useMutation({
+  const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/production/recipes/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production', 'recipes'] }); toast({ title: 'Recipe deleted' }); },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const addIngMut = useMutation({
+    mutationFn: ({ recipeId, dto }: { recipeId: string; dto: any }) =>
+      api.post(`/production/recipes/${recipeId}/ingredients`, dto),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['production', 'recipes'] })
-      toast({ title: 'Recipe deleted successfully' })
-      setDeleteDialog(null)
+      qc.invalidateQueries({ queryKey: ['production', 'recipes'] });
+      toast({ title: 'Ingredient added' });
+      setIngTarget(null);
+      setIngForm(EMPTY_ING_FORM());
     },
-    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to delete recipe', variant: 'destructive' }),
-  })
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
 
-  const handleOpenCreate = () => {
-    setEditRecipe(null)
-    setForm({ code: '', name: '', product: '', version: '', status: 'DRAFT', cycleTime: '', yieldPct: '', steps: '', materials: '' })
-    setFormOpen(true)
-  };
+  const removeIngMut = useMutation({
+    mutationFn: ({ recipeId, ingredientId }: { recipeId: string; ingredientId: string }) =>
+      api.delete(`/production/recipes/${recipeId}/ingredients/${ingredientId}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production', 'recipes'] }); },
+  });
 
-  const handleOpenEdit = (recipe: Recipe) => {
-    setEditRecipe(recipe)
-    setForm({
-      code: recipe.code,
-      name: recipe.name,
-      product: recipe.product,
-      version: recipe.version,
-      status: recipe.status,
-      cycleTime: String(recipe.cycleTime),
-      yieldPct: String(recipe.yield),
-      steps: String(recipe.steps),
-      materials: String(recipe.materials),
-    })
-    setFormOpen(true)
-  };
+  // ── Handlers ──────────────────────────────────────────────
 
-  const handleCloseForm = () => {
-    setFormOpen(false)
-    setEditRecipe(null)
-  };
-
-  const handleSubmit = () => {
-    const dto = {
+  const handleCreate = () => {
+    if (!form.skuId || !form.code || !form.name) return;
+    createMut.mutate({
+      skuId: form.skuId,
+      processId: form.processId || undefined,
       code: form.code,
-      name: form.name,
-      product: form.product,
       version: form.version,
-      status: form.status,
-      cycleTime: parseFloat(form.cycleTime),
-      yield: parseFloat(form.yieldPct || '0'),
-      steps: parseInt(form.steps),
-      materials: parseInt(form.materials || '0'),
-    };
-    if (editRecipe) {
-      updateMutation.mutate({ id: editRecipe.id, dto })
-    } else {
-      createMutation.mutate(dto)
-    }
+      name: form.name,
+      description: form.description || undefined,
+      batchSize: form.batchSize ? parseFloat(form.batchSize) : undefined,
+      batchUnit: form.batchUnit || undefined,
+      yieldPct: form.yieldPct ? parseFloat(form.yieldPct) : undefined,
+      cycleTimeSecs: form.cycleTimeSecs ? parseFloat(form.cycleTimeSecs) : undefined,
+      shelfLifeDays: form.shelfLifeDays ? parseInt(form.shelfLifeDays, 10) : undefined,
+      storageConditions: form.storageConditions || undefined,
+      notes: form.notes || undefined,
+    });
   };
 
-  const isValid = !!(form.code && form.name && form.product && form.version && form.cycleTime && form.steps)
+  const handleAddIngredient = () => {
+    if (!ingTarget || !ingForm.rawMaterialId || !ingForm.quantityPer || !ingForm.unit) return;
+    addIngMut.mutate({
+      recipeId: ingTarget.recipeId,
+      dto: {
+        rawMaterialId: ingForm.rawMaterialId,
+        phase: ingForm.phase || undefined,
+        quantityPer: parseFloat(ingForm.quantityPer),
+        unit: ingForm.unit,
+        scrapFactor: parseFloat(ingForm.scrapFactor) || 0,
+        isOptional: ingForm.isOptional,
+        notes: ingForm.notes || undefined,
+        sortOrder: parseInt(ingForm.sortOrder, 10) || 0,
+      },
+    });
+  };
 
-  const filtered = recipes.filter(r =>
-    r.name.toLowerCase().includes(search.toLowerCase()) ||
-    r.code.toLowerCase().includes(search.toLowerCase()) ||
-    r.product.toLowerCase().includes(search.toLowerCase()),
-  )
+  // ── Stats ─────────────────────────────────────────────────
+
+  const counts: Record<RecipeStatus, number> = { DRAFT: 0, REVIEW: 0, APPROVED: 0, OBSOLETE: 0 };
+  for (const r of recipes) counts[r.status] = (counts[r.status] ?? 0) + 1;
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
         <div>
           <h1 className="text-lg font-bold">Recipe Management</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Define, version, and manage production process recipes</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Master production documents linking SKUs → BOM → Routing → Work Orders
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs"><Download size={13} />Export</Button>
-          <Button size="sm" className="gap-1.5 h-8 text-xs" onClick={handleOpenCreate}><Plus size={13} />New Recipe</Button>
-        </div>
+        <Button size="sm" className="gap-1.5 h-8 text-xs" onClick={() => setCreateOpen(true)}>
+          <Plus size={13} />New Recipe
+        </Button>
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-5">
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label:'Total Recipes', value: recipes.length, icon: BookOpen, color:'text-brand-400' },
-            { label:'Active',        value: recipes.filter(r=>r.status==='ACTIVE').length,   icon: FlaskConical, color:'text-green-400' },
-            { label:'Draft',         value: recipes.filter(r=>r.status==='DRAFT').length,    icon: Settings2,    color:'text-amber-400' },
-            { label:'Locked',        value: recipes.filter(r=>r.status==='LOCKED').length,   icon: Lock,         color:'text-purple-400'},
-          ].map((s, i) => {
-            const Icon = s.icon;
-            return (
-              <motion.div key={s.label} initial={{ opacity:0,y:16 }} animate={{ opacity:1,y:0 }} transition={{ delay:i*0.05 }}
-                className="industrial-card rounded-xl p-4 flex items-center gap-3">
-                <Icon className={cn('w-8 h-8', s.color)} />
-                <div><div className="text-2xl font-bold">{s.value}</div><div className="text-xs text-muted-foreground">{s.label}</div></div>
-              </motion.div>
-            )
-          })}
+          {(Object.entries(STATUS) as [RecipeStatus, (typeof STATUS)[RecipeStatus]][]).map(([s, cfg], i) => (
+            <motion.button
+              key={s}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+              onClick={() => setStatusFilter(statusFilter === s ? 'ALL' : s)}
+              className={cn(
+                'industrial-card rounded-xl p-4 flex items-center gap-3 text-left transition-all',
+                statusFilter === s && 'ring-2 ring-primary',
+              )}
+            >
+              <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center', cfg.bg)}>
+                {s === 'APPROVED' ? <CheckCircle2 size={16} className={cfg.color} /> :
+                 s === 'REVIEW'   ? <Send size={16} className={cfg.color} /> :
+                 s === 'OBSOLETE' ? <Archive size={16} className={cfg.color} /> :
+                 <BookOpen size={16} className={cfg.color} />}
+              </div>
+              <div>
+                <div className="text-xl font-bold">{(data as any)?.total !== undefined && statusFilter === 'ALL' ? (counts[s] ?? 0) : '—'}</div>
+                <div className="text-xs text-muted-foreground">{cfg.label}</div>
+              </div>
+            </motion.button>
+          ))}
         </div>
 
-        {/* Search */}
-        <div className="flex items-center gap-2">
+        {/* Info */}
+        <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20 text-sm text-muted-foreground">
+          <Info size={14} className="mt-0.5 text-primary shrink-0" />
+          <span>
+            Status machine: <strong className="text-foreground">DRAFT</strong> → <strong className="text-foreground">REVIEW</strong> → <strong className="text-foreground">APPROVED</strong> → <strong className="text-foreground">OBSOLETE</strong>.
+            Only APPROVED recipes can be used in Work Orders. Clone an approved recipe to create a new DRAFT for editing.
+          </span>
+        </div>
+
+        {/* Filters */}
+        <div className="flex items-center gap-3">
           <div className="relative flex-1 max-w-xs">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Search recipe or product..." value={search} onChange={e => setSearch(e.target.value)} className="h-8 pl-7 text-xs" />
+            <Input
+              placeholder="Search recipe, code, product..."
+              value={search}
+              onChange={e => { setSearch(e.target.value); setPage(1); }}
+              className="h-8 pl-7 text-xs"
+            />
+          </div>
+          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v as any); setPage(1); }}>
+            <SelectTrigger className="h-8 w-36 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Statuses</SelectItem>
+              {Object.entries(STATUS).map(([s, cfg]) => (
+                <SelectItem key={s} value={s}>{cfg.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Recipe list */}
+        <div className="flex flex-col gap-3">
+          {isLoading ? (
+            <div className="text-sm text-muted-foreground p-8 text-center">Loading recipes...</div>
+          ) : recipes.length === 0 ? (
+            <div className="border rounded-xl p-12 text-center text-sm text-muted-foreground">
+              <FlaskConical size={32} className="mx-auto mb-3 opacity-20" />
+              No recipes found.
+            </div>
+          ) : recipes.map(recipe => (
+            <RecipeCard
+              key={recipe.id}
+              recipe={recipe}
+              isExpanded={expandedId === recipe.id}
+              onToggle={() => setExpandedId(expandedId === recipe.id ? null : recipe.id)}
+              onSubmit={() => submitMut.mutate(recipe.id)}
+              onApprove={() => approveMut.mutate(recipe.id)}
+              onObsolete={() => obsoleteMut.mutate(recipe.id)}
+              onClone={() => { setCloneTarget({ id: recipe.id, name: recipe.name }); setCloneVersion(''); }}
+              onDelete={() => deleteMut.mutate(recipe.id)}
+              onAddIngredient={() => setIngTarget({ recipeId: recipe.id, status: recipe.status })}
+              onRemoveIngredient={(ingredientId) => removeIngMut.mutate({ recipeId: recipe.id, ingredientId })}
+            />
+          ))}
+        </div>
+
+        <TablePagination page={page} total={total} limit={20} onPageChange={setPage} />
+      </div>
+
+      {/* Create Recipe Dialog */}
+      <AnimatePresence>
+        {createOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-background border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            >
+              <div className="p-5 border-b flex items-center justify-between">
+                <h2 className="font-semibold text-base">Create Recipe</h2>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCreateOpen(false)}>
+                  <X size={14} />
+                </Button>
+              </div>
+              <div className="p-5 grid grid-cols-2 gap-4">
+                {/* SKU */}
+                <div className="col-span-2 flex flex-col gap-1.5">
+                  <Label>Product (SKU) *</Label>
+                  <Select value={form.skuId} onValueChange={v => setForm(f => ({ ...f, skuId: v }))}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Select product..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {skus.map((s: any) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.itemNumber} — {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Process */}
+                <div className="col-span-2 flex flex-col gap-1.5">
+                  <Label>Manufacturing Process (optional)</Label>
+                  <Select value={form.processId || '_none'} onValueChange={v => setForm(f => ({ ...f, processId: v === '_none' ? '' : v }))}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Link to a process..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">— None —</SelectItem>
+                      {processes.map((p: any) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name} v{p.version}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Code + Version */}
+                <div className="flex flex-col gap-1.5">
+                  <Label>Recipe Code *</Label>
+                  <Input value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} placeholder="RCP-001" className="h-8 text-sm" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Version</Label>
+                  <Input value={form.version} onChange={e => setForm(f => ({ ...f, version: e.target.value }))} placeholder="1.0" className="h-8 text-sm" />
+                </div>
+
+                {/* Name */}
+                <div className="col-span-2 flex flex-col gap-1.5">
+                  <Label>Recipe Name *</Label>
+                  <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Standard Shampoo Formula" className="h-8 text-sm" />
+                </div>
+
+                {/* Batch size + unit */}
+                <div className="flex flex-col gap-1.5">
+                  <Label>Batch Size</Label>
+                  <Input type="number" min="0" value={form.batchSize} onChange={e => setForm(f => ({ ...f, batchSize: e.target.value }))} placeholder="1000" className="h-8 text-sm" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Batch Unit</Label>
+                  <Select value={form.batchUnit} onValueChange={v => setForm(f => ({ ...f, batchUnit: v }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {['kg', 'g', 'L', 'mL', 'unit', 'pcs', 'box'].map(u => (
+                        <SelectItem key={u} value={u}>{u}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Yield + Cycle time */}
+                <div className="flex flex-col gap-1.5">
+                  <Label>Yield %</Label>
+                  <Input type="number" min="0" max="100" value={form.yieldPct} onChange={e => setForm(f => ({ ...f, yieldPct: e.target.value }))} placeholder="98" className="h-8 text-sm" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Cycle Time (seconds)</Label>
+                  <Input type="number" min="0" value={form.cycleTimeSecs} onChange={e => setForm(f => ({ ...f, cycleTimeSecs: e.target.value }))} placeholder="3600" className="h-8 text-sm" />
+                </div>
+
+                {/* Shelf life + Storage */}
+                <div className="flex flex-col gap-1.5">
+                  <Label>Shelf Life (days)</Label>
+                  <Input type="number" min="0" value={form.shelfLifeDays} onChange={e => setForm(f => ({ ...f, shelfLifeDays: e.target.value }))} placeholder="365" className="h-8 text-sm" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Storage Conditions</Label>
+                  <Input value={form.storageConditions} onChange={e => setForm(f => ({ ...f, storageConditions: e.target.value }))} placeholder="Store below 25°C" className="h-8 text-sm" />
+                </div>
+
+                {/* Notes */}
+                <div className="col-span-2 flex flex-col gap-1.5">
+                  <Label>Notes</Label>
+                  <Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Additional notes..." className="h-8 text-sm" />
+                </div>
+              </div>
+              <div className="p-5 border-t flex items-center justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  onClick={handleCreate}
+                  disabled={createMut.isPending || !form.skuId || !form.code || !form.name}
+                >
+                  {createMut.isPending ? 'Creating...' : 'Create Recipe'}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Ingredient Dialog */}
+      <AnimatePresence>
+        {ingTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-background border rounded-xl shadow-2xl w-full max-w-lg"
+            >
+              <div className="p-5 border-b flex items-center justify-between">
+                <h2 className="font-semibold text-base">Add Ingredient</h2>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setIngTarget(null)}>
+                  <X size={14} />
+                </Button>
+              </div>
+              <div className="p-5 grid grid-cols-2 gap-4">
+                <div className="col-span-2 flex flex-col gap-1.5">
+                  <Label>Raw Material *</Label>
+                  <Select value={ingForm.rawMaterialId} onValueChange={v => {
+                    const mat = rawMaterials.find((m: any) => m.id === v);
+                    setIngForm(f => ({ ...f, rawMaterialId: v, unit: mat?.unit ?? f.unit }));
+                  }}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select material..." /></SelectTrigger>
+                    <SelectContent>
+                      {rawMaterials.map((m: any) => (
+                        <SelectItem key={m.id} value={m.id}>{m.code} — {m.name} ({m.unit})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label>Phase / Group</Label>
+                  <Input value={ingForm.phase} onChange={e => setIngForm(f => ({ ...f, phase: e.target.value }))} placeholder="A, B, Premix..." className="h-8 text-sm" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Sort Order</Label>
+                  <Input type="number" min="0" value={ingForm.sortOrder} onChange={e => setIngForm(f => ({ ...f, sortOrder: e.target.value }))} className="h-8 text-sm" />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label>Quantity per Batch *</Label>
+                  <Input type="number" min="0" step="0.001" value={ingForm.quantityPer} onChange={e => setIngForm(f => ({ ...f, quantityPer: e.target.value }))} placeholder="100" className="h-8 text-sm" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Unit *</Label>
+                  <Select value={ingForm.unit || '_none'} onValueChange={v => setIngForm(f => ({ ...f, unit: v === '_none' ? '' : v }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Unit..." /></SelectTrigger>
+                    <SelectContent>
+                      {['kg', 'g', 'mg', 'L', 'mL', 'unit', 'pcs'].map(u => (
+                        <SelectItem key={u} value={u}>{u}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label>Scrap Factor %</Label>
+                  <Input type="number" min="0" max="100" value={ingForm.scrapFactor} onChange={e => setIngForm(f => ({ ...f, scrapFactor: e.target.value }))} className="h-8 text-sm" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Optional?</Label>
+                  <Select value={ingForm.isOptional ? 'yes' : 'no'} onValueChange={v => setIngForm(f => ({ ...f, isOptional: v === 'yes' }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="no">No (required)</SelectItem>
+                      <SelectItem value="yes">Yes (optional)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="p-5 border-t flex items-center justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setIngTarget(null)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  onClick={handleAddIngredient}
+                  disabled={addIngMut.isPending || !ingForm.rawMaterialId || !ingForm.quantityPer || !ingForm.unit}
+                >
+                  {addIngMut.isPending ? 'Adding...' : 'Add Ingredient'}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Clone Dialog */}
+      <AnimatePresence>
+        {cloneTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-background border rounded-xl shadow-xl w-full max-w-sm"
+            >
+              <div className="p-5 border-b flex items-center justify-between">
+                <h2 className="font-semibold text-base">Clone Recipe</h2>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCloneTarget(null)}>
+                  <X size={14} />
+                </Button>
+              </div>
+              <div className="p-5 flex flex-col gap-4">
+                <p className="text-sm text-muted-foreground">
+                  Cloning <strong className="text-foreground">{cloneTarget.name}</strong> will create a new DRAFT recipe with all ingredients copied.
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  <Label>New Version *</Label>
+                  <Input
+                    value={cloneVersion}
+                    onChange={e => setCloneVersion(e.target.value)}
+                    placeholder="e.g. 2.0"
+                    className="h-8 text-sm"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className="p-5 border-t flex items-center justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setCloneTarget(null)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  onClick={() => cloneMut.mutate({ id: cloneTarget.id, version: cloneVersion })}
+                  disabled={cloneMut.isPending || !cloneVersion.trim()}
+                >
+                  {cloneMut.isPending ? 'Cloning...' : 'Clone'}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ── Recipe Card ───────────────────────────────────────────────
+
+function RecipeCard({
+  recipe, isExpanded, onToggle,
+  onSubmit, onApprove, onObsolete, onClone, onDelete,
+  onAddIngredient, onRemoveIngredient,
+}: {
+  recipe: Recipe;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onSubmit: () => void;
+  onApprove: () => void;
+  onObsolete: () => void;
+  onClone: () => void;
+  onDelete: () => void;
+  onAddIngredient: () => void;
+  onRemoveIngredient: (id: string) => void;
+}) {
+  const cfg = STATUS[recipe.status];
+
+  return (
+    <div className="border rounded-xl overflow-hidden bg-card">
+      {/* Header row */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+        onClick={onToggle}
+      >
+        <div className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center shrink-0">
+          <FlaskConical size={15} className="text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-[10px] text-muted-foreground">{recipe.code}</span>
+            <span className="font-semibold text-sm">{recipe.name}</span>
+            <Badge variant="outline" className="text-[10px] h-4">v{recipe.version}</Badge>
+            <Badge className={cn('text-[10px] h-4 border', cfg.bg, cfg.color, cfg.border)}>
+              {cfg.label}
+            </Badge>
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3 flex-wrap">
+            <span><Package size={10} className="inline mr-0.5" />{recipe.sku.name}</span>
+            {recipe.batchSize && <span>{recipe.batchSize} {recipe.batchUnit}</span>}
+            {recipe.yieldPct != null && <span>{recipe.yieldPct}% yield</span>}
+            {recipe.cycleTimeSecs != null && <span><Clock3 size={10} className="inline mr-0.5" />{(recipe.cycleTimeSecs / 60).toFixed(0)} min</span>}
+            <span>{recipe._count.ingredients} ingredients</span>
+            {recipe.estimatedMaterialCost != null && (
+              <span className="text-green-400 flex items-center gap-0.5">
+                <DollarSign size={9} />{recipe.estimatedMaterialCost.toFixed(2)}
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Recipe cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {isLoading ? (
-            Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="industrial-card rounded-xl p-4"><div className="shimmer h-32 rounded" /></div>
-            ))
-          ) : filtered.length === 0 ? (
-            <div className="col-span-full text-center py-12 text-muted-foreground">No recipes found</div>
-          ) : (
-            filtered.map((recipe, i) => {
-            const cfg = STATUS_CONFIG[recipe.status];
-            return (
-              <motion.div key={recipe.id} initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ delay:i*0.04 }}
-                className="industrial-card rounded-xl p-4 flex flex-col gap-3 hover:border-brand-500/40 cursor-pointer transition-colors">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="font-mono text-[10px] text-muted-foreground">{recipe.code} · {recipe.version}</div>
-                    <div className="font-semibold text-sm mt-0.5 leading-tight">{recipe.name}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">{recipe.product}</div>
-                  </div>
-                  <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0', cfg.bg, cfg.color)}>
-                    {recipe.status === 'LOCKED' ? <Lock size={9}/> : <Unlock size={9}/>}
-                    {cfg.label}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  {[
-                    { label:'Cycle Time', value:`${recipe.cycleTime}s` },
-                    { label:'Steps',      value:recipe.steps },
-                    { label:'Materials',  value:recipe.materials },
-                  ].map(m => (
-                    <div key={m.label} className="bg-muted/30 rounded-lg p-2">
-                      <div className="text-sm font-bold">{m.value}</div>
-                      <div className="text-[10px] text-muted-foreground">{m.label}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {recipe.yield > 0 && (
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-muted-foreground">Expected Yield</span>
-                    <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full bg-green-500 rounded-full" style={{ width:`${recipe.yield}%` }} />
-                    </div>
-                    <span className="text-green-400 font-medium">{recipe.yield}%</span>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between pt-2 border-t border-border/30">
-                  <span className="text-[10px] text-muted-foreground">Modified {recipe.lastModified.slice(0, 10)}{recipe.modifiedBy ? ` by ${recipe.modifiedBy}` : ''}</span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-6 w-6"><MoreHorizontal size={11}/></Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleOpenEdit(recipe)}>
-                        <Pencil className="w-3 h-3 mr-2" />Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem><Copy className="w-3 h-3 mr-2" />Duplicate</DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive" onClick={() => setDeleteDialog({ id: recipe.id, name: recipe.name })}>
-                        <Trash2 className="w-3 h-3 mr-2" />Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </motion.div>
-            )
-          })
+        {/* Actions */}
+        <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+          {recipe.status === 'DRAFT' && (
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onSubmit}>
+              <Send size={11} className="mr-1" />Review
+            </Button>
           )}
+          {recipe.status === 'REVIEW' && (
+            <Button size="sm" variant="outline" className="h-7 text-xs text-green-500 border-green-500/30 hover:bg-green-500/10" onClick={onApprove}>
+              <ShieldCheck size={11} className="mr-1" />Approve
+            </Button>
+          )}
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7">
+                <MoreHorizontal size={13} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onClone}>
+                <Copy size={12} className="mr-2" />Clone to new version
+              </DropdownMenuItem>
+              {recipe.status === 'APPROVED' && (
+                <DropdownMenuItem onClick={onObsolete} className="text-amber-500">
+                  <Archive size={12} className="mr-2" />Mark Obsolete
+                </DropdownMenuItem>
+              )}
+              {recipe.status === 'DRAFT' && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={onDelete} className="text-destructive">
+                    <Trash2 size={12} className="mr-2" />Delete
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {isExpanded ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
         </div>
       </div>
 
-      <FormDialog
-        open={formOpen}
-        onClose={handleCloseForm}
-        title={editRecipe ? 'Edit Recipe' : 'Create Recipe'}
-        onSubmit={handleSubmit}
-        isSubmitting={createMutation.isPending || updateMutation.isPending}
-        isValid={isValid}
-      >
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>Recipe Code *</Label>
-            <Input value={form.code} onChange={e => setForm(v => ({ ...v, code: e.target.value }))} className="mt-1" placeholder="RCP-001" />
-          </div>
-          <div>
-            <Label>Version *</Label>
-            <Input value={form.version} onChange={e => setForm(v => ({ ...v, version: e.target.value }))} className="mt-1" placeholder="v1.0" />
-          </div>
-          <div className="col-span-2">
-            <Label>Recipe Name *</Label>
-            <Input value={form.name} onChange={e => setForm(v => ({ ...v, name: e.target.value }))} className="mt-1" />
-          </div>
-          <div className="col-span-2">
-            <Label className="flex items-center gap-1.5"><Package size={11} className="text-muted-foreground" />Product / SKU *</Label>
-            <Select value={form.product} onValueChange={v => setForm(f => ({ ...f, product: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select a product..." /></SelectTrigger>
-              <SelectContent className="max-h-60">
-                {skus.length === 0
-                  ? <SelectItem value="_none" disabled>No products available</SelectItem>
-                  : skus.map(sku => (
-                    <SelectItem key={sku.id} value={sku.name}>
-                      <div className="flex flex-col">
-                        <span className="text-xs font-medium">{sku.name}</span>
-                        <span className="text-[10px] text-muted-foreground">{sku.itemNumber ?? sku.code}{sku.brand ? ` · ${sku.brand}` : ''}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Status *</Label>
-            <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v as any }))}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="DRAFT">Draft</SelectItem>
-                <SelectItem value="ACTIVE">Active</SelectItem>
-                <SelectItem value="LOCKED">Locked</SelectItem>
-                <SelectItem value="ARCHIVED">Archived</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Cycle Time (s) *</Label>
-            <Input type="number" value={form.cycleTime} onChange={e => setForm(v => ({ ...v, cycleTime: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
-            <Label>Expected Yield (%)</Label>
-            <Input type="number" value={form.yieldPct} onChange={e => setForm(v => ({ ...v, yieldPct: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
-            <Label>Steps *</Label>
-            <Input type="number" value={form.steps} onChange={e => setForm(v => ({ ...v, steps: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
-            <Label>Materials</Label>
-            <Input type="number" value={form.materials} onChange={e => setForm(v => ({ ...v, materials: e.target.value }))} className="mt-1" />
-          </div>
-        </div>
-      </FormDialog>
+      {/* Expanded: Ingredients */}
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0 }}
+            animate={{ height: 'auto' }}
+            exit={{ height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="border-t p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Bill of Materials ({recipe.ingredients?.length ?? 0} ingredients)
+                </div>
+                {(recipe.status === 'DRAFT' || recipe.status === 'REVIEW') && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onAddIngredient}>
+                    <Plus size={11} className="mr-1" />Add Ingredient
+                  </Button>
+                )}
+              </div>
 
-      <DeleteDialog
-        open={!!deleteDialog}
-        onClose={() => setDeleteDialog(null)}
-        onConfirm={() => deleteDialog && deleteMutation.mutate(deleteDialog.id)}
-        title={`Delete recipe ${deleteDialog?.name}?`}
-        description="This will permanently delete this recipe and all related data."
-        isDeleting={deleteMutation.isPending}
-      />
+              {(recipe.ingredients?.length ?? 0) === 0 ? (
+                <div className="text-xs text-muted-foreground p-4 border rounded-lg border-dashed text-center">
+                  No ingredients yet. Add raw materials to define the BOM.
+                </div>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/40">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Material</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Phase</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Qty/Batch</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Scrap %</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Cost/unit</th>
+                        <th className="px-3 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(recipe.ingredients ?? []).map((ing, i) => (
+                        <tr key={ing.id} className={cn('border-t', i % 2 === 0 ? '' : 'bg-muted/20')}>
+                          <td className="px-3 py-2">
+                            <div className="font-medium">{ing.rawMaterial.name}</div>
+                            <div className="text-[10px] text-muted-foreground">{ing.rawMaterial.code}</div>
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">{ing.phase || '—'}</td>
+                          <td className="px-3 py-2 text-right">
+                            <span className="font-mono">{ing.quantityPer} {ing.unit}</span>
+                          </td>
+                          <td className="px-3 py-2 text-right text-muted-foreground">
+                            {ing.scrapFactor > 0 ? `${ing.scrapFactor}%` : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-right text-muted-foreground">
+                            {ing.rawMaterial.unitCost != null ? `$${ing.rawMaterial.unitCost}` : '—'}
+                          </td>
+                          <td className="px-3 py-2">
+                            {(recipe.status === 'DRAFT' || recipe.status === 'REVIEW') && (
+                              <Button
+                                variant="ghost" size="icon" className="h-6 w-6 text-destructive"
+                                onClick={() => onRemoveIngredient(ing.id)}
+                              >
+                                <Trash2 size={11} />
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {recipe.estimatedMaterialCost != null && (
+                      <tfoot className="border-t bg-muted/30">
+                        <tr>
+                          <td colSpan={4} className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground">
+                            Estimated material cost / batch:
+                          </td>
+                          <td className="px-3 py-2 text-right text-xs font-bold text-green-400">
+                            ${recipe.estimatedMaterialCost.toFixed(2)}
+                          </td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              )}
+
+              {/* Meta */}
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-muted-foreground">
+                {recipe.process && (
+                  <div><span className="font-medium text-foreground">Process:</span> {recipe.process.name} v{recipe.process.version}</div>
+                )}
+                {recipe.shelfLifeDays && (
+                  <div><span className="font-medium text-foreground">Shelf Life:</span> {recipe.shelfLifeDays} days</div>
+                )}
+                {recipe.storageConditions && (
+                  <div><span className="font-medium text-foreground">Storage:</span> {recipe.storageConditions}</div>
+                )}
+                {recipe.approvedBy && (
+                  <div><span className="font-medium text-foreground">Approved by:</span> {recipe.approvedBy.name}</div>
+                )}
+                {recipe._count.workOrders > 0 && (
+                  <div><span className="font-medium text-foreground">Work Orders:</span> {recipe._count.workOrders}</div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
-  )
+  );
 }

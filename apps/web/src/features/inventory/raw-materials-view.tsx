@@ -21,6 +21,13 @@ import { TablePagination } from '@/components/ui/table-pagination';
 
 // ── Types ────────────────────────────────────────────────────
 
+interface StorageLocationOption {
+  id: string;
+  code: string;
+  name: string;
+  zone: string;
+}
+
 interface RawMaterial {
   id: string;
   code: string;
@@ -34,6 +41,7 @@ interface RawMaterial {
   minStock: number;
   reorderPoint: number | null;
   storageLocation: string | null;
+  storageLocationId: string | null;
   supplierName: string | null;
   isLowStock: boolean;
   stockValue: number | null;
@@ -57,7 +65,7 @@ interface MaterialFormState {
   minStock: string;
   maxStock: string;
   reorderPoint: string;
-  storageLocation: string;
+  storageLocationId: string;
   supplierName: string;
   leadTimeDays: string;
 }
@@ -76,7 +84,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const EMPTY_FORM: MaterialFormState = {
   code: '', name: '', category: '', unit: 'KG', unitCost: '',
-  minStock: '', maxStock: '', reorderPoint: '', storageLocation: '',
+  minStock: '', maxStock: '', reorderPoint: '', storageLocationId: '',
   supplierName: '', leadTimeDays: '',
 };
 
@@ -103,6 +111,13 @@ export function RawMaterialsView() {
   const { toast } = useToast();
 
   // ── Queries ─────────────────────────────────────────────────
+
+  const { data: storageLocData } = useQuery({
+    queryKey: ['inventory', 'storage-locations'],
+    queryFn: () => api.get<{ data: StorageLocationOption[] }>('/inventory/storage-locations'),
+    staleTime: 300_000,
+  });
+  const storageLocations: StorageLocationOption[] = (storageLocData as any)?.data ?? (storageLocData as any) ?? [];
 
   const { data, isLoading } = useQuery({
     queryKey: ['inventory', 'raw-materials', { search, category: categoryFilter, lowStock: lowStockOnly }, page],
@@ -185,7 +200,7 @@ export function RawMaterialsView() {
       minStock: material.minStock.toString(),
       maxStock: '',
       reorderPoint: material.reorderPoint?.toString() ?? '',
-      storageLocation: material.storageLocation ?? '',
+      storageLocationId: material.storageLocationId ?? '',
       supplierName: material.supplierName ?? '',
       leadTimeDays: '',
     });
@@ -207,7 +222,7 @@ export function RawMaterialsView() {
     minStock: parseInt(form.minStock) || 0,
     maxStock: form.maxStock ? parseInt(form.maxStock) : null,
     reorderPoint: form.reorderPoint ? parseInt(form.reorderPoint) : null,
-    storageLocation: form.storageLocation || null,
+    storageLocationId: form.storageLocationId || null,
     supplierName: form.supplierName || null,
     leadTimeDays: form.leadTimeDays ? parseInt(form.leadTimeDays) : null,
   });
@@ -549,12 +564,21 @@ export function RawMaterialsView() {
               {/* Storage Location */}
               <div className="space-y-1.5">
                 <Label className="text-xs">Storage Location</Label>
-                <Input
-                  value={form.storageLocation}
-                  onChange={e => setForm(p => ({ ...p, storageLocation: e.target.value }))}
-                  placeholder="e.g. Warehouse A, Rack 3"
-                  className="h-9"
-                />
+                <Select
+                  value={form.storageLocationId || '__none__'}
+                  onValueChange={v => setForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
+                >
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select location…" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {storageLocations.map(loc => (
+                      <SelectItem key={loc.id} value={loc.id}>
+                        {loc.code} — {loc.name}
+                        <span className="ml-1 text-xs text-muted-foreground">({loc.zone})</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Supplier */}

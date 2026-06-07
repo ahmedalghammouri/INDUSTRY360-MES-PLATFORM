@@ -16,6 +16,7 @@ export interface CreateRawMaterialDto {
   maxStock?: number;
   reorderPoint?: number;
   storageLocation?: string;
+  storageLocationId?: string;
   supplierName?: string;
   leadTimeDays?: number;
 }
@@ -64,6 +65,7 @@ export class RawMaterialsService {
       this.prisma.rawMaterial.count({ where }),
       this.prisma.rawMaterial.findMany({
         where,
+        include: { storageLocationRef: { select: { id: true, code: true, name: true, zone: true } } },
         orderBy: [{ category: 'asc' }, { name: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
@@ -94,6 +96,7 @@ export class RawMaterialsService {
     const factoryFilter = factoryId ? { factoryId } : {};
     const material = await this.prisma.rawMaterial.findFirst({
       where: { id, ...factoryFilter, isActive: true },
+      include: { storageLocationRef: { select: { id: true, code: true, name: true, zone: true } } },
     });
     if (!material) throw new NotFoundException('Raw material not found');
     return this.enrichMaterial(material);
@@ -128,11 +131,13 @@ export class RawMaterialsService {
         maxStock: dto.maxStock,
         reorderPoint: dto.reorderPoint,
         storageLocation: dto.storageLocation,
+        storageLocationId: dto.storageLocationId ?? null,
         supplierName: dto.supplierName,
         leadTimeDays: dto.leadTimeDays,
         currentStock: 0,
         isActive: true,
       },
+      include: { storageLocationRef: { select: { id: true, code: true, name: true, zone: true } } },
     });
 
     await this.traceability.logEvent({
@@ -178,9 +183,11 @@ export class RawMaterialsService {
         ...(dto.maxStock !== undefined && { maxStock: dto.maxStock }),
         ...(dto.reorderPoint !== undefined && { reorderPoint: dto.reorderPoint }),
         ...(dto.storageLocation !== undefined && { storageLocation: dto.storageLocation }),
+        ...(dto.storageLocationId !== undefined && { storageLocationId: dto.storageLocationId }),
         ...(dto.supplierName !== undefined && { supplierName: dto.supplierName }),
         ...(dto.leadTimeDays !== undefined && { leadTimeDays: dto.leadTimeDays }),
       },
+      include: { storageLocationRef: { select: { id: true, code: true, name: true, zone: true } } },
     });
 
     await this.traceability.logEvent({
@@ -333,7 +340,9 @@ export class RawMaterialsService {
       minStock: m.minStock,
       maxStock: m.maxStock,
       reorderPoint: m.reorderPoint,
-      storageLocation: m.storageLocation,
+      storageLocation: m.storageLocationRef?.name ?? m.storageLocation,
+      storageLocationId: m.storageLocationId,
+      storageLocationRef: m.storageLocationRef ?? null,
       supplierName: m.supplierName,
       leadTimeDays: m.leadTimeDays,
       isActive: m.isActive,

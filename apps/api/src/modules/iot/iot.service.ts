@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
+import { EnergyContextService } from './energy-context.service';
 
 export interface TelemetryDto {
   machineId: string;
@@ -17,6 +18,7 @@ export class IotService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly energyContext: EnergyContextService,
   ) {}
 
   async ingestTelemetry(factoryId: string | null, dto: TelemetryDto) {
@@ -340,6 +342,82 @@ export class IotService {
     const tag = await this.prisma.tagDefinition.findFirst({ where: { id, ...factoryFilter } });
     if (!tag) throw new NotFoundException('Tag not found');
     await this.prisma.tagDefinition.update({ where: { id }, data: { isActive: false } });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // ENERGY READINGS
+  // ────────────────────────────────────────────────────────────
+
+  async ingestEnergyReading(factoryId: string | null, dto: {
+    meterId: string;
+    value: number;     // cumulative kWh from the meter
+    powerKw?: number;  // instantaneous power reading
+    timestamp?: string;
+  }) {
+    const meter = await (this.prisma as any).energyMeter.findUnique({
+      where: { id: dto.meterId },
+      select: { id: true, factoryId: true, machineId: true },
+    });
+    if (!meter) throw new NotFoundException(`Energy meter ${dto.meterId} not found`);
+
+    const resolvedFactoryId = factoryId ?? meter.factoryId;
+    const ts = dto.timestamp ? new Date(dto.timestamp) : new Date();
+
+    const reading = await this.prisma.energyReading.create({
+      data: {
+        meterId: dto.meterId,
+        factoryId: resolvedFactoryId,
+        timestamp: ts,
+        value: dto.value,
+        ...(dto.powerKw !== undefined && { powerKw: dto.powerKw }),
+      } as any,
+    });
+
+    // Async context enrichment: link to WO, WorkCenter, machine state
+    void this.energyContext.enrichEnergyReading(reading.id, meter.machineId).then(async () => {
+      const anomaly = await this.energyContext.detectPowerAnomaly(reading.id);
+      if (anomaly.isAnomaly) {
+        this.eventEmitter.emit('energy.anomaly.detected', {
+          readingId: reading.id,
+          factoryId: resolvedFactoryId,
+          machineId: meter.machineId,
+          message: anomaly.message,
+          timestamp: ts.toISOString(),
+        });
+      }
+    });
+
+    return {
+      id: reading.id,
+      meterId: dto.meterId,
+      factoryId: resolvedFactoryId,
+      timestamp: ts.toISOString(),
+      value: dto.value,
+      powerKw: dto.powerKw ?? null,
+    };
+  }
+
+  async getEnergyTimeseries(factoryId: string | null, filters: {
+    workOrderId?: string;
+    workCenterId?: string;
+    from: string;
+    to: string;
+  }) {
+    return this.energyContext.getEnergyTimeseries({
+      factoryId: factoryId ?? undefined,
+      workOrderId: filters.workOrderId,
+      workCenterId: filters.workCenterId,
+      from: new Date(filters.from),
+      to: new Date(filters.to),
+    });
+  }
+
+  async getEnergyWOSummary(workOrderId: string) {
+    return this.energyContext.getWOEnergySummary(workOrderId);
+  }
+
+  async getEnergyByWorkCenter(factoryId: string, from: string, to: string) {
+    return this.energyContext.getEnergyByWorkCenter(factoryId, new Date(from), new Date(to));
   }
 
   private async getDefaultFactoryId(): Promise<string> {

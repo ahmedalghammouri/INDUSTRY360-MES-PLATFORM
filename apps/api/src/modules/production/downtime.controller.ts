@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Body, Param, Query,
+  Controller, Get, Post, Patch, Delete, Body, Param, Query,
   HttpCode, HttpStatus, ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
@@ -15,6 +15,11 @@ import {
   AcknowledgeDowntimeDto,
 } from './dto/downtime.dto';
 
+// A minimal DTO for the "close" alias used by the frontend
+class CloseDowntimeDto {
+  endTime?: string;
+}
+
 interface RequestUser {
   id: string;
   factoryId: string | null;
@@ -22,7 +27,7 @@ interface RequestUser {
 
 @ApiTags('Downtime')
 @ApiBearerAuth('JWT-auth')
-@Controller('downtime')
+@Controller('production/downtime')
 export class DowntimeController {
   constructor(private readonly downtimeService: DowntimeService) {}
 
@@ -108,6 +113,66 @@ export class DowntimeController {
     return this.downtimeService.acknowledgeDowntimeEvent(user.factoryId, id, user.id, dto.notes);
   }
 
+  // ── Frontend-friendly flat routes (no /events/ prefix) ──────
+
+  @Get()
+  @ApiOperation({ summary: 'List downtime events (flat route)' })
+  async findEventsFlat(
+    @CurrentUser() user: RequestUser,
+    @Query('machineId') machineId?: string,
+    @Query('workOrderId') workOrderId?: string,
+    @Query('isOpen') isOpen?: string,
+    @Query('includeOpen') includeOpen?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+  ) {
+    const openFlag = isOpen === 'true' || includeOpen === 'true' ? true : undefined;
+    return this.downtimeService.findDowntimeEvents(user.factoryId, {
+      machineId,
+      workOrderId,
+      isOpen: openFlag,
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+    });
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create downtime event (flat route)' })
+  async createEventFlat(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateDowntimeEventDto,
+  ) {
+    return this.downtimeService.createDowntimeEvent(user.factoryId, user.id, dto);
+  }
+
+  @Patch(':id/close')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Close/end an open downtime event' })
+  async closeEvent(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CloseDowntimeDto,
+  ) {
+    return this.downtimeService.endDowntimeEvent(user.factoryId, id, user.id, {
+      endTime: dto.endTime,
+    } as EndDowntimeEventDto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermissions('production:execute')
+  @AuditLog('DOWNTIME_EVENT_DELETE')
+  @ApiOperation({ summary: 'Delete a downtime event (supervisor only, for data correction)' })
+  async deleteEvent(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.downtimeService.deleteDowntimeEvent(user.factoryId, id);
+  }
+
+  // ──────────────────────────────────────────────────────────────
+
   @Get('causes')
   @ApiOperation({ summary: 'Get downtime cause codes (reference data)' })
   @ApiQuery({ name: 'machineId', required: false })
@@ -131,5 +196,36 @@ export class DowntimeController {
     const from = dateFrom ? new Date(dateFrom) : new Date(now.setHours(0, 0, 0, 0));
     const to = dateTo ? new Date(dateTo) : new Date();
     return this.downtimeService.getDowntimeSummary(user.factoryId, from, to);
+  }
+
+  // ── Reason Tree ────────────────────────────────────────────────
+
+  @Get('reasons/tree')
+  @ApiOperation({ summary: 'Get 3-level downtime reason tree (L1 → L2 → L3 leaf codes)' })
+  async getReasonTree(@CurrentUser() user: RequestUser) {
+    return this.downtimeService.getReasonTree(user.factoryId);
+  }
+
+  @Post('reasons')
+  @ApiOperation({ summary: 'Create a reason tree node (L1, L2, or L3)' })
+  async createReason(@CurrentUser() user: RequestUser, @Body() dto: any) {
+    return this.downtimeService.createReasonNode(user.factoryId ?? '', dto);
+  }
+
+  @Patch('reasons/:id')
+  @ApiOperation({ summary: 'Update a reason node (name, active, sortOrder, etc.)' })
+  async updateReason(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() dto: any,
+  ) {
+    return this.downtimeService.updateReasonNode(user.factoryId ?? '', id, dto);
+  }
+
+  @Delete('reasons/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a leaf reason node (only if unused)' })
+  async deleteReason(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.downtimeService.deleteReasonNode(user.factoryId ?? '', id);
   }
 }

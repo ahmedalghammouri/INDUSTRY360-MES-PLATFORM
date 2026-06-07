@@ -9,6 +9,7 @@ import type {
   StartWODto, CompleteWODto, CancelWODto,
   SparePartRequestItemDto, IssueSparePartDto,
 } from './dto/maintenance.dto';
+import { TraceabilityService } from '../traceability/traceability.service';
 
 const VALID_MAINT_TRANSITIONS: Record<MaintStatus, MaintStatus[]> = {
   OPEN: ['ASSIGNED', 'AWAITING_PARTS', 'IN_PROGRESS', 'CANCELLED'],
@@ -27,6 +28,7 @@ export class MaintenanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly traceability: TraceabilityService,
   ) {}
 
   // ────────────────────────────────────────────────────────────
@@ -169,6 +171,18 @@ export class MaintenanceService {
       wo,
       factoryId: resolvedFactoryId,
       isEmergency: dto.type === 'EMERGENCY',
+    });
+
+    void this.traceability.logEvent({
+      factoryId: resolvedFactoryId,
+      entityType: 'MAINT_WO',
+      entityId: wo.id,
+      entityCode: woNumber,
+      eventType: 'CREATED',
+      toValue: initialStatus,
+      performedById: userId,
+      notes: `${dto.type} - ${dto.priority}${hasParts ? ' | Parts requested' : ''}`,
+      eventData: { type: dto.type, priority: dto.priority, machineId: dto.machineId },
     });
 
     this.logger.log(`Maintenance WO ${woNumber} created (${dto.type} - ${dto.priority})`);
@@ -341,6 +355,18 @@ export class MaintenanceService {
       factoryId: wo.factoryId,
     });
 
+    void this.traceability.logEvent({
+      factoryId: wo.factoryId,
+      entityType: 'MAINT_WO',
+      entityId: id,
+      entityCode: wo.woNumber,
+      eventType: 'STATUS_CHANGED',
+      fromValue: wo.status,
+      toValue: MaintStatus.ASSIGNED,
+      notes: `Assigned to ${user.name}`,
+      eventData: { assignedToId: dto.assignedToId, technicianName: user.name },
+    });
+
     return updated;
   }
 
@@ -378,6 +404,18 @@ export class MaintenanceService {
     this.eventEmitter.emit('maintenance.wo.started', {
       wo: updated,
       factoryId: wo.factoryId,
+    });
+
+    void this.traceability.logEvent({
+      factoryId: wo.factoryId,
+      entityType: 'MAINT_WO',
+      entityId: id,
+      entityCode: wo.woNumber,
+      eventType: 'STATUS_CHANGED',
+      fromValue: wo.status,
+      toValue: MaintStatus.IN_PROGRESS,
+      notes: dto.notes,
+      eventData: { runtimeHoursAtService: dto.runtimeHoursAtService, machineId: wo.machineId },
     });
 
     return updated;
@@ -472,6 +510,18 @@ export class MaintenanceService {
       totalCost,
     });
 
+    void this.traceability.logEvent({
+      factoryId: wo.factoryId,
+      entityType: 'MAINT_WO',
+      entityId: id,
+      entityCode: wo.woNumber,
+      eventType: 'STATUS_CHANGED',
+      fromValue: wo.status,
+      toValue: MaintStatus.COMPLETED,
+      notes: dto.notes ?? `Completed in ${dto.actualHours}h`,
+      eventData: { actualHours: dto.actualHours, laborCost, partsCost, totalCost },
+    });
+
     this.logger.log(`Maintenance WO ${wo.woNumber} completed in ${dto.actualHours}h`);
     return updated;
   }
@@ -496,24 +546,58 @@ export class MaintenanceService {
       });
     }
 
+    void this.traceability.logEvent({
+      factoryId: wo.factoryId,
+      entityType: 'MAINT_WO',
+      entityId: id,
+      entityCode: wo.woNumber,
+      eventType: 'STATUS_CHANGED',
+      fromValue: wo.status,
+      toValue: MaintStatus.CANCELLED,
+      performedById: userId,
+      notes: dto.reason,
+    });
+
     return updated;
   }
 
   async holdWO(factoryId: string | null, id: string, reason?: string) {
     const wo = await this.assertTransition(factoryId, id, MaintStatus.ON_HOLD);
-    return this.prisma.maintenanceWO.update({
+    const updated = await this.prisma.maintenanceWO.update({
       where: { id },
       data: { status: MaintStatus.ON_HOLD, ...(reason && { notes: reason }) },
     });
+    void this.traceability.logEvent({
+      factoryId: wo.factoryId,
+      entityType: 'MAINT_WO',
+      entityId: id,
+      entityCode: wo.woNumber,
+      eventType: 'STATUS_CHANGED',
+      fromValue: wo.status,
+      toValue: MaintStatus.ON_HOLD,
+      notes: reason,
+    });
+    return updated;
   }
 
   async resumeWO(factoryId: string | null, id: string) {
     const wo = await this.assertTransition(factoryId, id, MaintStatus.IN_PROGRESS);
     const resumeStatus = wo.startedAt ? MaintStatus.IN_PROGRESS : MaintStatus.ASSIGNED;
-    return this.prisma.maintenanceWO.update({
+    const updated = await this.prisma.maintenanceWO.update({
       where: { id },
       data: { status: resumeStatus },
     });
+    void this.traceability.logEvent({
+      factoryId: wo.factoryId,
+      entityType: 'MAINT_WO',
+      entityId: id,
+      entityCode: wo.woNumber,
+      eventType: 'STATUS_CHANGED',
+      fromValue: MaintStatus.ON_HOLD,
+      toValue: resumeStatus,
+      notes: 'Work order resumed',
+    });
+    return updated;
   }
 
   // ────────────────────────────────────────────────────────────
@@ -803,6 +887,20 @@ export class MaintenanceService {
       quantityIssued: dto.quantityIssued,
       issuedByUserId: userId,
       factoryId: wo.factoryId,
+    });
+
+    void this.traceability.logEvent({
+      factoryId: wo.factoryId,
+      entityType: 'SPARE_PART',
+      entityId: part.id,
+      entityCode: part.partNumber,
+      eventType: 'PARTS_ISSUED',
+      quantity: dto.quantityIssued,
+      performedById: userId,
+      notes: `Issued for MO ${wo.woNumber}`,
+      relatedType: 'MAINT_WO',
+      relatedId: woId,
+      eventData: { partName: part.name, woNumber: wo.woNumber, newStatus },
     });
 
     this.logger.log(`Spare part ${part.partNumber} x${dto.quantityIssued} issued for WO ${wo.woNumber}`);

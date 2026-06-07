@@ -113,7 +113,7 @@ export default function LoginPage() {
               <Factory className="w-6 h-6 text-white" />
             </div>
             <div>
-              <div className="text-white font-bold text-xl tracking-tight">INDUSTRY360</div>
+              <div className="text-white font-bold text-xl tracking-tight">STAR-MES</div>
               <div className="text-primary/70 text-xs font-medium tracking-widest uppercase">MES Platform</div>
             </div>
           </div>
@@ -154,7 +154,7 @@ export default function LoginPage() {
           </div>
 
           <div className="text-white/20 text-sm">
-            © 2026 INDUSTRY360 — Enterprise Manufacturing Platform for Saudi Arabia
+            © 2026 STAR-MES — Enterprise Manufacturing Platform for Saudi Arabia
           </div>
         </div>
       </div>
@@ -172,7 +172,7 @@ export default function LoginPage() {
             <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
               <Factory className="w-5 h-5 text-white" />
             </div>
-            <div className="font-bold text-lg">INDUSTRY360 MES</div>
+            <div className="font-bold text-lg">STAR-MES</div>
           </div>
 
           {/* Factory context badge */}

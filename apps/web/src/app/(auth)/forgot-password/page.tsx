@@ -51,7 +51,7 @@ export default function ForgotPasswordPage() {
               <Factory className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="font-bold text-foreground">INDUSTRY360</div>
+              <div className="font-bold text-foreground">STAR-MES</div>
               <div className="text-xs text-muted-foreground">MES Platform</div>
             </div>
           </div>

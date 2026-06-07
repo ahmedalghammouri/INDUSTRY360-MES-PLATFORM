@@ -42,12 +42,17 @@ import {
   GitCommit,
   FlaskConical,
   Truck,
+  MapPin,
+  Workflow,
+  GitMerge,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useSidebarStore } from '@/store/ui-store';
 import { useAuthStore } from '@/store/auth-store';
 import { useFactoryStore } from '@/store/factory-store';
 import { useNotificationStore } from '@/store/notification-store';
+import { api } from '@/services/api.client';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -58,7 +63,8 @@ interface NavItem {
   icon: React.ElementType;
   badge?: string | number;
   badgeVariant?: 'default' | 'destructive' | 'secondary' | 'outline';
-  badgeDynamic?: boolean; // if true, badge value will be injected at render time
+  badgeDynamic?: boolean;
+  dynamicKey?: string;
   children?: NavItem[];
   permission?: string;
 }
@@ -76,34 +82,36 @@ const navItems: NavItem[] = [
     label: 'Production',
     icon: Factory,
     children: [
-      { label: 'Overview',      href: '/production',            icon: Gauge        },
-      { label: 'Work Orders',   href: '/production/orders',     icon: ClipboardList },
-      { label: 'Batches & Lots',href: '/production/batches',    icon: Boxes        },
-      { label: 'Scheduling',    href: '/production/scheduling', icon: Calendar     },
-      { label: 'OEE Analytics', href: '/production/oee',        icon: TrendingUp   },
-      { label: 'Recipes',       href: '/production/recipes',    icon: FileText     },
+      { label: 'Overview',           href: '/production',             icon: Gauge         },
+      { label: 'Work Orders',        href: '/production/orders',      icon: ClipboardList, dynamicKey: 'workOrders',   badgeVariant: 'secondary'    },
+      { label: 'Batches & Lots',     href: '/production/batches',     icon: Boxes         },
+      { label: 'Scheduling',         href: '/production/scheduling',  icon: Calendar      },
+      { label: 'OEE Analytics',      href: '/production/oee',         icon: TrendingUp    },
+      { label: 'Downtime',           href: '/production/downtime',    icon: AlertTriangle, dynamicKey: 'openDowntime',  badgeVariant: 'destructive'  },
+      { label: 'Recipes',            href: '/production/recipes',     icon: FileText      },
+      { label: 'Mfg. Processes',     href: '/production/processes',   icon: Workflow      },
     ],
   },
   {
     label: 'Quality',
     icon: ShieldCheck,
     children: [
-      { label: 'Overview',          href: '/quality',             icon: Activity      },
+      { label: 'Overview',          href: '/quality',             icon: Activity       },
       { label: 'Inspections',       href: '/quality/inspections', icon: ClipboardCheck },
-      { label: 'Non-Conformance',   href: '/quality/ncr',         icon: AlertTriangle, badge: 3, badgeVariant: 'destructive' },
-      { label: 'CAPA',              href: '/quality/capa',        icon: ShieldCheck   },
-      { label: 'SPC Charts',        href: '/quality/spc',         icon: LineChart     },
+      { label: 'Non-Conformance',   href: '/quality/ncr',         icon: AlertTriangle,  dynamicKey: 'openNcr',       badgeVariant: 'destructive'  },
+      { label: 'CAPA',              href: '/quality/capa',        icon: ShieldCheck    },
+      { label: 'SPC Charts',        href: '/quality/spc',         icon: LineChart      },
     ],
   },
   {
     label: 'Maintenance',
     icon: Wrench,
     children: [
-      { label: 'Overview',              href: '/maintenance',             icon: Gauge        },
-      { label: 'Maintenance Orders',     href: '/maintenance/work-orders', icon: ClipboardList },
-      { label: 'Assets & Equipment',    href: '/maintenance/assets',      icon: Cpu          },
-      { label: 'Preventive Maintenance',href: '/maintenance/preventive',  icon: Calendar     },
-      { label: 'Spare Parts',           href: '/maintenance/spare-parts', icon: PackageSearch },
+      { label: 'Overview',               href: '/maintenance',             icon: Gauge         },
+      { label: 'Maintenance Orders',      href: '/maintenance/work-orders', icon: ClipboardList, dynamicKey: 'openMaintenance', badgeVariant: 'secondary'  },
+      { label: 'Assets & Equipment',     href: '/maintenance/assets',      icon: Cpu           },
+      { label: 'Preventive Maintenance', href: '/maintenance/preventive',  icon: Calendar      },
+      { label: 'Spare Parts',            href: '/maintenance/spare-parts', icon: PackageSearch },
     ],
   },
 
@@ -112,12 +120,14 @@ const navItems: NavItem[] = [
     label: 'Inventory',
     icon: Package,
     children: [
-      { label: 'Overview',            href: '/inventory',                  icon: Boxes       },
-      { label: 'Spare Parts',         href: '/inventory/spare-parts',      icon: PackageSearch },
-      { label: 'Spare Part Requests', href: '/inventory/spare-requests',   icon: Truck       },
-      { label: 'Raw Materials',       href: '/inventory/raw-materials',    icon: FlaskConical },
-      { label: 'Products (SKUs)',     href: '/inventory/products',         icon: BoxesIcon   },
-      { label: 'Material Lots',       href: '/inventory/materials',        icon: Layers3     },
+      { label: 'Overview',            href: '/inventory',                     icon: Boxes        },
+      { label: 'Spare Parts',         href: '/inventory/spare-parts',         icon: PackageSearch },
+      { label: 'Spare Part Requests', href: '/inventory/spare-requests',      icon: Truck        },
+      { label: 'Raw Materials',       href: '/inventory/raw-materials',       icon: FlaskConical },
+      { label: 'Products (SKUs)',     href: '/inventory/products',            icon: BoxesIcon    },
+      { label: 'Material Lots',       href: '/inventory/materials',           icon: Layers3      },
+      { label: 'Bill of Materials',   href: '/inventory/bom',                 icon: GitMerge     },
+      { label: 'Storage Locations',   href: '/inventory/storage-locations',   icon: MapPin       },
     ],
   },
   {
@@ -177,7 +187,7 @@ const navItems: NavItem[] = [
     label: 'Notifications',
     href: '/notifications',
     icon: Bell,
-    badgeDynamic: true, // rendered dynamically from store
+    badgeDynamic: true,
     badgeVariant: 'destructive',
   },
 ];
@@ -187,6 +197,45 @@ const bottomNavItems: NavItem[] = [
   { label: 'Settings',      href: '/settings', icon: Settings },
 ];
 
+// ── Live counts fetched once per Sidebar mount, refreshed every 60 s ─────────
+
+function useSidebarCounts(): Record<string, number> {
+  const { data: downtimeData } = useQuery({
+    queryKey: ['sidebar-count-downtime'],
+    queryFn: () => api.get('/production/downtime/events?isOpen=true&limit=1').catch(() => null),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const { data: workOrderData } = useQuery({
+    queryKey: ['sidebar-count-workorders'],
+    queryFn: () => api.get('/production/work-orders?status=IN_PROGRESS&limit=1').catch(() => null),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const { data: ncrData } = useQuery({
+    queryKey: ['sidebar-count-ncr'],
+    queryFn: () => api.get('/quality/ncr?status=OPEN&limit=1').catch(() => null),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const { data: maintenanceData } = useQuery({
+    queryKey: ['sidebar-count-maintenance'],
+    queryFn: () => api.get('/maintenance/work-orders?status=OPEN&limit=1').catch(() => null),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  return {
+    openDowntime:    (downtimeData  as any)?.total   ?? 0,
+    workOrders:      (workOrderData as any)?.total   ?? 0,
+    openNcr:         (ncrData       as any)?.total   ?? 0,
+    openMaintenance: (maintenanceData as any)?.total ?? 0,
+  };
+}
+
 // ── SidebarItem ─────────────────────────────────────────────────
 
 interface SidebarItemProps {
@@ -194,9 +243,10 @@ interface SidebarItemProps {
   isCollapsed: boolean;
   depth?: number;
   dynamicBadge?: number;
+  countsMap?: Record<string, number>;
 }
 
-function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge }: SidebarItemProps) {
+function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge, countsMap }: SidebarItemProps) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(() => {
     if (!item.children) return false;
@@ -208,7 +258,23 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge }: SidebarItem
     : item.children?.some((c) => c.href && pathname.startsWith(c.href));
 
   const Icon = item.icon;
-  const badge = item.badgeDynamic ? (dynamicBadge && dynamicBadge > 0 ? dynamicBadge : undefined) : item.badge;
+
+  // Resolve badge: static > dynamic-notification > dynamic-count
+  const resolvedBadge = (() => {
+    if (item.badge !== undefined) return item.badge;
+    if (item.badgeDynamic && dynamicBadge && dynamicBadge > 0) return dynamicBadge;
+    if (item.dynamicKey && countsMap) {
+      const n = countsMap[item.dynamicKey] ?? 0;
+      return n > 0 ? n : undefined;
+    }
+    return undefined;
+  })();
+
+  // For parent groups: show a dot if any child has a nonzero count
+  const childHasAlert = item.children?.some(c => {
+    if (!c.dynamicKey || !countsMap) return false;
+    return (countsMap[c.dynamicKey] ?? 0) > 0;
+  });
 
   if (item.children) {
     return (
@@ -223,7 +289,12 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge }: SidebarItem
             isCollapsed && 'justify-center px-2',
           )}
         >
-          <Icon className={cn('shrink-0', isActive && 'text-sidebar-primary')} size={18} />
+          <span className="relative shrink-0">
+            <Icon className={cn(isActive && 'text-sidebar-primary')} size={18} />
+            {childHasAlert && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-destructive ring-2 ring-sidebar" />
+            )}
+          </span>
           <AnimatePresence>
             {!isCollapsed && (
               <motion.span
@@ -259,6 +330,7 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge }: SidebarItem
                   item={child}
                   isCollapsed={false}
                   depth={depth + 1}
+                  countsMap={countsMap}
                 />
               ))}
             </motion.div>
@@ -296,12 +368,12 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge }: SidebarItem
           </motion.span>
         )}
       </AnimatePresence>
-      {!isCollapsed && badge !== undefined && (
+      {!isCollapsed && resolvedBadge !== undefined && (
         <Badge
           variant={item.badgeVariant || 'secondary'}
           className="ml-auto text-[10px] h-4 min-w-4 px-1"
         >
-          {typeof badge === 'number' && badge > 99 ? '99+' : badge}
+          {typeof resolvedBadge === 'number' && resolvedBadge > 99 ? '99+' : resolvedBadge}
         </Badge>
       )}
     </Link>
@@ -314,9 +386,9 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge }: SidebarItem
           <TooltipTrigger asChild>{content}</TooltipTrigger>
           <TooltipContent side="right" className="font-medium">
             {item.label}
-            {badge && (
+            {resolvedBadge !== undefined && (
               <Badge variant={item.badgeVariant || 'secondary'} className="ml-2 text-[10px]">
-                {badge}
+                {resolvedBadge}
               </Badge>
             )}
           </TooltipContent>
@@ -405,6 +477,7 @@ export function Sidebar() {
   const { isCollapsed, toggle } = useSidebarStore();
   const { user } = useAuthStore();
   const { unreadCount } = useNotificationStore();
+  const countsMap = useSidebarCounts();
 
   return (
     <motion.aside
@@ -427,7 +500,7 @@ export function Sidebar() {
                 className="overflow-hidden"
               >
                 <div className="text-sidebar-foreground font-bold text-sm whitespace-nowrap">
-                  INDUSTRY360
+                  STAR-MES
                 </div>
                 <div className="text-sidebar-foreground/40 text-[10px] font-medium tracking-widest uppercase whitespace-nowrap">
                   MES Platform
@@ -456,6 +529,7 @@ export function Sidebar() {
             item={item}
             isCollapsed={isCollapsed}
             dynamicBadge={item.badgeDynamic ? unreadCount : undefined}
+            countsMap={countsMap}
           />
         ))}
       </nav>

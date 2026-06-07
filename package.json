@@ -1,8 +1,8 @@
 {
-  "name": "industry360-mes-platform",
+  "name": "star-mes-platform",
   "version": "1.0.0",
   "private": true,
-  "description": "INDUSTRY360 MES Platform - Enterprise Manufacturing Execution System",
+  "description": "STAR-MES Platform - Enterprise Manufacturing Execution System",
   "workspaces": [
     "apps/*",
     "packages/*",

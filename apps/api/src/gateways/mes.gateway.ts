@@ -51,7 +51,7 @@ export class MesWebSocketGateway implements OnGatewayInit, OnGatewayConnection, 
 
       this.logger.log(`Client connected: ${client.id} (user: ${payload.sub})`);
       client.emit('connected', {
-        message: 'Connected to INDUSTRY360 MES real-time feed',
+        message: 'Connected to STAR-MES real-time feed',
         timestamp: new Date().toISOString(),
       });
     } catch {

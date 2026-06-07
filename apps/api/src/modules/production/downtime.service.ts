@@ -6,8 +6,15 @@ import type {
   CreateDowntimeEventDto, UpdateDowntimeEventDto, EndDowntimeEventDto,
 } from './dto/downtime.dto';
 
-// NCC requirement: 1 minute (60 seconds) before classifying as downtime
-const DOWNTIME_THRESHOLD_SECONDS = 60;
+// ── Constants ─────────────────────────────────────────────────
+
+const DOWNTIME_THRESHOLD_SECONDS = 60; // NCC requirement
+
+// Reason codes that do NOT count against OEE Availability
+const OEE_EXCLUDED_REASON_CODES = new Set(['PLANNED_MAINTENANCE', 'EXTERNAL']);
+
+// Reason codes that ARE Planned Stops (reduce net planned time, not OEE)
+const PLANNED_STOP_CODES = new Set(['PLANNED_MAINTENANCE', 'CHANGEOVER']);
 
 @Injectable()
 export class DowntimeService {
@@ -18,68 +25,92 @@ export class DowntimeService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  // ────────────────────────────────────────────────────────────
-  // DOWNTIME EVENTS
-  // ────────────────────────────────────────────────────────────
+  // ── Create ───────────────────────────────────────────────────
 
   async createDowntimeEvent(factoryId: string | null, userId: string, dto: CreateDowntimeEventDto) {
     const factoryFilter = factoryId ? { factoryId } : {};
 
-    const machine = await this.prisma.machine.findFirst({
-      where: { id: dto.machineId, ...factoryFilter },
-    });
-    if (!machine) throw new NotFoundException('Machine not found');
+    let machine: { id: string; factoryId: string; name: string; code: string } | null = null;
+    if (dto.machineId) {
+      machine = await this.prisma.machine.findFirst({
+        where: { id: dto.machineId, ...factoryFilter },
+        select: { id: true, factoryId: true, name: true, code: true },
+      });
+      if (!machine) throw new NotFoundException('Machine not found');
 
-    // Check for existing open downtime on this machine
-    const existing = await this.prisma.downtimeEvent.findFirst({
-      where: { machineId: dto.machineId, endTime: null },
-    });
-    if (existing) {
-      throw new BadRequestException(
-        `Machine already has an open downtime event (started ${existing.startTime.toISOString()}). End it before creating a new one.`,
-      );
+      const existing = await this.prisma.downtimeEvent.findFirst({
+        where: { machineId: dto.machineId, endTime: null },
+      });
+      if (existing) {
+        throw new BadRequestException(
+          `Machine already has an open downtime event (started ${existing.startTime.toISOString()}).`,
+        );
+      }
+
+      // Auto-link to active work order if caller didn't specify one
+      if (!dto.workOrderId) {
+        const activeWO = await this.prisma.workOrder.findFirst({
+          where: { machineId: dto.machineId, status: 'IN_PROGRESS' },
+          select: { id: true },
+        });
+        if (activeWO) (dto as any).workOrderId = activeWO.id;
+      }
     }
 
-    const resolvedFactoryId = factoryId ?? machine.factoryId;
-    const startTime = new Date(dto.startTime);
+    const resolvedFactoryId = factoryId ?? machine?.factoryId ?? (await this.getDefaultFactoryId());
+    const startTime = dto.startTime ? new Date(dto.startTime) : new Date();
     const endTime = dto.endTime ? new Date(dto.endTime) : undefined;
     const durationMinutes = endTime
       ? (endTime.getTime() - startTime.getTime()) / 60_000
       : undefined;
 
+    const reasonCode = (dto as any).reasonCode ?? 'UNPLANNED_BREAKDOWN';
+    const affectsOEE = !OEE_EXCLUDED_REASON_CODES.has(reasonCode);
+    const isPlanned = dto.isPlanned ?? PLANNED_STOP_CODES.has(reasonCode);
+
     const event = await this.prisma.downtimeEvent.create({
       data: {
         factoryId: resolvedFactoryId,
-        machineId: dto.machineId,
+        ...(dto.machineId && { machineId: dto.machineId }),
+        workCenterId: (dto as any).workCenterId ?? null,
         workOrderId: dto.workOrderId,
         causeId: dto.causeId,
-        reason: dto.reason,
+        operatorId: (dto as any).operatorId ?? null,
+        reason: (dto as any).description ?? (dto as any).reason,
         category: dto.category as DowntimeCategory,
+        reasonCode: reasonCode as any,
         startTime,
         endTime,
         durationMinutes,
-        isPlanned: dto.isPlanned ?? false,
+        affectsOEE,
+        isPlanned,
         reportedById: userId,
         notes: dto.notes,
-      },
+      } as any,
       include: {
         machine: { select: { name: true, code: true } },
         cause: { select: { code: true, name: true, category: true } },
+        workCenter: { select: { id: true, code: true, name: true, level: true } },
       },
     });
 
-    // Update machine state to BREAKDOWN or PLANNED_STOP
-    await this.updateMachineStateForDowntime(dto.machineId, dto.isPlanned ?? false);
+    if (dto.machineId) {
+      await this.updateMachineStateForDowntime(dto.machineId, isPlanned);
+    }
 
     this.eventEmitter.emit('downtime.event.created', {
       event,
       factoryId: resolvedFactoryId,
-      machineName: machine.name,
+      machineName: machine?.name,
+      reasonCode,
+      affectsOEE,
     });
 
-    this.logger.log(`Downtime event created for machine ${machine.code}: ${dto.category}`);
+    this.logger.log(`Downtime event created${machine ? ` for machine ${machine.code}` : ''}: ${reasonCode}`);
     return event;
   }
+
+  // ── End ──────────────────────────────────────────────────────
 
   async endDowntimeEvent(factoryId: string | null, eventId: string, userId: string, dto: EndDowntimeEventDto) {
     const factoryFilter = factoryId ? { factoryId } : {};
@@ -91,10 +122,9 @@ export class DowntimeService {
     if (!event) throw new NotFoundException('Downtime event not found');
     if (event.endTime) throw new BadRequestException('Downtime event already ended');
 
-    const endTime = new Date(dto.endTime);
-    if (endTime <= event.startTime) {
-      throw new BadRequestException('End time must be after start time');
-    }
+    // Use server time if no endTime provided or if client clock is behind server (Docker clock skew)
+    const requestedEnd = dto.endTime ? new Date(dto.endTime) : new Date();
+    const endTime = requestedEnd <= event.startTime ? new Date() : requestedEnd;
 
     const durationMinutes = (endTime.getTime() - event.startTime.getTime()) / 60_000;
 
@@ -105,37 +135,45 @@ export class DowntimeService {
         durationMinutes,
         ...(dto.causeId && { causeId: dto.causeId }),
         ...(dto.resolution && { notes: dto.resolution }),
-      },
+      } as any,
       include: {
         machine: { select: { name: true, code: true } },
         cause: { select: { code: true, name: true } },
+        workCenter: { select: { id: true, code: true, name: true } },
       },
     });
 
-    // Restore machine state based on active WO
+    // Restore machine state
     const activeWO = await this.prisma.workOrder.findFirst({
       where: { machineId: event.machineId, status: 'IN_PROGRESS' },
     });
-
     await this.prisma.machineCurrentStatus.upsert({
       where: { machineId: event.machineId },
-      create: {
-        machineId: event.machineId,
-        state: activeWO ? 'RUNNING' : 'IDLE',
-        currentWOId: activeWO?.id ?? null,
-      },
-      update: {
-        state: activeWO ? 'RUNNING' : 'IDLE',
-        lastEventAt: new Date(),
-      },
+      create: { machineId: event.machineId, state: activeWO ? 'RUNNING' : 'IDLE', currentWOId: activeWO?.id ?? null },
+      update: { state: activeWO ? 'RUNNING' : 'IDLE', lastEventAt: new Date() },
     });
 
-    // Update work order's downtime total
+    // Accumulate WO downtime
     if (event.workOrderId) {
       await this.prisma.workOrder.update({
         where: { id: event.workOrderId },
         data: { downtimeMinutes: { increment: durationMinutes } },
       });
+    }
+
+    // Compute and store scheduling impact on dependent routing steps
+    if (event.workOrderId && (event as any).reasonCode !== 'MICRO_STOP') {
+      const impact = await this.computeSchedulingImpact(
+        event.workOrderId,
+        (event as any).workCenterId,
+        durationMinutes,
+      );
+      if (impact > 0) {
+        await this.prisma.downtimeEvent.update({
+          where: { id: eventId },
+          data: { schedulingImpactMins: impact } as any,
+        });
+      }
     }
 
     this.eventEmitter.emit('downtime.event.ended', {
@@ -149,11 +187,158 @@ export class DowntimeService {
     return updated;
   }
 
-  async acknowledgeDowntimeEvent(factoryId: string | null, eventId: string, userId: string, notes?: string) {
+  // ── Delete ───────────────────────────────────────────────────
+
+  async deleteDowntimeEvent(factoryId: string | null, eventId: string) {
     const factoryFilter = factoryId ? { factoryId } : {};
     const event = await this.prisma.downtimeEvent.findFirst({
       where: { id: eventId, ...factoryFilter },
     });
+    if (!event) throw new NotFoundException('Downtime event not found');
+    await this.prisma.downtimeEvent.delete({ where: { id: eventId } });
+    this.logger.log(`Downtime event ${eventId} deleted`);
+  }
+
+  // ── Scheduling Impact (FS/SS/SF/FF cascade) ──────────────────
+
+  /**
+   * When a downtime event closes on workCenterId X, find all active routing steps
+   * at that WorkCenter and forward-propagate the delay through their successors.
+   *
+   * Logic by dependency type:
+   *  FS (Finish-to-Start): successor start delayed by full downtime duration
+   *  SS (Start-to-Start):  successor already started → logs a STARVED/BLOCKED risk
+   *  SF/FF:                successor finish deadline pushed forward by downtime duration
+   *
+   * Returns the maximum cascade delay in minutes (used for dashboard alerting).
+   */
+  async computeSchedulingImpact(
+    workOrderId: string,
+    workCenterId: string | null,
+    downtimeMins: number,
+  ): Promise<number> {
+    if (!workCenterId || downtimeMins < 1) return 0;
+
+    try {
+      // Find routing steps at this WorkCenter for the active WO's process
+      const wo = await this.prisma.workOrder.findUnique({
+        where: { id: workOrderId },
+        include: {
+          sku: { include: { manufacturingProcesses: { include: { routingSteps: { include: { successors: true } } } } } },
+        },
+      });
+      if (!wo) return 0;
+
+      const process = wo.sku?.manufacturingProcesses?.[0];
+      if (!process) return 0;
+
+      const affectedSteps = process.routingSteps.filter(
+        (s: any) => s.workCenterId === workCenterId,
+      );
+
+      let maxCascade = 0;
+      for (const step of affectedSteps) {
+        for (const dep of (step as any).successors) {
+          let cascadeDelay = 0;
+          if (dep.type === 'FINISH_TO_START' || dep.type === 'FINISH_TO_FINISH') {
+            cascadeDelay = downtimeMins + (dep.lagMins ?? 0);
+          } else if (dep.type === 'START_TO_START') {
+            // If successor already started, the downtime creates a STARVED condition
+            cascadeDelay = Math.max(0, downtimeMins - (dep.lagMins ?? 0));
+          } else {
+            cascadeDelay = downtimeMins;
+          }
+          maxCascade = Math.max(maxCascade, cascadeDelay);
+        }
+      }
+
+      if (maxCascade > 0) {
+        this.logger.warn(
+          `Downtime cascade: WO ${workOrderId} → ${maxCascade.toFixed(1)} min delay on dependent steps`,
+        );
+        // Emit event so scheduling service / dashboard can pick it up
+        this.eventEmitter.emit('downtime.scheduling.impact', {
+          workOrderId,
+          workCenterId,
+          downtimeMins,
+          cascadeDelayMins: maxCascade,
+        });
+      }
+      return maxCascade;
+    } catch (err) {
+      this.logger.error('Failed to compute scheduling impact', err);
+      return 0;
+    }
+  }
+
+  // ── OEE Loss Breakdown ────────────────────────────────────────
+
+  /**
+   * Returns a waterfall breakdown of OEE losses for a given time window.
+   * Used to populate the Six Big Losses / Waterfall chart.
+   *
+   * Returns:
+   *  - plannedStopMins   (PLANNED_MAINTENANCE + CHANGEOVER — excluded from OEE)
+   *  - availabilityLoss  (UNPLANNED_BREAKDOWN — reduces availability)
+   *  - speedLoss         (MICRO_STOP, STARVED, BLOCKED — reduces performance)
+   *  - externalLoss      (EXTERNAL — informational)
+   *  - oeeAvailability   (computed %)
+   */
+  async getOEELossBreakdown(factoryId: string | null, dateFrom: Date, dateTo: Date, machineId?: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const machineFilter = machineId ? { machineId } : {};
+
+    const events = await this.prisma.downtimeEvent.findMany({
+      where: {
+        ...factoryFilter,
+        ...machineFilter,
+        startTime: { gte: dateFrom },
+        OR: [{ endTime: { lte: dateTo } }, { endTime: null }],
+      },
+      select: {
+        durationMinutes: true,
+        reasonCode: true,
+        affectsOEE: true,
+        isPlanned: true,
+        machine: { select: { name: true, code: true } },
+      },
+    });
+
+    const breakdown = {
+      plannedStopMins: 0,
+      availabilityLossMins: 0,
+      speedLossMins: 0,
+      externalLossMins: 0,
+      totalDowntimeMins: 0,
+      eventCount: events.length,
+      byReasonCode: {} as Record<string, number>,
+    };
+
+    for (const e of events) {
+      const mins = e.durationMinutes ?? 0;
+      const rc = (e as any).reasonCode ?? 'UNPLANNED_BREAKDOWN';
+      breakdown.totalDowntimeMins += mins;
+      breakdown.byReasonCode[rc] = (breakdown.byReasonCode[rc] ?? 0) + mins;
+
+      if (rc === 'PLANNED_MAINTENANCE' || rc === 'CHANGEOVER') {
+        breakdown.plannedStopMins += mins;
+      } else if (rc === 'UNPLANNED_BREAKDOWN') {
+        breakdown.availabilityLossMins += mins;
+      } else if (rc === 'MICRO_STOP' || rc === 'STARVED' || rc === 'BLOCKED') {
+        breakdown.speedLossMins += mins;
+      } else if (rc === 'EXTERNAL') {
+        breakdown.externalLossMins += mins;
+      }
+    }
+
+    return breakdown;
+  }
+
+  // ── Acknowledge ───────────────────────────────────────────────
+
+  async acknowledgeDowntimeEvent(factoryId: string | null, eventId: string, userId: string, notes?: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const event = await this.prisma.downtimeEvent.findFirst({ where: { id: eventId, ...factoryFilter } });
     if (!event) throw new NotFoundException('Downtime event not found');
 
     return this.prisma.downtimeEvent.update({
@@ -169,9 +354,7 @@ export class DowntimeService {
 
   async updateDowntimeEvent(factoryId: string | null, eventId: string, dto: UpdateDowntimeEventDto) {
     const factoryFilter = factoryId ? { factoryId } : {};
-    const event = await this.prisma.downtimeEvent.findFirst({
-      where: { id: eventId, ...factoryFilter },
-    });
+    const event = await this.prisma.downtimeEvent.findFirst({ where: { id: eventId, ...factoryFilter } });
     if (!event) throw new NotFoundException('Downtime event not found');
 
     const endTime = dto.endTime ? new Date(dto.endTime) : undefined;
@@ -187,7 +370,7 @@ export class DowntimeService {
         ...(dto.category && { category: dto.category as DowntimeCategory }),
         ...(endTime && { endTime, durationMinutes }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
-      },
+      } as any,
       include: {
         machine: { select: { name: true, code: true } },
         cause: { select: { code: true, name: true } },
@@ -195,9 +378,13 @@ export class DowntimeService {
     });
   }
 
+  // ── List ──────────────────────────────────────────────────────
+
   async findDowntimeEvents(factoryId: string | null, filters: {
     machineId?: string;
+    workCenterId?: string;
     workOrderId?: string;
+    reasonCode?: string;
     isPlanned?: boolean;
     isOpen?: boolean;
     dateFrom?: string;
@@ -205,13 +392,15 @@ export class DowntimeService {
     page?: number;
     limit?: number;
   }) {
-    const { machineId, workOrderId, isPlanned, isOpen, dateFrom, dateTo, page = 1, limit = 20 } = filters;
+    const { machineId, workCenterId, workOrderId, reasonCode, isPlanned, isOpen, dateFrom, dateTo, page = 1, limit = 20 } = filters;
     const factoryFilter = factoryId ? { factoryId } : {};
 
-    const where: Prisma.DowntimeEventWhereInput = {
+    const where: any = {
       ...factoryFilter,
       ...(machineId && { machineId }),
+      ...(workCenterId && { workCenterId }),
       ...(workOrderId && { workOrderId }),
+      ...(reasonCode && { reasonCode }),
       ...(isPlanned !== undefined && { isPlanned }),
       ...(isOpen === true && { endTime: null }),
       ...(isOpen === false && { endTime: { not: null } }),
@@ -224,8 +413,16 @@ export class DowntimeService {
       this.prisma.downtimeEvent.findMany({
         where,
         include: {
-          machine: { select: { name: true, code: true } },
-          cause: { select: { code: true, name: true, category: true } },
+          machine: { select: { id: true, name: true, code: true } },
+          cause: {
+            select: {
+              id: true, code: true, name: true, category: true, level: true,
+              parent: { select: { name: true, parent: { select: { name: true } } } },
+            },
+          },
+          workCenter: { select: { id: true, code: true, name: true } },
+          workOrder: { select: { id: true, orderNumber: true, status: true } },
+          operator: { select: { id: true, name: true } },
         },
         orderBy: { startTime: 'desc' },
         skip: (page - 1) * limit,
@@ -234,20 +431,31 @@ export class DowntimeService {
     ]);
 
     return {
-      data: data.map((e) => ({
+      data: data.map((e: any) => ({
         id: e.id,
-        machine: e.machine.name,
-        machineCode: e.machine.code,
-        cause: e.cause?.name ?? null,
-        causeCode: e.cause?.code ?? null,
+        machineId: e.machineId,
+        machine: e.machine ? { id: e.machine.id, name: e.machine.name, code: e.machine.code } : null,
+        workCenter: e.workCenter ? { id: e.workCenter.id, code: e.workCenter.code, name: e.workCenter.name } : null,
+        workOrder: e.workOrder ? { id: e.workOrder.id, orderNumber: e.workOrder.orderNumber, status: e.workOrder.status } : null,
+        operator: e.operator ? { id: e.operator.id, name: e.operator.name } : null,
+        cause: e.cause ? {
+          id: e.cause.id,
+          code: e.cause.code,
+          name: e.cause.name,
+          level: e.cause.level,
+          parent: e.cause.parent,
+        } : null,
         category: e.category,
+        reasonCode: e.reasonCode,
         reason: e.reason,
         startTime: e.startTime.toISOString(),
         endTime: e.endTime?.toISOString() ?? null,
         durationMinutes: e.durationMinutes,
+        affectsOEE: e.affectsOEE,
         isPlanned: e.isPlanned,
         isOpen: !e.endTime,
         acknowledged: e.acknowledged,
+        schedulingImpactMins: e.schedulingImpactMins,
         notes: e.notes,
       })),
       total,
@@ -257,9 +465,7 @@ export class DowntimeService {
     };
   }
 
-  // ────────────────────────────────────────────────────────────
-  // DOWNTIME CAUSES (reference data)
-  // ────────────────────────────────────────────────────────────
+  // ── Causes ────────────────────────────────────────────────────
 
   async findDowntimeCauses(factoryId: string | null, machineId?: string) {
     const factoryFilter = factoryId ? { factoryId } : {};
@@ -273,28 +479,23 @@ export class DowntimeService {
     });
   }
 
-  // ────────────────────────────────────────────────────────────
-  // AUTOMATIC DOWNTIME DETECTION (called by machine state monitor)
-  // Checks machines that have been IDLE > DOWNTIME_THRESHOLD_SECONDS
-  // ────────────────────────────────────────────────────────────
+  // ── Auto-detection ────────────────────────────────────────────
 
   async detectAndCreateAutoDowntime(factoryId: string) {
     const thresholdMs = DOWNTIME_THRESHOLD_SECONDS * 1000;
     const cutoff = new Date(Date.now() - thresholdMs);
 
-    // Find machines in IDLE state that transitioned before cutoff
     const idleMachines = await this.prisma.machineCurrentStatus.findMany({
       where: {
         machine: { factoryId, isActive: true },
         state: 'IDLE',
         lastEventAt: { lt: cutoff },
-        currentWOId: { not: null }, // only when WO is active
+        currentWOId: { not: null },
       },
       include: { machine: { select: { id: true, code: true, name: true, factoryId: true } } },
     });
 
     for (const status of idleMachines) {
-      // Check if downtime event already exists for this machine
       const existing = await this.prisma.downtimeEvent.findFirst({
         where: { machineId: status.machineId, endTime: null },
       });
@@ -307,16 +508,13 @@ export class DowntimeService {
             machineId: status.machineId,
             workOrderId: status.currentWOId,
             category: 'OTHER',
+            reasonCode: 'MICRO_STOP',
             reason: `Auto-detected: machine idle > ${DOWNTIME_THRESHOLD_SECONDS}s`,
             startTime: status.lastEventAt ?? new Date(),
             isPlanned: false,
-          },
+            affectsOEE: true,
+          } as any,
         });
-
-        this.logger.warn(
-          `Auto-downtime created for machine ${status.machine.code} (idle > ${DOWNTIME_THRESHOLD_SECONDS}s)`,
-        );
-
         this.eventEmitter.emit('downtime.auto.created', {
           machineId: status.machineId,
           machineName: status.machine.name,
@@ -328,9 +526,7 @@ export class DowntimeService {
     }
   }
 
-  // ────────────────────────────────────────────────────────────
-  // DOWNTIME SUMMARY (for reports)
-  // ────────────────────────────────────────────────────────────
+  // ── Summary (legacy + enhanced) ───────────────────────────────
 
   async getDowntimeSummary(factoryId: string | null, dateFrom: Date, dateTo: Date) {
     const factoryFilter = factoryId ? { factoryId } : {};
@@ -340,7 +536,6 @@ export class DowntimeService {
         ...factoryFilter,
         startTime: { gte: dateFrom },
         endTime: { lte: dateTo },
-        isPlanned: false,
       },
       include: {
         machine: { select: { name: true, code: true } },
@@ -349,30 +544,103 @@ export class DowntimeService {
     });
 
     const byCategory: Record<string, number> = {};
+    const byReasonCode: Record<string, number> = {};
     const byMachine: Record<string, number> = {};
     let totalMinutes = 0;
+    let oeeImpactMinutes = 0;
 
     for (const e of events) {
       const min = e.durationMinutes ?? 0;
       totalMinutes += min;
       byCategory[e.category] = (byCategory[e.category] ?? 0) + min;
       byMachine[e.machine.name] = (byMachine[e.machine.name] ?? 0) + min;
+      const rc = (e as any).reasonCode ?? 'UNPLANNED_BREAKDOWN';
+      byReasonCode[rc] = (byReasonCode[rc] ?? 0) + min;
+      if ((e as any).affectsOEE !== false) oeeImpactMinutes += min;
     }
 
     return {
       totalEvents: events.length,
       totalMinutes,
+      oeeImpactMinutes,
+      plannedMinutes: totalMinutes - oeeImpactMinutes,
       byCategory,
+      byReasonCode,
       byMachine,
-      topCauses: Object.entries(byCategory)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 5),
+      topCauses: Object.entries(byReasonCode).sort(([, a], [, b]) => b - a).slice(0, 5),
     };
   }
 
-  // ────────────────────────────────────────────────────────────
-  // PRIVATE
-  // ────────────────────────────────────────────────────────────
+  // ── Reason Tree (3-Level) ─────────────────────────────────────
+
+  async getReasonTree(factoryId: string | null) {
+    const fId = factoryId ?? await this.getDefaultFactoryId();
+    const roots = await this.prisma.downtimeCause.findMany({
+      where: { factoryId: fId, level: 1, parentId: null },
+      orderBy: { sortOrder: 'asc' },
+      include: {
+        children: {
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            children: {
+              orderBy: { sortOrder: 'asc' },
+              include: { machine: { select: { id: true, name: true, code: true } } },
+            },
+          },
+        },
+      },
+    });
+    return roots;
+  }
+
+  async createReasonNode(factoryId: string, dto: {
+    code: string; name: string; nameAr?: string;
+    category: DowntimeCategory; level: number; parentId?: string;
+    machineId?: string; isPlanned?: boolean; sortOrder?: number;
+  }) {
+    if (dto.parentId) {
+      const parent = await this.prisma.downtimeCause.findUnique({ where: { id: dto.parentId } });
+      if (!parent) throw new NotFoundException('Parent reason not found');
+      if (parent.level !== dto.level - 1) {
+        throw new BadRequestException(`Parent is level ${parent.level}; child must be level ${parent.level + 1}`);
+      }
+    }
+    return this.prisma.downtimeCause.create({
+      data: { factoryId, ...dto, isActive: true },
+    });
+  }
+
+  async updateReasonNode(factoryId: string, id: string, dto: Partial<{
+    name: string; nameAr: string; category: DowntimeCategory;
+    machineId: string | null; isPlanned: boolean; sortOrder: number; isActive: boolean;
+  }>) {
+    const node = await this.prisma.downtimeCause.findFirst({ where: { id, factoryId } });
+    if (!node) throw new NotFoundException('Reason node not found');
+    return this.prisma.downtimeCause.update({ where: { id }, data: dto });
+  }
+
+  async deleteReasonNode(factoryId: string, id: string) {
+    const node = await this.prisma.downtimeCause.findFirst({
+      where: { id, factoryId },
+      include: { _count: { select: { downtimeEvents: true, children: true } } },
+    });
+    if (!node) throw new NotFoundException('Reason node not found');
+    if ((node as any)._count.downtimeEvents > 0) {
+      throw new BadRequestException('Cannot delete: reason is used in existing downtime events. Deactivate it instead.');
+    }
+    if ((node as any)._count.children > 0) {
+      throw new BadRequestException('Cannot delete: reason has child nodes. Remove children first.');
+    }
+    await this.prisma.downtimeCause.delete({ where: { id } });
+  }
+
+  // ── Private ───────────────────────────────────────────────────
+
+  private async getDefaultFactoryId(): Promise<string> {
+    const factory = await this.prisma.factory.findFirst({ where: { isActive: true }, select: { id: true } });
+    if (!factory) throw new NotFoundException('No active factory found');
+    return factory.id;
+  }
 
   private async updateMachineStateForDowntime(machineId: string, isPlanned: boolean) {
     try {
@@ -383,7 +651,7 @@ export class DowntimeService {
         update: { state: newState, lastEventAt: new Date() },
       });
     } catch (err) {
-      this.logger.error(`Failed to update machine state for downtime`, err);
+      this.logger.error('Failed to update machine state for downtime', err);
     }
   }
 }

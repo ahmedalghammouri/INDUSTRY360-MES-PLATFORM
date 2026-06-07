@@ -25,7 +25,7 @@ export class MqttDriverService implements IndustrialDriver, OnModuleInit, OnModu
         brokerUrl,
         username: this.config.get<string>('mqtt.username'),
         password: this.config.get<string>('mqtt.password'),
-        clientId: this.config.get<string>('mqtt.clientId', 'industry360-mes'),
+        clientId: this.config.get<string>('mqtt.clientId', 'star-mes'),
       });
     } catch (error) {
       this.logger.warn('MQTT broker not available, running in offline mode');
@@ -39,7 +39,7 @@ export class MqttDriverService implements IndustrialDriver, OnModuleInit, OnModu
   async connect(config: Record<string, unknown>): Promise<void> {
     return new Promise((resolve, reject) => {
       const options: mqtt.IClientOptions = {
-        clientId: String(config.clientId || 'industry360-mes'),
+        clientId: String(config.clientId || 'star-mes'),
         username: config.username as string | undefined,
         password: config.password as string | undefined,
         reconnectPeriod: 5000,

@@ -23,11 +23,11 @@
     "emitDecoratorMetadata": true,
     "baseUrl": ".",
     "paths": {
-      "@industry360/ui": ["packages/ui/src/index.ts"],
-      "@industry360/shared": ["packages/shared/src/index.ts"],
-      "@industry360/types": ["packages/types/src/index.ts"],
-      "@industry360/auth-utils": ["packages/auth-utils/src/index.ts"],
-      "@industry360/api-sdk": ["packages/api-sdk/src/index.ts"]
+      "@star-mes/ui": ["packages/ui/src/index.ts"],
+      "@star-mes/shared": ["packages/shared/src/index.ts"],
+      "@star-mes/types": ["packages/types/src/index.ts"],
+      "@star-mes/auth-utils": ["packages/auth-utils/src/index.ts"],
+      "@star-mes/api-sdk": ["packages/api-sdk/src/index.ts"]
     }
   }
 }

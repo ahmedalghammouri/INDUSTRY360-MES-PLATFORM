@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
@@ -15,6 +16,13 @@ import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+
+interface StorageLocationOption {
+  id: string;
+  code: string;
+  name: string;
+  zone: string;
+}
 
 interface SparePart {
   id: string;
@@ -29,6 +37,7 @@ interface SparePart {
   minStockQty: number;
   maxStockQty: number | null;
   storageLocation: string | null;
+  storageLocationId: string | null;
   binNumber: string | null;
   isLowStock: boolean;
   stockValue: number;
@@ -45,7 +54,7 @@ function timeAgo(iso: string | null) {
   return `${days}d ago`;
 }
 
-const EMPTY_PART_FORM = { partNumber: '', name: '', description: '', category: '', manufacturer: '', supplier: '', unitCost: '', minStockQty: '', maxStockQty: '', storageLocation: '', binNumber: '' };
+const EMPTY_PART_FORM = { partNumber: '', name: '', description: '', category: '', manufacturer: '', supplier: '', unitCost: '', minStockQty: '', maxStockQty: '', storageLocationId: '', binNumber: '' };
 
 export function SparePartsView() {
   const qc = useQueryClient();
@@ -61,6 +70,13 @@ export function SparePartsView() {
   const [editTarget, setEditTarget] = useState<SparePart | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; name: string } | null>(null);
   const [createForm, setCreateForm] = useState(EMPTY_PART_FORM);
+
+  const { data: storageLocData } = useQuery({
+    queryKey: ['inventory', 'storage-locations'],
+    queryFn: () => api.get<{ data: StorageLocationOption[] }>('/inventory/storage-locations'),
+    staleTime: 300_000,
+  });
+  const storageLocations: StorageLocationOption[] = (storageLocData as any)?.data ?? (storageLocData as any) ?? [];
 
   const { data, isLoading } = useQuery({
     queryKey: ['inventory', 'spare-parts', search, category, lowStockOnly, page],
@@ -241,7 +257,7 @@ export function SparePartsView() {
                               unitCost: p.unitCost?.toString() ?? '',
                               minStockQty: p.minStockQty.toString(),
                               maxStockQty: p.maxStockQty?.toString() ?? '',
-                              storageLocation: p.storageLocation ?? '',
+                              storageLocationId: p.storageLocationId ?? '',
                               binNumber: p.binNumber ?? '',
                             });
                           }}>
@@ -355,7 +371,18 @@ export function SparePartsView() {
             </div>
             <div>
               <Label className="text-xs">Storage Location</Label>
-              <Input value={createForm.storageLocation} onChange={e => setCreateForm(v => ({ ...v, storageLocation: e.target.value }))} className="h-9 mt-1" />
+              <Select
+                value={createForm.storageLocationId || '__none__'}
+                onValueChange={v => setCreateForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
+              >
+                <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {storageLocations.map(loc => (
+                    <SelectItem key={loc.id} value={loc.id}>{loc.code} — {loc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label className="text-xs">Bin Number</Label>
@@ -378,7 +405,7 @@ export function SparePartsView() {
                   unitCost: createForm.unitCost ? parseFloat(createForm.unitCost) : null,
                   minStockQty: parseInt(createForm.minStockQty),
                   maxStockQty: createForm.maxStockQty ? parseInt(createForm.maxStockQty) : null,
-                  storageLocation: createForm.storageLocation || null,
+                  storageLocationId: createForm.storageLocationId || null,
                   binNumber: createForm.binNumber || null,
                 },
               })}
@@ -432,7 +459,18 @@ export function SparePartsView() {
             </div>
             <div>
               <Label className="text-xs">Storage Location</Label>
-              <Input value={createForm.storageLocation} onChange={e => setCreateForm(v => ({ ...v, storageLocation: e.target.value }))} className="h-9 mt-1" />
+              <Select
+                value={createForm.storageLocationId || '__none__'}
+                onValueChange={v => setCreateForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
+              >
+                <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {storageLocations.map(loc => (
+                    <SelectItem key={loc.id} value={loc.id}>{loc.code} — {loc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label className="text-xs">Bin Number</Label>
@@ -451,7 +489,7 @@ export function SparePartsView() {
               unitCost: createForm.unitCost ? parseFloat(createForm.unitCost) : null,
               minStockQty: parseInt(createForm.minStockQty),
               maxStockQty: createForm.maxStockQty ? parseInt(createForm.maxStockQty) : null,
-              storageLocation: createForm.storageLocation || null,
+              storageLocationId: createForm.storageLocationId || null,
               binNumber: createForm.binNumber || null,
               stockQty: 0,
             })}>

@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import {
   Wrench, Factory, Package, Layers3, Cpu, Settings, Tag,
   Activity, Calendar, ChevronRight, Search, Filter, ChevronDown,
-  ArrowRight, User, FileText,
+  ArrowRight, User, FileText, Eye, X as XIcon, History,
+  GitBranch, ArrowUpRight, ArrowDownRight, FlaskConical,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { api } from '@/services/api.client';
 import { cn, timeAgo, formatDateTime } from '@/lib/utils';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -40,10 +42,18 @@ interface TraceResponse {
 }
 
 interface TraceStats {
-  total: number;
-  today: number;
-  thisWeek: number;
+  totalEvents: number;
+  events24h: number;
+  events7d: number;
+  byEntityType: Array<{ entityType: string; count: number }>;
+  byEventType: Array<{ eventType: string; count: number }>;
   [key: string]: unknown;
+}
+
+interface DrilldownEntity {
+  type: string;
+  id: string;
+  code?: string;
 }
 
 // ── Constants ────────────────────────────────────────────────
@@ -108,12 +118,172 @@ function humanizeEventType(eventType: string): string {
 
 // ── Component ────────────────────────────────────────────────
 
+// ── Genealogy Tree ───────────────────────────────────────────
+
+interface TraceNode {
+  type: string;
+  id: string;
+  label: string;
+  meta?: Record<string, unknown>;
+  children?: TraceNode[];
+}
+
+const NODE_CONFIG: Record<string, { color: string; icon: React.ElementType }> = {
+  MATERIAL_LOT:       { color: 'text-cyan-400',   icon: Package },
+  WORK_ORDER:         { color: 'text-blue-400',    icon: Factory },
+  FINISHED_GOODS_LOT: { color: 'text-green-400',   icon: Layers3 },
+  RECIPE:             { color: 'text-violet-400',   icon: FlaskConical },
+};
+
+function GenealogyNode({ node, depth = 0 }: { node: TraceNode; depth?: number }) {
+  const [expanded, setExpanded] = useState(depth < 2);
+  const cfg = NODE_CONFIG[node.type] ?? { color: 'text-muted-foreground', icon: Cpu };
+  const Icon = cfg.icon;
+  const hasChildren = (node.children?.length ?? 0) > 0;
+
+  return (
+    <div className={cn('relative', depth > 0 && 'ml-5 pl-3 border-l border-border/30')}>
+      <div
+        className={cn(
+          'flex items-start gap-2 py-1.5 px-2 rounded-lg hover:bg-muted/10 cursor-pointer group',
+          hasChildren && 'hover:bg-muted/20',
+        )}
+        onClick={() => hasChildren && setExpanded(e => !e)}
+      >
+        <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+          {hasChildren ? (
+            expanded
+              ? <ChevronDown size={11} className="text-muted-foreground" />
+              : <ChevronRight size={11} className="text-muted-foreground" />
+          ) : (
+            <div className="w-3" />
+          )}
+          <Icon size={13} className={cfg.color} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className={cn('text-xs font-medium leading-snug', cfg.color)}>{node.label}</div>
+          {node.meta && (
+            <div className="flex flex-wrap gap-x-3 gap-y-0 mt-0.5">
+              {Object.entries(node.meta)
+                .filter(([, v]) => v !== null && v !== undefined && v !== '')
+                .slice(0, 4)
+                .map(([k, v]) => (
+                  <span key={k} className="text-[10px] text-muted-foreground">
+                    {k}: <span className="text-foreground/80">{String(v)}</span>
+                  </span>
+                ))}
+            </div>
+          )}
+        </div>
+      </div>
+      {expanded && node.children?.map((child, i) => (
+        <GenealogyNode key={`${child.id}-${i}`} node={child} depth={depth + 1} />
+      ))}
+    </div>
+  );
+}
+
+function GenealogyPanel() {
+  const [traceMode, setTraceMode] = useState<'backward' | 'forward'>('backward');
+  const [entityId, setEntityId] = useState('');
+  const [submitted, setSubmitted] = useState('');
+
+  const { data: traceData, isLoading, isError } = useQuery({
+    queryKey: ['traceability', 'genealogy', traceMode, submitted],
+    queryFn: () => submitted
+      ? api.get<TraceNode>(
+          traceMode === 'backward'
+            ? `/production/traceability/backward/${submitted}`
+            : `/production/traceability/forward/${submitted}`,
+        )
+      : null,
+    enabled: !!submitted,
+  });
+
+  const node = traceData as TraceNode | null | undefined;
+
+  return (
+    <div className="space-y-4">
+      {/* Mode + search */}
+      <div className="glass-card p-4 space-y-3">
+        <div className="flex rounded-lg border border-border overflow-hidden text-xs">
+          {(['backward', 'forward'] as const).map(mode => (
+            <button
+              key={mode}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 py-1.5 transition-colors',
+                traceMode === mode ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted/20',
+              )}
+              onClick={() => { setTraceMode(mode); setSubmitted(''); }}
+            >
+              {mode === 'backward' ? <ArrowDownRight size={12} /> : <ArrowUpRight size={12} />}
+              {mode === 'backward' ? 'Backward (FG → Inputs)' : 'Forward (Material → Outputs)'}
+            </button>
+          ))}
+        </div>
+
+        <div className="text-[10px] text-muted-foreground">
+          {traceMode === 'backward'
+            ? 'Enter a Finished Goods Lot ID to trace back through the WO → Recipe → Material Lots consumed.'
+            : 'Enter a Material Lot ID to trace forward through all Work Orders that consumed it and FG Lots produced.'}
+        </div>
+
+        <div className="flex gap-2">
+          <Input
+            placeholder={traceMode === 'backward' ? 'FG Lot ID…' : 'Material Lot ID…'}
+            value={entityId}
+            onChange={e => setEntityId(e.target.value)}
+            className="h-8 text-xs font-mono"
+            onKeyDown={e => { if (e.key === 'Enter' && entityId.trim()) setSubmitted(entityId.trim()); }}
+          />
+          <Button
+            size="sm"
+            className="h-8 text-xs shrink-0"
+            onClick={() => setSubmitted(entityId.trim())}
+            disabled={!entityId.trim() || isLoading}
+          >
+            <Search size={12} />
+            Trace
+          </Button>
+        </div>
+      </div>
+
+      {/* Result tree */}
+      {isLoading && (
+        <div className="glass-card p-8 text-center">
+          <div className="shimmer h-4 w-48 rounded mx-auto mb-2" />
+          <div className="shimmer h-3 w-64 rounded mx-auto" />
+        </div>
+      )}
+      {isError && (
+        <div className="glass-card p-6 text-center text-red-400 text-sm">
+          Entity not found or no traceability data.
+        </div>
+      )}
+      {node && !isLoading && (
+        <div className="glass-card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <GitBranch size={14} className="text-primary" />
+            <h3 className="text-sm font-semibold">
+              {traceMode === 'backward' ? 'Backward Genealogy' : 'Forward Genealogy'}
+            </h3>
+          </div>
+          <GenealogyNode node={node} depth={0} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TraceabilityView() {
+  const [activeTab, setActiveTab] = useState<'log' | 'genealogy'>('log');
   const [entityTypeFilter, setEntityTypeFilter] = useState<string>('');
   const [eventSearch, setEventSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
+  const [drilldown, setDrilldown] = useState<DrilldownEntity | null>(null);
+  const [drillPage, setDrillPage] = useState(1);
 
   // ── Queries ─────────────────────────────────────────────────
 
@@ -141,10 +311,20 @@ export function TraceabilityView() {
     staleTime: 15_000,
   });
 
+  const { data: drillData } = useQuery({
+    queryKey: ['traceability', 'entity', drilldown?.type, drilldown?.id, drillPage],
+    queryFn: () => drilldown
+      ? api.get(`/traceability/entity/${drilldown.type}/${drilldown.id}?page=${drillPage}&limit=50`)
+      : null,
+    enabled: !!drilldown,
+    staleTime: 15_000,
+  });
+
   const response = data as unknown as TraceResponse | undefined;
   const events: TraceEvent[] = response?.data ?? [];
   const total: number = response?.total ?? 0;
-  const hasMore = events.length === 30 && page * 30 < total;
+  const drillEvents: TraceEvent[] = (drillData as any)?.data ?? [];
+  const drillTotal: number = (drillData as any)?.total ?? 0;
 
   // ── Reset page when filters change ──────────────────────────
 
@@ -153,42 +333,65 @@ export function TraceabilityView() {
     setPage(1);
   };
 
+  const openDrilldown = (event: TraceEvent) => {
+    setDrilldown({ type: event.entityType, id: event.entityId, code: event.entityCode ?? undefined });
+    setDrillPage(1);
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
         <div>
-          <h1 className="text-lg font-bold">Traceability & Event Log</h1>
+          <h1 className="text-lg font-bold">Traceability & Genealogy</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Full audit trail of every operation across production, maintenance, inventory, and quality
+            Full audit trail and material genealogy across production, maintenance, inventory, and quality
           </p>
+        </div>
+        {/* Tab switcher */}
+        <div className="flex rounded-lg border border-border overflow-hidden text-xs">
+          <button
+            className={cn('px-4 py-1.5 transition-colors', activeTab === 'log' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted/20')}
+            onClick={() => setActiveTab('log')}
+          >
+            Event Log
+          </button>
+          <button
+            className={cn('px-4 py-1.5 flex items-center gap-1.5 transition-colors', activeTab === 'genealogy' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted/20')}
+            onClick={() => setActiveTab('genealogy')}
+          >
+            <GitBranch size={11} />
+            Genealogy
+          </button>
         </div>
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
+        {activeTab === 'genealogy' && <GenealogyPanel />}
+        {activeTab === 'log' && (<>
         {/* Stats Row */}
         <div className="grid grid-cols-3 gap-3">
           {[
             {
               label: 'Total Events',
-              value: stats?.total,
+              value: stats?.totalEvents,
               icon: Activity,
-              color: 'text-brand-400',
+              color: 'text-primary',
               sub: 'all time',
             },
             {
-              label: 'Events Today',
-              value: stats?.today,
+              label: 'Last 24 Hours',
+              value: stats?.events24h,
               icon: Calendar,
               color: 'text-green-400',
-              sub: 'since midnight',
+              sub: 'new events',
             },
             {
-              label: 'This Week',
-              value: stats?.thisWeek,
+              label: 'Last 7 Days',
+              value: stats?.events7d,
               icon: ChevronRight,
               color: 'text-blue-400',
-              sub: 'last 7 days',
+              sub: 'recent activity',
             },
           ].map(({ label, value, icon: Icon, color, sub }) => (
             <div key={label} className="glass-card p-4">
@@ -273,8 +476,9 @@ export function TraceabilityView() {
           </div>
         </div>
 
-        {/* Timeline */}
-        <div className="space-y-2">
+        {/* Timeline + drilldown */}
+        <div className="flex gap-4">
+        <div className="flex-1 space-y-2">
           {isLoading ? (
             Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="glass-card p-4 flex gap-3 animate-pulse">
@@ -338,7 +542,13 @@ export function TraceabilityView() {
                       {/* Entity code + status change */}
                       <div className="flex items-center gap-2 flex-wrap">
                         {event.entityCode && (
-                          <span className="font-mono text-xs font-semibold">{event.entityCode}</span>
+                          <button
+                            onClick={() => openDrilldown(event)}
+                            className="font-mono text-xs font-semibold hover:text-primary transition-colors flex items-center gap-1 group/drill"
+                          >
+                            {event.entityCode}
+                            <Eye size={10} className="opacity-0 group-hover/drill:opacity-50 transition-opacity" />
+                          </button>
                         )}
                         {isStatusChange && event.fromValue && event.toValue && (
                           <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -389,30 +599,73 @@ export function TraceabilityView() {
                 );
               })}
 
-              {/* Load more */}
-              {hasMore && (
-                <div className="flex justify-center pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs gap-1.5"
-                    onClick={() => setPage(p => p + 1)}
-                    disabled={isFetching}
-                  >
-                    <ChevronDown size={12} />
-                    {isFetching ? 'Loading…' : 'Load More'}
-                  </Button>
-                </div>
-              )}
-
-              {!hasMore && events.length > 0 && (
-                <p className="text-center text-[11px] text-muted-foreground/50 py-2">
-                  Showing all {total.toLocaleString()} events
-                </p>
-              )}
+              <TablePagination page={page} total={total} limit={30} onPageChange={setPage} />
             </>
           )}
         </div>
+
+        {/* Entity drilldown panel */}
+        {drilldown && (
+          <div className="w-72 shrink-0">
+            <div className="glass-card sticky top-4">
+              <div className="p-3 border-b border-border/50 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <History size={13} className="text-primary" />
+                  <div>
+                    <div className="text-xs font-semibold">{drilldown.code ?? drilldown.id.slice(0, 12)}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {(ENTITY_CONFIG[drilldown.type] ?? FALLBACK_ENTITY).label} history
+                    </div>
+                  </div>
+                </div>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDrilldown(null)}>
+                  <XIcon size={12} />
+                </Button>
+              </div>
+              <div className="p-3 max-h-[calc(100vh-360px)] overflow-y-auto">
+                {drillEvents.length === 0 ? (
+                  <div className="text-xs text-muted-foreground text-center py-4">No history found.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {drillEvents.map((ev, i) => {
+                      const isLast = i === drillEvents.length - 1;
+                      const isStatusChange = ev.eventType === 'STATUS_CHANGED' || (ev.fromValue && ev.toValue);
+                      return (
+                        <div key={ev.id} className="flex gap-2 text-xs">
+                          <div className="flex flex-col items-center">
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary/60 mt-1.5 shrink-0" />
+                            {!isLast && <div className="w-px flex-1 bg-border/40 mt-1" />}
+                          </div>
+                          <div className={cn('pb-2', isLast ? '' : '')}>
+                            <div className="font-medium text-[10px] leading-snug">
+                              {humanizeEventType(ev.eventType)}
+                              {isStatusChange && ev.fromValue && ev.toValue && (
+                                <span className="text-muted-foreground font-normal ml-1">
+                                  {ev.fromValue} → {ev.toValue}
+                                </span>
+                              )}
+                            </div>
+                            {ev.notes && <div className="text-[10px] text-muted-foreground truncate">{ev.notes}</div>}
+                            <div className="text-[10px] text-muted-foreground/60">
+                              {timeAgo(ev.performedAt)}{ev.performedBy ? ` · ${ev.performedBy.name}` : ''}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              {drillTotal > 50 && (
+                <div className="p-2 border-t border-border/50">
+                  <TablePagination page={drillPage} total={drillTotal} limit={50} onPageChange={setDrillPage} className="text-[10px]" />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        </div>
+        </>)}
       </div>
     </div>
   );

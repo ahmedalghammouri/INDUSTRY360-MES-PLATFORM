@@ -1,5 +1,5 @@
 {
-  "name": "@industry360/api",
+  "name": "@star-mes/api",
   "version": "1.0.0",
   "private": true,
   "prisma": {

@@ -1,5 +1,5 @@
 // ============================================================
-// INDUSTRY360 MES Platform — Database Seed
+// STAR-MES Platform — Database Seed
 // NCC (National Care Company) — Real Factory Data
 // Based on NCC Prerequisites File & Requirements Matrix
 // ============================================================
@@ -10,7 +10,7 @@ import * as bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Seeding INDUSTRY360 MES Platform — NCC Group...\n');
+  console.log('🌱 Seeding STAR-MES Platform — NCC Group...\n');
 
   const passwordHash = await bcrypt.hash('Password@123', 12);
 
@@ -599,144 +599,144 @@ async function main() {
   console.log(`✅ Cycle times loaded for all SKU × Machine combinations`);
 
   // ============================================================
-  // SIDCO — DOWNTIME CAUSES (real NCC data per machine)
-  // From Prerequisites File
+  // SIDCO — DOWNTIME CAUSES  (3-Level Tree: Standard + NCC)
+  // Level 1 = Top category | Level 2 = Sub-category | Level 3 = Specific reason (leaf)
   // ============================================================
 
-  // Big Betti downtime causes
-  const bigBettiCauses = [
-    { code: 'BB-01', name: 'Piston for powder inlet gate', category: DowntimeCategory.MECHANICAL },
-    { code: 'BB-02', name: 'Screw piston for opening the powder inlet gate to the inner', category: DowntimeCategory.MECHANICAL },
-    { code: 'BB-03', name: 'Glue tank piston + internal board', category: DowntimeCategory.MECHANICAL },
-    { code: 'BB-04', name: 'Glue system complete nozzle', category: DowntimeCategory.MECHANICAL },
-    { code: 'BB-05', name: 'Inverter fault', category: DowntimeCategory.ELECTRICAL },
-    { code: 'BB-06', name: 'Inner holder', category: DowntimeCategory.MECHANICAL },
-    { code: 'BB-07', name: 'Air pressure low', category: DowntimeCategory.UTILITY },
-    { code: 'BB-08', name: 'Inner section cup', category: DowntimeCategory.MECHANICAL },
-    { code: 'BB-09', name: 'A/C failure', category: DowntimeCategory.UTILITY },
-    { code: 'BB-10', name: 'Electrical problems', category: DowntimeCategory.ELECTRICAL },
-    { code: 'BB-11', name: 'Electrical trip for checkweigher belt', category: DowntimeCategory.ELECTRICAL },
-    { code: 'BB-12', name: 'Rollers drive the inner', category: DowntimeCategory.MECHANICAL },
-    { code: 'BB-13', name: 'Door sensors', category: DowntimeCategory.ELECTRICAL },
-    { code: 'BB-14', name: 'Main power failure', category: DowntimeCategory.EXTERNAL },
-    { code: 'BB-15', name: 'Chain failure', category: DowntimeCategory.MECHANICAL },
-    { code: 'BB-16', name: 'Powder shortage', category: DowntimeCategory.MATERIAL },
-    { code: 'BB-17', name: 'Printer machine fault', category: DowntimeCategory.MECHANICAL },
-    { code: 'BB-18', name: 'Packing material shortage', category: DowntimeCategory.MATERIAL },
-  ];
-
-  for (let i = 0; i < bigBettiCauses.length; i++) {
-    const c = bigBettiCauses[i];
+  const dc = async (id: string, data: Record<string, unknown>) => {
     await prisma.downtimeCause.upsert({
-      where: { id: `dc-bb-${c.code}` },
-      update: {},
-      create: {
-        id: `dc-bb-${c.code}`,
-        factoryId: sidco.id,
-        machineId: bigBetti.id,
-        code: c.code,
-        name: c.name,
-        category: c.category,
-        isPlanned: false,
-        sortOrder: i + 1,
-      },
+      where: { id },
+      update: { level: (data.level as number) ?? 3, parentId: (data.parentId as string | null) ?? null },
+      create: { id, factoryId: sidco.id, ...(data as any) },
     });
-  }
+  };
 
-  // Cartomac downtime causes
-  const cartomacCauseData = [
-    { code: 'CM-01', name: 'Cartomac machine - lower large piston', category: DowntimeCategory.MECHANICAL },
-    { code: 'CM-02', name: 'Carton section cup', category: DowntimeCategory.MECHANICAL },
-    { code: 'CM-03', name: 'Carton closing piston right & left', category: DowntimeCategory.MECHANICAL },
-    { code: 'CM-04', name: 'Fixing piston and fixing track', category: DowntimeCategory.MECHANICAL },
-    { code: 'CM-05', name: 'Glue tank piston + internal board', category: DowntimeCategory.MECHANICAL },
-    { code: 'CM-06', name: 'Glue system complete nozzle', category: DowntimeCategory.MECHANICAL },
-    { code: 'CM-07', name: 'A/C failure', category: DowntimeCategory.UTILITY },
-    { code: 'CM-08', name: 'Door sensors', category: DowntimeCategory.ELECTRICAL },
-    { code: 'CM-09', name: 'Chain failure', category: DowntimeCategory.MECHANICAL },
-    { code: 'CM-10', name: 'Packing material shortage', category: DowntimeCategory.MATERIAL },
-    { code: 'CM-11', name: 'Main power failure', category: DowntimeCategory.EXTERNAL },
-    { code: 'CM-12', name: 'Air pressure low', category: DowntimeCategory.UTILITY },
-    { code: 'CM-13', name: 'Electrical problems', category: DowntimeCategory.ELECTRICAL },
-    { code: 'CM-14', name: 'Printer machine fault', category: DowntimeCategory.MECHANICAL },
-  ];
+  // ── Level 1 ─────────────────────────────────────────────────
+  await dc('dt-l1-01', { code: 'L1-EF',  name: 'Equipment Failure & Breakdown',      nameAr: 'أعطال المعدات والانهيار',          category: DowntimeCategory.MECHANICAL,          level: 1, isPlanned: false, sortOrder: 1 });
+  await dc('dt-l1-02', { code: 'L1-HE',  name: 'Human Error & Operational Mistakes', nameAr: 'خطأ بشري وأخطاء تشغيلية',           category: DowntimeCategory.OPERATOR,            level: 1, isPlanned: false, sortOrder: 2 });
+  await dc('dt-l1-03', { code: 'L1-MP',  name: 'Poor Maintenance Practices',         nameAr: 'ممارسات صيانة غير كافية',           category: DowntimeCategory.PROCESS,             level: 1, isPlanned: false, sortOrder: 3 });
+  await dc('dt-l1-04', { code: 'L1-MS',  name: 'Material & Supply Chain Shortages',  nameAr: 'نقص المواد وسلسلة التوريد',         category: DowntimeCategory.MATERIAL,            level: 1, isPlanned: false, sortOrder: 4 });
+  await dc('dt-l1-05', { code: 'L1-UN',  name: 'Utility & Network Outages',          nameAr: 'انقطاع المرافق والشبكات',           category: DowntimeCategory.UTILITY,             level: 1, isPlanned: false, sortOrder: 5 });
+  await dc('dt-l1-06', { code: 'L1-PLN', name: 'Planned Stops',                      nameAr: 'التوقفات المخططة',                  category: DowntimeCategory.PLANNED_MAINTENANCE, level: 1, isPlanned: true,  sortOrder: 6 });
 
-  for (let i = 0; i < cartomacCauseData.length; i++) {
-    const c = cartomacCauseData[i];
-    await prisma.downtimeCause.upsert({
-      where: { id: `dc-cm-${c.code}` },
-      update: {},
-      create: {
-        id: `dc-cm-${c.code}`,
-        factoryId: sidco.id,
-        machineId: cartomac.id,
-        code: c.code,
-        name: c.name,
-        category: c.category,
-        isPlanned: false,
-        sortOrder: i + 1,
-      },
-    });
-  }
+  // ── Level 2 ─────────────────────────────────────────────────
+  await dc('dt-l2-01', { code: 'L2-MECH',   name: 'Mechanical Faults',           nameAr: 'أعطال ميكانيكية',           category: DowntimeCategory.MECHANICAL,          level: 2, parentId: 'dt-l1-01', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l2-02', { code: 'L2-ELEC',   name: 'Electrical Faults',           nameAr: 'أعطال كهربائية',            category: DowntimeCategory.ELECTRICAL,          level: 2, parentId: 'dt-l1-01', isPlanned: false, sortOrder: 2 });
+  await dc('dt-l2-03', { code: 'L2-SETUP',  name: 'Setup & Changeovers',         nameAr: 'الإعداد والتحويل',          category: DowntimeCategory.CHANGEOVER,          level: 2, parentId: 'dt-l1-02', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l2-04', { code: 'L2-OPS',    name: 'Operator Unavailability',     nameAr: 'غياب المشغل',               category: DowntimeCategory.OPERATOR,            level: 2, parentId: 'dt-l1-02', isPlanned: false, sortOrder: 2 });
+  await dc('dt-l2-05', { code: 'L2-PREV',   name: 'Lack of Preventive Care',     nameAr: 'غياب الصيانة الوقائية',     category: DowntimeCategory.PROCESS,             level: 2, parentId: 'dt-l1-03', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l2-06', { code: 'L2-TOOL',   name: 'Tooling Issues',              nameAr: 'مشاكل الأدوات',             category: DowntimeCategory.MECHANICAL,          level: 2, parentId: 'dt-l1-03', isPlanned: false, sortOrder: 2 });
+  await dc('dt-l2-07', { code: 'L2-LOG',    name: 'Logistics / Warehouse',       nameAr: 'الخدمات اللوجستية والمستودع', category: DowntimeCategory.MATERIAL,           level: 2, parentId: 'dt-l1-04', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l2-08', { code: 'L2-QA',     name: 'Quality Inspection Hold',     nameAr: 'تعليق فحص الجودة',          category: DowntimeCategory.QUALITY,             level: 2, parentId: 'dt-l1-04', isPlanned: false, sortOrder: 2 });
+  await dc('dt-l2-09', { code: 'L2-PWR',    name: 'Power & Pneumatics',          nameAr: 'الطاقة والهواء المضغوط',    category: DowntimeCategory.UTILITY,             level: 2, parentId: 'dt-l1-05', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l2-10', { code: 'L2-IT',     name: 'IT & Connectivity',           nameAr: 'تقنية المعلومات والاتصالات', category: DowntimeCategory.UTILITY,            level: 2, parentId: 'dt-l1-05', isPlanned: false, sortOrder: 2 });
+  await dc('dt-l2-11', { code: 'L2-HVAC',   name: 'Environmental & HVAC',        nameAr: 'البيئة وتكييف الهواء',      category: DowntimeCategory.UTILITY,             level: 2, parentId: 'dt-l1-05', isPlanned: false, sortOrder: 3 });
+  await dc('dt-l2-12', { code: 'L2-BRK',    name: 'Scheduled Breaks & Cleaning', nameAr: 'فترات الراحة والتنظيف',     category: DowntimeCategory.PLANNED_BREAK,       level: 2, parentId: 'dt-l1-06', isPlanned: true,  sortOrder: 1 });
+  await dc('dt-l2-13', { code: 'L2-PMAINT', name: 'Planned Maintenance & Changeover', nameAr: 'الصيانة والتحويل المخطط', category: DowntimeCategory.PLANNED_MAINTENANCE, level: 2, parentId: 'dt-l1-06', isPlanned: true, sortOrder: 2 });
 
-  // Euro-Pack Robot causes
-  const euroPackCauseData = [
-    { code: 'EP-01', name: 'Piston and arm for cutting the stretch roll', category: DowntimeCategory.MECHANICAL },
-    { code: 'EP-02', name: 'Electrical trip for pallet wrapping rotating', category: DowntimeCategory.ELECTRICAL },
-    { code: 'EP-03', name: 'A/C failure', category: DowntimeCategory.UTILITY },
-    { code: 'EP-04', name: 'Chain failure', category: DowntimeCategory.MECHANICAL },
-    { code: 'EP-05', name: 'Door sensors', category: DowntimeCategory.ELECTRICAL },
-    { code: 'EP-06', name: 'Air pressure low', category: DowntimeCategory.UTILITY },
-    { code: 'EP-07', name: 'Electrical problems', category: DowntimeCategory.ELECTRICAL },
-    { code: 'EP-08', name: 'Main power failure', category: DowntimeCategory.EXTERNAL },
-  ];
+  // ── Level 3: Mechanical Faults (L2-01) ──────────────────────
+  // Generic standard codes
+  await dc('dt-l3-mech-001', { code: 'MECH-GEN-01', name: 'Jammed Conveyor',             nameAr: 'ناقل محشور',               category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', isPlanned: false, sortOrder:  1 });
+  await dc('dt-l3-mech-002', { code: 'MECH-GEN-02', name: 'Motor Overheating',            nameAr: 'ارتفاع حرارة المحرك',      category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', isPlanned: false, sortOrder:  2 });
+  // NCC — Big Betti
+  await dc('dc-bb-BB-01', { code: 'BB-01', name: 'Piston for powder inlet gate',                  nameAr: 'مكبس بوابة دخول المسحوق',   category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: bigBetti.id,     isPlanned: false, sortOrder:  3 });
+  await dc('dc-bb-BB-02', { code: 'BB-02', name: 'Screw piston for opening the powder inlet gate', nameAr: 'مسمار مكبس بوابة المسحوق',  category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: bigBetti.id,     isPlanned: false, sortOrder:  4 });
+  await dc('dc-bb-BB-03', { code: 'BB-03', name: 'Glue tank piston + internal board',             nameAr: 'مكبس خزان الغراء + اللوحة', category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: bigBetti.id,     isPlanned: false, sortOrder:  5 });
+  await dc('dc-bb-BB-04', { code: 'BB-04', name: 'Glue system complete nozzle',                   nameAr: 'فوهة نظام الغراء الكاملة',  category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: bigBetti.id,     isPlanned: false, sortOrder:  6 });
+  await dc('dc-bb-BB-06', { code: 'BB-06', name: 'Inner holder',                                  nameAr: 'حامل داخلي',                category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: bigBetti.id,     isPlanned: false, sortOrder:  7 });
+  await dc('dc-bb-BB-08', { code: 'BB-08', name: 'Inner section cup',                             nameAr: 'كوب القسم الداخلي',         category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: bigBetti.id,     isPlanned: false, sortOrder:  8 });
+  await dc('dc-bb-BB-12', { code: 'BB-12', name: 'Rollers drive the inner',                       nameAr: 'بكرات تحريك الجزء الداخلي', category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: bigBetti.id,     isPlanned: false, sortOrder:  9 });
+  await dc('dc-bb-BB-15', { code: 'BB-15', name: 'Chain failure',                                 nameAr: 'عطل السلسلة',               category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: bigBetti.id,     isPlanned: false, sortOrder: 10 });
+  await dc('dc-bb-BB-17', { code: 'BB-17', name: 'Printer machine fault',                         nameAr: 'عطل آلة الطباعة',           category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: bigBetti.id,     isPlanned: false, sortOrder: 11 });
+  // NCC — Cartomac
+  await dc('dc-cm-CM-01', { code: 'CM-01', name: 'Cartomac machine - lower large piston',          nameAr: 'مكبس سفلي كبير - كارتوماك', category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: cartomac.id,     isPlanned: false, sortOrder: 12 });
+  await dc('dc-cm-CM-02', { code: 'CM-02', name: 'Carton section cup',                             nameAr: 'كوب قسم الكرتون',           category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: cartomac.id,     isPlanned: false, sortOrder: 13 });
+  await dc('dc-cm-CM-03', { code: 'CM-03', name: 'Carton closing piston right & left',             nameAr: 'مكبس إغلاق الكرتون Y/Y',    category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: cartomac.id,     isPlanned: false, sortOrder: 14 });
+  await dc('dc-cm-CM-04', { code: 'CM-04', name: 'Fixing piston and fixing track',                 nameAr: 'مكبس التثبيت ومسار التثبيت', category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: cartomac.id,    isPlanned: false, sortOrder: 15 });
+  await dc('dc-cm-CM-05', { code: 'CM-05', name: 'Glue tank piston + internal board',              nameAr: 'مكبس خزان الغراء + اللوحة', category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: cartomac.id,     isPlanned: false, sortOrder: 16 });
+  await dc('dc-cm-CM-06', { code: 'CM-06', name: 'Glue system complete nozzle',                    nameAr: 'فوهة نظام الغراء الكاملة',  category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: cartomac.id,     isPlanned: false, sortOrder: 17 });
+  await dc('dc-cm-CM-09', { code: 'CM-09', name: 'Chain failure',                                  nameAr: 'عطل السلسلة',               category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: cartomac.id,     isPlanned: false, sortOrder: 18 });
+  await dc('dc-cm-CM-14', { code: 'CM-14', name: 'Printer machine fault',                          nameAr: 'عطل آلة الطباعة',           category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: cartomac.id,     isPlanned: false, sortOrder: 19 });
+  // NCC — Euro-Pack
+  await dc('dc-ep-EP-01', { code: 'EP-01', name: 'Piston and arm for cutting the stretch roll',    nameAr: 'مكبس وذراع قطع الشريط',     category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: euroPackRobot.id, isPlanned: false, sortOrder: 20 });
+  await dc('dc-ep-EP-04', { code: 'EP-04', name: 'Chain failure',                                  nameAr: 'عطل السلسلة',               category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-01', machineId: euroPackRobot.id, isPlanned: false, sortOrder: 21 });
 
-  for (let i = 0; i < euroPackCauseData.length; i++) {
-    const c = euroPackCauseData[i];
-    await prisma.downtimeCause.upsert({
-      where: { id: `dc-ep-${c.code}` },
-      update: {},
-      create: {
-        id: `dc-ep-${c.code}`,
-        factoryId: sidco.id,
-        machineId: euroPackRobot.id,
-        code: c.code,
-        name: c.name,
-        category: c.category,
-        isPlanned: false,
-        sortOrder: i + 1,
-      },
-    });
-  }
+  // ── Level 3: Tooling Issues (L2-06) ──────────────────────────
+  await dc('dt-l3-tool-001', { code: 'TOOL-01', name: 'Worn Part Past Service Life', nameAr: 'قطعة تجاوزت عمرها الافتراضي', category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-06', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l3-tool-002', { code: 'TOOL-02', name: 'Blunt Cutting Blades',        nameAr: 'شفرات قطع باهتة',              category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-06', isPlanned: false, sortOrder: 2 });
+  await dc('dt-l3-tool-003', { code: 'TOOL-03', name: 'Broken Die / Mold',           nameAr: 'قالب مكسور',                   category: DowntimeCategory.MECHANICAL, level: 3, parentId: 'dt-l2-06', isPlanned: false, sortOrder: 3 });
 
-  // Planned downtime causes (common to all machines)
-  const plannedCauses = [
-    { code: 'PLN-01', name: 'Planned break', category: DowntimeCategory.PLANNED_BREAK, isPlanned: true },
-    { code: 'PLN-02', name: 'Planned cleaning', category: DowntimeCategory.PLANNED_CLEANING, isPlanned: true },
-    { code: 'PLN-03', name: 'Product changeover', category: DowntimeCategory.CHANGEOVER, isPlanned: true },
-    { code: 'PLN-04', name: 'Preventive maintenance', category: DowntimeCategory.PLANNED_MAINTENANCE, isPlanned: true },
-    { code: 'PLN-05', name: 'Scheduled shutdown', category: DowntimeCategory.PLANNED_MAINTENANCE, isPlanned: true },
-  ];
+  // ── Level 3: Electrical Faults (L2-02) ───────────────────────
+  await dc('dt-l3-elec-001', { code: 'ELEC-GEN-01', name: 'Blown Fuse',        nameAr: 'فيوز محترق',         category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l3-elec-002', { code: 'ELEC-GEN-02', name: 'PLC / Control Error', nameAr: 'خطأ في وحدة التحكم', category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', isPlanned: false, sortOrder: 2 });
+  // NCC — Big Betti
+  await dc('dc-bb-BB-05', { code: 'BB-05', name: 'Inverter fault',                             nameAr: 'عطل الإنفرتر',               category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', machineId: bigBetti.id,     isPlanned: false, sortOrder: 3 });
+  await dc('dc-bb-BB-10', { code: 'BB-10', name: 'Electrical problems',                        nameAr: 'مشاكل كهربائية',             category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', machineId: bigBetti.id,     isPlanned: false, sortOrder: 4 });
+  await dc('dc-bb-BB-11', { code: 'BB-11', name: 'Electrical trip for checkweigher belt',      nameAr: 'رحلة كهربائية لحزام الموازين', category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', machineId: bigBetti.id,   isPlanned: false, sortOrder: 5 });
+  await dc('dc-bb-BB-13', { code: 'BB-13', name: 'Door sensors',                               nameAr: 'حساسات الباب',               category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', machineId: bigBetti.id,     isPlanned: false, sortOrder: 6 });
+  // NCC — Cartomac
+  await dc('dc-cm-CM-08', { code: 'CM-08', name: 'Door sensors',                               nameAr: 'حساسات الباب',               category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', machineId: cartomac.id,     isPlanned: false, sortOrder: 7 });
+  await dc('dc-cm-CM-13', { code: 'CM-13', name: 'Electrical problems',                        nameAr: 'مشاكل كهربائية',             category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', machineId: cartomac.id,     isPlanned: false, sortOrder: 8 });
+  // NCC — Euro-Pack
+  await dc('dc-ep-EP-02', { code: 'EP-02', name: 'Electrical trip for pallet wrapping rotating', nameAr: 'رحلة كهربائية لتغليف البالة', category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', machineId: euroPackRobot.id, isPlanned: false, sortOrder: 9 });
+  await dc('dc-ep-EP-05', { code: 'EP-05', name: 'Door sensors',                               nameAr: 'حساسات الباب',               category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', machineId: euroPackRobot.id, isPlanned: false, sortOrder: 10 });
+  await dc('dc-ep-EP-07', { code: 'EP-07', name: 'Electrical problems',                        nameAr: 'مشاكل كهربائية',             category: DowntimeCategory.ELECTRICAL, level: 3, parentId: 'dt-l2-02', machineId: euroPackRobot.id, isPlanned: false, sortOrder: 11 });
 
-  for (let i = 0; i < plannedCauses.length; i++) {
-    const c = plannedCauses[i];
-    await prisma.downtimeCause.upsert({
-      where: { id: `dc-pln-${c.code}` },
-      update: {},
-      create: {
-        id: `dc-pln-${c.code}`,
-        factoryId: sidco.id,
-        machineId: null,
-        code: c.code,
-        name: c.name,
-        category: c.category,
-        isPlanned: c.isPlanned,
-        sortOrder: i + 1,
-      },
-    });
-  }
+  // ── Level 3: Setup & Changeovers (L2-03) ─────────────────────
+  await dc('dt-l3-setup-001', { code: 'SETUP-01', name: 'Tooling Swap Delay',       nameAr: 'تأخر تبديل الأدوات',       category: DowntimeCategory.CHANGEOVER, level: 3, parentId: 'dt-l2-03', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l3-setup-002', { code: 'SETUP-02', name: 'Calibration Adjustment',   nameAr: 'ضبط المعايرة',             category: DowntimeCategory.CHANGEOVER, level: 3, parentId: 'dt-l2-03', isPlanned: false, sortOrder: 2 });
+  await dc('dt-l3-setup-003', { code: 'SETUP-03', name: 'Cleaning / Sanitation',    nameAr: 'التنظيف / التعقيم',        category: DowntimeCategory.CHANGEOVER, level: 3, parentId: 'dt-l2-03', isPlanned: false, sortOrder: 3 });
 
-  console.log(`✅ SIDCO downtime causes: Big Betti(18), Cartomac(14), Euro-Pack(8), Planned(5)`);
+  // ── Level 3: Operator Unavailability (L2-04) ──────────────────
+  await dc('dt-l3-ops-001', { code: 'OPS-01', name: 'Late Shift Handover',           nameAr: 'تأخر تسليم الوردية',       category: DowntimeCategory.OPERATOR, level: 3, parentId: 'dt-l2-04', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l3-ops-002', { code: 'OPS-02', name: 'Missing Operator / Ghost Shift', nameAr: 'غياب مشغل / وردية وهمية', category: DowntimeCategory.OPERATOR, level: 3, parentId: 'dt-l2-04', isPlanned: false, sortOrder: 2 });
+  await dc('dt-l3-ops-003', { code: 'OPS-03', name: 'Incorrect Machine Settings',    nameAr: 'إعدادات آلة خاطئة',       category: DowntimeCategory.OPERATOR, level: 3, parentId: 'dt-l2-04', isPlanned: false, sortOrder: 3 });
+
+  // ── Level 3: Lack of Preventive Care (L2-05) ─────────────────
+  await dc('dt-l3-prev-001', { code: 'PREV-01', name: 'Skipped Scheduled Inspection', nameAr: 'تجاهل الفحص الدوري',         category: DowntimeCategory.PROCESS, level: 3, parentId: 'dt-l2-05', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l3-prev-002', { code: 'PREV-02', name: 'Lack of Lubrication',          nameAr: 'نقص التزييت',               category: DowntimeCategory.PROCESS, level: 3, parentId: 'dt-l2-05', isPlanned: false, sortOrder: 2 });
+
+  // ── Level 3: Logistics / Warehouse (L2-07) ───────────────────
+  await dc('dt-l3-log-001', { code: 'LOG-GEN-01', name: 'Wrong Material Delivered',  nameAr: 'تسليم مواد خاطئة',          category: DowntimeCategory.MATERIAL, level: 3, parentId: 'dt-l2-07', isPlanned: false, sortOrder: 1 });
+  // NCC
+  await dc('dc-bb-BB-16', { code: 'BB-16', name: 'Powder shortage',                  nameAr: 'نقص المسحوق',               category: DowntimeCategory.MATERIAL, level: 3, parentId: 'dt-l2-07', machineId: bigBetti.id, isPlanned: false, sortOrder: 2 });
+  await dc('dc-bb-BB-18', { code: 'BB-18', name: 'Packing material shortage',        nameAr: 'نقص مواد التعبئة',          category: DowntimeCategory.MATERIAL, level: 3, parentId: 'dt-l2-07', machineId: bigBetti.id, isPlanned: false, sortOrder: 3 });
+  await dc('dc-cm-CM-10', { code: 'CM-10', name: 'Packing material shortage',        nameAr: 'نقص مواد التعبئة',          category: DowntimeCategory.MATERIAL, level: 3, parentId: 'dt-l2-07', machineId: cartomac.id, isPlanned: false, sortOrder: 4 });
+
+  // ── Level 3: Quality Inspection Hold (L2-08) ─────────────────
+  await dc('dt-l3-qa-001', { code: 'QA-01', name: 'Waiting for QA Release',          nameAr: 'انتظار إفراج الجودة',       category: DowntimeCategory.QUALITY, level: 3, parentId: 'dt-l2-08', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l3-qa-002', { code: 'QA-02', name: 'Defective Raw Material Rejection', nameAr: 'رفض مواد خام معيبة',        category: DowntimeCategory.QUALITY, level: 3, parentId: 'dt-l2-08', isPlanned: false, sortOrder: 2 });
+
+  // ── Level 3: Power & Pneumatics (L2-09) ──────────────────────
+  await dc('dt-l3-pwr-001', { code: 'PWR-GEN-01', name: 'Localized Voltage Spike',   nameAr: 'ارتفاع جهد موضعي',          category: DowntimeCategory.UTILITY, level: 3, parentId: 'dt-l2-09', isPlanned: false, sortOrder: 1 });
+  // NCC — air & power (shared across machines, machineId null = all)
+  await dc('dc-bb-BB-07', { code: 'BB-07', name: 'Air pressure low',                 nameAr: 'ضغط الهواء منخفض',          category: DowntimeCategory.UTILITY,  level: 3, parentId: 'dt-l2-09', machineId: bigBetti.id,     isPlanned: false, sortOrder: 2 });
+  await dc('dc-bb-BB-14', { code: 'BB-14', name: 'Main power failure',               nameAr: 'انقطاع الطاقة الرئيسي',     category: DowntimeCategory.UTILITY,  level: 3, parentId: 'dt-l2-09', machineId: bigBetti.id,     isPlanned: false, sortOrder: 3 });
+  await dc('dc-cm-CM-11', { code: 'CM-11', name: 'Main power failure',               nameAr: 'انقطاع الطاقة الرئيسي',     category: DowntimeCategory.UTILITY,  level: 3, parentId: 'dt-l2-09', machineId: cartomac.id,     isPlanned: false, sortOrder: 4 });
+  await dc('dc-cm-CM-12', { code: 'CM-12', name: 'Air pressure low',                 nameAr: 'ضغط الهواء منخفض',          category: DowntimeCategory.UTILITY,  level: 3, parentId: 'dt-l2-09', machineId: cartomac.id,     isPlanned: false, sortOrder: 5 });
+  await dc('dc-ep-EP-06', { code: 'EP-06', name: 'Air pressure low',                 nameAr: 'ضغط الهواء منخفض',          category: DowntimeCategory.UTILITY,  level: 3, parentId: 'dt-l2-09', machineId: euroPackRobot.id, isPlanned: false, sortOrder: 6 });
+  await dc('dc-ep-EP-08', { code: 'EP-08', name: 'Main power failure',               nameAr: 'انقطاع الطاقة الرئيسي',     category: DowntimeCategory.UTILITY,  level: 3, parentId: 'dt-l2-09', machineId: euroPackRobot.id, isPlanned: false, sortOrder: 7 });
+
+  // ── Level 3: IT & Connectivity (L2-10) ───────────────────────
+  await dc('dt-l3-it-001', { code: 'IT-01', name: 'Network Disruption / Internet Down', nameAr: 'انقطاع الشبكة / الإنترنت', category: DowntimeCategory.UTILITY, level: 3, parentId: 'dt-l2-10', isPlanned: false, sortOrder: 1 });
+  await dc('dt-l3-it-002', { code: 'IT-02', name: 'Software Freeze / Server Crash',     nameAr: 'تجمد البرنامج / انهيار الخادم', category: DowntimeCategory.UTILITY, level: 3, parentId: 'dt-l2-10', isPlanned: false, sortOrder: 2 });
+
+  // ── Level 3: Environmental & HVAC (L2-11) ────────────────────
+  await dc('dt-l3-hvac-001', { code: 'HVAC-GEN-01', name: 'Temperature Out of Range', nameAr: 'درجة حرارة خارج النطاق',    category: DowntimeCategory.UTILITY, level: 3, parentId: 'dt-l2-11', isPlanned: false, sortOrder: 1 });
+  await dc('dc-bb-BB-09', { code: 'BB-09', name: 'A/C failure',                       nameAr: 'عطل التكييف',               category: DowntimeCategory.UTILITY, level: 3, parentId: 'dt-l2-11', machineId: bigBetti.id,     isPlanned: false, sortOrder: 2 });
+  await dc('dc-cm-CM-07', { code: 'CM-07', name: 'A/C failure',                       nameAr: 'عطل التكييف',               category: DowntimeCategory.UTILITY, level: 3, parentId: 'dt-l2-11', machineId: cartomac.id,     isPlanned: false, sortOrder: 3 });
+  await dc('dc-ep-EP-03', { code: 'EP-03', name: 'A/C failure',                       nameAr: 'عطل التكييف',               category: DowntimeCategory.UTILITY, level: 3, parentId: 'dt-l2-11', machineId: euroPackRobot.id, isPlanned: false, sortOrder: 4 });
+
+  // ── Level 3: Scheduled Breaks & Cleaning (L2-12) ─────────────
+  await dc('dc-pln-PLN-01', { code: 'PLN-01', name: 'Planned break',     nameAr: 'استراحة مجدولة',    category: DowntimeCategory.PLANNED_BREAK,       level: 3, parentId: 'dt-l2-12', isPlanned: true, sortOrder: 1 });
+  await dc('dc-pln-PLN-02', { code: 'PLN-02', name: 'Planned cleaning',  nameAr: 'تنظيف مجدول',       category: DowntimeCategory.PLANNED_CLEANING,    level: 3, parentId: 'dt-l2-12', isPlanned: true, sortOrder: 2 });
+  await dc('dc-pln-PLN-05', { code: 'PLN-05', name: 'Scheduled shutdown', nameAr: 'إيقاف تشغيل مجدول', category: DowntimeCategory.PLANNED_MAINTENANCE, level: 3, parentId: 'dt-l2-12', isPlanned: true, sortOrder: 3 });
+
+  // ── Level 3: Planned Maintenance & Changeover (L2-13) ────────
+  await dc('dc-pln-PLN-04', { code: 'PLN-04', name: 'Preventive maintenance', nameAr: 'صيانة وقائية',     category: DowntimeCategory.PLANNED_MAINTENANCE, level: 3, parentId: 'dt-l2-13', isPlanned: true, sortOrder: 1 });
+  await dc('dc-pln-PLN-03', { code: 'PLN-03', name: 'Product changeover',     nameAr: 'تحويل المنتج',     category: DowntimeCategory.CHANGEOVER,          level: 3, parentId: 'dt-l2-13', isPlanned: true, sortOrder: 2 });
+
+  console.log(`✅ Downtime causes tree: 6 L1 categories, 13 L2 sub-categories, ~50 L3 specific reasons (NCC + standard)`);
 
   // ============================================================
   // SIDCO — USERS (from NCC Prerequisites File)
@@ -993,6 +993,301 @@ async function main() {
   }
 
   console.log(`✅ SDPF, SAF, NDPF, RNTIC basic structure seeded`);
+
+  // ============================================================
+  // SIDCO — STORAGE LOCATIONS
+  // ============================================================
+  const storeLocs = [
+    { code: 'SL-RM-A',  name: 'Raw Material Store A', zone: 'RAW_MATERIAL' },
+    { code: 'SL-RM-B',  name: 'Raw Material Store B', zone: 'RAW_MATERIAL' },
+    { code: 'SL-FG-A',  name: 'Finished Goods Store A', zone: 'FINISHED_GOODS' },
+    { code: 'SL-SP-A',  name: 'Spare Parts Store', zone: 'SPARE_PARTS' },
+    { code: 'SL-QC-A',  name: 'Quarantine Area', zone: 'QUARANTINE' },
+    { code: 'SL-PROD',  name: 'Production Floor', zone: 'PRODUCTION' },
+  ];
+
+  const slMap: Record<string, string> = {};
+  for (const sl of storeLocs) {
+    const loc = await (prisma as any).storageLocation.upsert({
+      where: { factoryId_code: { factoryId: sidco.id, code: sl.code } },
+      update: {},
+      create: { factoryId: sidco.id, code: sl.code, name: sl.name, zone: sl.zone },
+    });
+    slMap[sl.code] = loc.id;
+  }
+  console.log(`✅ SIDCO storage locations: ${storeLocs.length} zones`);
+
+  // ============================================================
+  // SIDCO — WORKCENTER HIERARCHY (ISA-95 PLANT > AREA > LINE > CELL)
+  // ============================================================
+  const wcPlant = await (prisma as any).workCenter.upsert({
+    where: { factoryId_code: { factoryId: sidco.id, code: 'WC-PLANT' } },
+    update: {},
+    create: { factoryId: sidco.id, code: 'WC-PLANT', name: 'SIDCO Production Plant', level: 'PLANT', description: 'Top-level plant scheduling unit' },
+  });
+
+  const wcMaking = await (prisma as any).workCenter.upsert({
+    where: { factoryId_code: { factoryId: sidco.id, code: 'WC-MAKING' } },
+    update: {},
+    create: { factoryId: sidco.id, parentId: wcPlant.id, code: 'WC-MAKING', name: 'Making Area', level: 'AREA', description: 'Powder manufacturing area' },
+  });
+
+  const wcPacking = await (prisma as any).workCenter.upsert({
+    where: { factoryId_code: { factoryId: sidco.id, code: 'WC-PACKING' } },
+    update: {},
+    create: { factoryId: sidco.id, parentId: wcPlant.id, code: 'WC-PACKING', name: 'Packing Area', level: 'AREA', description: 'Packing and finishing area' },
+  });
+
+  const wcLine1 = await (prisma as any).workCenter.upsert({
+    where: { factoryId_code: { factoryId: sidco.id, code: 'WC-PL01' } },
+    update: {},
+    create: { factoryId: sidco.id, parentId: wcPacking.id, code: 'WC-PL01', name: 'Packing Line 1', level: 'LINE', capacity: 120 },
+  });
+
+  const wcMixingLine = await (prisma as any).workCenter.upsert({
+    where: { factoryId_code: { factoryId: sidco.id, code: 'WC-MIX-L1' } },
+    update: {},
+    create: { factoryId: sidco.id, parentId: wcMaking.id, code: 'WC-MIX-L1', name: 'Mixing Line 1', level: 'LINE', capacity: 2000 },
+  });
+
+  const wcCells = [
+    { code: 'WC-BETTI',   name: 'Big Betti Cell',         parentId: wcLine1.id },
+    { code: 'WC-CARTOMAC',name: 'Cartomac Cell',           parentId: wcLine1.id },
+    { code: 'WC-CHECKWT', name: 'Checkweigher Cell',       parentId: wcLine1.id },
+    { code: 'WC-EUROPACK',name: 'Euro-Pack Robot Cell',     parentId: wcLine1.id },
+    { code: 'WC-UNITECH', name: 'Uni-tech Wrapping Cell',  parentId: wcLine1.id },
+    { code: 'WC-MIXER-01',name: 'Mixer 01',                parentId: wcMixingLine.id },
+  ];
+
+  for (const wc of wcCells) {
+    await (prisma as any).workCenter.upsert({
+      where: { factoryId_code: { factoryId: sidco.id, code: wc.code } },
+      update: {},
+      create: { factoryId: sidco.id, parentId: wc.parentId, code: wc.code, name: wc.name, level: 'CELL' },
+    });
+  }
+  console.log(`✅ SIDCO WorkCenter hierarchy: PLANT > 2 AREAs > 2 LINEs > 6 CELLs`);
+
+  // ============================================================
+  // SIDCO — RAW MATERIALS (NCC detergent powder ingredients)
+  // ============================================================
+  const rawMaterials = [
+    { code: 'RM-STPP',   name: 'Sodium Tripolyphosphate (STPP)',  unit: 'kg',  category: 'Chemical',   unitCost: 12.5,  minStock: 5000 },
+    { code: 'RM-LAS',    name: 'Linear Alkylbenzene Sulfonate',   unit: 'kg',  category: 'Surfactant', unitCost: 18.0,  minStock: 3000 },
+    { code: 'RM-SODA',   name: 'Soda Ash (Na2CO3)',               unit: 'kg',  category: 'Chemical',   unitCost: 4.2,   minStock: 10000 },
+    { code: 'RM-ZEOLITE',name: 'Zeolite A',                       unit: 'kg',  category: 'Chemical',   unitCost: 8.0,   minStock: 5000 },
+    { code: 'RM-CMC',    name: 'Carboxymethyl Cellulose (CMC)',   unit: 'kg',  category: 'Chemical',   unitCost: 22.0,  minStock: 1000 },
+    { code: 'RM-PERF',   name: 'Perfume / Fragrance Blend',       unit: 'kg',  category: 'Additive',   unitCost: 85.0,  minStock: 500 },
+    { code: 'RM-BRIGHT', name: 'Optical Brightener',              unit: 'kg',  category: 'Additive',   unitCost: 45.0,  minStock: 200 },
+    { code: 'RM-SALT',   name: 'Salt (NaCl)',                     unit: 'kg',  category: 'Chemical',   unitCost: 1.8,   minStock: 5000 },
+    { code: 'RM-ENZYME', name: 'Enzyme Blend',                    unit: 'kg',  category: 'Biological', unitCost: 120.0, minStock: 300 },
+    { code: 'RM-COLOUR', name: 'Colour Pigment (Blue/Violet)',    unit: 'kg',  category: 'Additive',   unitCost: 35.0,  minStock: 100 },
+    { code: 'RM-INNER',  name: 'Polyethylene Inner Bag (1.5kg)',  unit: 'pcs', category: 'Packaging',  unitCost: 0.18,  minStock: 50000 },
+    { code: 'RM-CARTON', name: 'Corrugated Carton Box',           unit: 'pcs', category: 'Packaging',  unitCost: 0.95,  minStock: 10000 },
+  ];
+
+  const rmMap: Record<string, string> = {};
+  for (const rm of rawMaterials) {
+    const mat = await (prisma as any).rawMaterial.upsert({
+      where: { factoryId_code: { factoryId: sidco.id, code: rm.code } },
+      update: { unitCost: rm.unitCost },
+      create: {
+        factoryId: sidco.id,
+        code: rm.code,
+        name: rm.name,
+        unit: rm.unit,
+        category: rm.category,
+        unitCost: rm.unitCost,
+        minStock: rm.minStock,
+        storageLocationId: rm.category === 'Packaging' ? slMap['SL-RM-B'] : slMap['SL-RM-A'],
+      },
+    });
+    rmMap[rm.code] = mat.id;
+  }
+  console.log(`✅ SIDCO raw materials: ${rawMaterials.length} items`);
+
+  // ============================================================
+  // SIDCO — MATERIAL LOTS (3–4 lots per raw material)
+  // ============================================================
+  const now = new Date();
+  const daysAgo = (d: number) => new Date(now.getTime() - d * 86400000);
+  const daysAhead = (d: number) => new Date(now.getTime() + d * 86400000);
+
+  const lotsToSeed = [
+    // STPP
+    { rmCode: 'RM-STPP',    lot: 'LOT-STPP-2024-01', qty: 8000,  remaining: 1200,  status: 'ACTIVE',    received: daysAgo(90), expiry: daysAhead(275), supplier: 'Prayon SA' },
+    { rmCode: 'RM-STPP',    lot: 'LOT-STPP-2024-02', qty: 10000, remaining: 10000, status: 'ACTIVE',    received: daysAgo(15), expiry: daysAhead(350), supplier: 'Prayon SA' },
+    { rmCode: 'RM-STPP',    lot: 'LOT-STPP-2023-04', qty: 5000,  remaining: 0,     status: 'COMPLETED', received: daysAgo(180), expiry: daysAhead(180), supplier: 'Prayon SA' },
+    // LAS
+    { rmCode: 'RM-LAS',     lot: 'LOT-LAS-2024-01',  qty: 6000,  remaining: 800,   status: 'ACTIVE',    received: daysAgo(60),  expiry: daysAhead(300), supplier: 'Sasol' },
+    { rmCode: 'RM-LAS',     lot: 'LOT-LAS-2024-02',  qty: 6000,  remaining: 6000,  status: 'ACTIVE',    received: daysAgo(5),   expiry: daysAhead(360), supplier: 'Sasol' },
+    // Soda Ash
+    { rmCode: 'RM-SODA',    lot: 'LOT-SODA-2024-01', qty: 20000, remaining: 4500,  status: 'ACTIVE',    received: daysAgo(45),  expiry: daysAhead(540), supplier: 'Solvay' },
+    { rmCode: 'RM-SODA',    lot: 'LOT-SODA-2024-02', qty: 25000, remaining: 25000, status: 'ACTIVE',    received: daysAgo(2),   expiry: daysAhead(540), supplier: 'Solvay' },
+    // Zeolite
+    { rmCode: 'RM-ZEOLITE', lot: 'LOT-ZEO-2024-01',  qty: 8000,  remaining: 2100,  status: 'ACTIVE',    received: daysAgo(70),  expiry: daysAhead(350), supplier: 'PQ Corp' },
+    { rmCode: 'RM-ZEOLITE', lot: 'LOT-ZEO-2023-03',  qty: 4000,  remaining: 0,     status: 'COMPLETED', received: daysAgo(200), expiry: daysAgo(5),     supplier: 'PQ Corp' },
+    // CMC
+    { rmCode: 'RM-CMC',     lot: 'LOT-CMC-2024-01',  qty: 2000,  remaining: 600,   status: 'ACTIVE',    received: daysAgo(30),  expiry: daysAhead(700), supplier: 'Ashland' },
+    // Perfume
+    { rmCode: 'RM-PERF',    lot: 'LOT-PERF-2024-01', qty: 1000,  remaining: 250,   status: 'ACTIVE',    received: daysAgo(40),  expiry: daysAhead(180), supplier: 'Firmenich' },
+    { rmCode: 'RM-PERF',    lot: 'LOT-PERF-2024-02', qty: 500,   remaining: 500,   status: 'ACTIVE',    received: daysAgo(3),   expiry: daysAhead(220), supplier: 'Firmenich' },
+    { rmCode: 'RM-PERF',    lot: 'LOT-PERF-Q-001',   qty: 200,   remaining: 200,   status: 'QUARANTINE', received: daysAgo(10), expiry: daysAhead(200), supplier: 'Alternative Source' },
+    // Brightener
+    { rmCode: 'RM-BRIGHT',  lot: 'LOT-OB-2024-01',   qty: 400,   remaining: 120,   status: 'ACTIVE',    received: daysAgo(50),  expiry: daysAhead(400), supplier: 'Huntsman' },
+    // Salt
+    { rmCode: 'RM-SALT',    lot: 'LOT-NaCl-2024-01', qty: 10000, remaining: 3800,  status: 'ACTIVE',    received: daysAgo(35),  expiry: null,           supplier: 'Saudi Mining Co.' },
+    { rmCode: 'RM-SALT',    lot: 'LOT-NaCl-2024-02', qty: 15000, remaining: 15000, status: 'ACTIVE',    received: daysAgo(1),   expiry: null,           supplier: 'Saudi Mining Co.' },
+    // Enzyme
+    { rmCode: 'RM-ENZYME',  lot: 'LOT-ENZ-2024-01',  qty: 500,   remaining: 80,    status: 'ACTIVE',    received: daysAgo(60),  expiry: daysAhead(60),  supplier: 'Novozymes' },
+    { rmCode: 'RM-ENZYME',  lot: 'LOT-ENZ-2024-02',  qty: 300,   remaining: 300,   status: 'RELEASED',  received: daysAgo(7),   expiry: daysAhead(120), supplier: 'Novozymes' },
+    // Colour
+    { rmCode: 'RM-COLOUR',  lot: 'LOT-COL-2024-01',  qty: 200,   remaining: 55,    status: 'ACTIVE',    received: daysAgo(80),  expiry: daysAhead(280), supplier: 'Clariant' },
+    // Packaging
+    { rmCode: 'RM-INNER',   lot: 'LOT-PKG-INNER-01', qty: 100000,remaining: 42000, status: 'ACTIVE',    received: daysAgo(20),  expiry: null,           supplier: 'NCC Plastics' },
+    { rmCode: 'RM-CARTON',  lot: 'LOT-PKG-CTN-01',   qty: 50000, remaining: 18000, status: 'ACTIVE',    received: daysAgo(15),  expiry: null,           supplier: 'Riyadh Carton' },
+  ];
+
+  for (const lot of lotsToSeed) {
+    const rmId = rmMap[lot.rmCode];
+    const rm = rawMaterials.find(r => r.code === lot.rmCode)!;
+    if (!rmId) continue;
+    await (prisma as any).materialLot.upsert({
+      where: { factoryId_lotNumber_materialCode: { factoryId: sidco.id, lotNumber: lot.lot, materialCode: rm.code } },
+      update: {},
+      create: {
+        factoryId: sidco.id,
+        rawMaterialId: rmId,
+        materialCode: rm.code,
+        materialName: rm.name,
+        lotNumber: lot.lot,
+        supplierName: lot.supplier,
+        quantity: lot.qty,
+        remainingQty: lot.remaining,
+        unit: rm.unit,
+        status: lot.status,
+        receivedAt: lot.received,
+        expiryDate: lot.expiry ?? undefined,
+        storageLocationId: lot.status === 'QUARANTINE' ? slMap['SL-QC-A'] : slMap['SL-RM-A'],
+      } as any,
+    });
+  }
+  console.log(`✅ SIDCO material lots: ${lotsToSeed.length} lots across ${rawMaterials.length} raw materials`);
+
+  // ============================================================
+  // SIDCO — RECIPE (Standard GENTO 2.25kg HF Formula)
+  // ============================================================
+  const gentoSkuId = skuMap['10310191']; // GENTO Original HF 2.25kg
+  if (gentoSkuId && rmMap['RM-STPP']) {
+    const recipe = await (prisma as any).recipe.upsert({
+      where: { skuId_version: { skuId: gentoSkuId, version: '1.0' } },
+      update: {},
+      create: {
+        factoryId: sidco.id,
+        skuId: gentoSkuId,
+        code: 'RCP-GENTO-225-HF',
+        version: '1.0',
+        name: 'GENTO 2.25kg HF — Standard Formula',
+        description: 'Standard powder detergent formula for GENTO 2.25kg High Foam variants',
+        status: 'APPROVED',
+        batchSize: 2000,
+        batchUnit: 'kg',
+        yieldPct: 98.5,
+        cycleTimeSecs: 3600,
+        shelfLifeDays: 730,
+        storageConditions: 'Store in dry conditions below 35°C, away from moisture',
+        approvedAt: daysAgo(30),
+        approvedById: platformUser.id,
+        effectiveFrom: daysAgo(30),
+        notes: 'Validated formula — approved for production per QC report QC-2024-045',
+      } as any,
+    });
+
+    // Recipe ingredients (BOM)
+    const bom = [
+      { rmCode: 'RM-STPP',    phase: 'A', qty: 180,   unit: 'kg',  scrap: 0.5,  sort: 1  },
+      { rmCode: 'RM-LAS',     phase: 'A', qty: 220,   unit: 'kg',  scrap: 0.5,  sort: 2  },
+      { rmCode: 'RM-SODA',    phase: 'A', qty: 600,   unit: 'kg',  scrap: 0.3,  sort: 3  },
+      { rmCode: 'RM-ZEOLITE', phase: 'A', qty: 450,   unit: 'kg',  scrap: 0.5,  sort: 4  },
+      { rmCode: 'RM-CMC',     phase: 'B', qty: 20,    unit: 'kg',  scrap: 1.0,  sort: 5  },
+      { rmCode: 'RM-SALT',    phase: 'A', qty: 300,   unit: 'kg',  scrap: 0.2,  sort: 6  },
+      { rmCode: 'RM-ENZYME',  phase: 'C', qty: 15,    unit: 'kg',  scrap: 2.0,  sort: 7, optional: true },
+      { rmCode: 'RM-BRIGHT',  phase: 'B', qty: 8,     unit: 'kg',  scrap: 2.0,  sort: 8  },
+      { rmCode: 'RM-COLOUR',  phase: 'B', qty: 4,     unit: 'kg',  scrap: 3.0,  sort: 9  },
+      { rmCode: 'RM-PERF',    phase: 'C', qty: 22,    unit: 'kg',  scrap: 1.0,  sort: 10 },
+      { rmCode: 'RM-INNER',   phase: 'PKG', qty: 889, unit: 'pcs', scrap: 1.0,  sort: 11 }, // 2000kg / 2.25kg per unit = 889 packs
+      { rmCode: 'RM-CARTON',  phase: 'PKG', qty: 223, unit: 'pcs', scrap: 0.5,  sort: 12 }, // 4 units per inner
+    ];
+
+    for (const ing of bom) {
+      const rmId = rmMap[ing.rmCode];
+      if (!rmId) continue;
+      const existing = await (prisma as any).recipeIngredient.findFirst({
+        where: { recipeId: recipe.id, rawMaterialId: rmId },
+      });
+      if (!existing) {
+        await (prisma as any).recipeIngredient.create({
+          data: {
+            recipeId: recipe.id,
+            rawMaterialId: rmId,
+            phase: ing.phase,
+            quantityPer: ing.qty,
+            unit: ing.unit,
+            scrapFactor: ing.scrap,
+            isOptional: (ing as any).optional ?? false,
+            sortOrder: ing.sort,
+          },
+        });
+      }
+    }
+
+    // Clone as draft v2.0 for editing
+    const recipeV2 = await (prisma as any).recipe.upsert({
+      where: { skuId_version: { skuId: gentoSkuId, version: '2.0' } },
+      update: {},
+      create: {
+        factoryId: sidco.id,
+        skuId: gentoSkuId,
+        code: 'RCP-GENTO-225-HF-v20',
+        version: '2.0',
+        name: 'GENTO 2.25kg HF — Formula v2 (Enzyme Enhanced)',
+        description: 'Draft v2 with increased enzyme dosage and new fragrance blend',
+        status: 'DRAFT',
+        batchSize: 2000,
+        batchUnit: 'kg',
+        yieldPct: 98.0,
+        cycleTimeSecs: 3600,
+        shelfLifeDays: 730,
+        storageConditions: 'Store in dry conditions below 35°C, away from moisture',
+        notes: `Cloned from RCP-GENTO-225-HF v1.0 — increasing enzyme level from 15kg to 25kg per batch`,
+      } as any,
+    });
+
+    // Copy BOM ingredients to v2
+    for (const ing of bom) {
+      const rmId = rmMap[ing.rmCode];
+      if (!rmId) continue;
+      const existing = await (prisma as any).recipeIngredient.findFirst({
+        where: { recipeId: recipeV2.id, rawMaterialId: rmId },
+      });
+      if (!existing) {
+        await (prisma as any).recipeIngredient.create({
+          data: {
+            recipeId: recipeV2.id,
+            rawMaterialId: rmId,
+            phase: ing.phase,
+            quantityPer: ing.rmCode === 'RM-ENZYME' ? 25 : ing.qty, // Increased enzyme
+            unit: ing.unit,
+            scrapFactor: ing.scrap,
+            isOptional: (ing as any).optional ?? false,
+            sortOrder: ing.sort,
+          },
+        });
+      }
+    }
+
+    console.log(`✅ SIDCO recipes: v1.0 (APPROVED) + v2.0 (DRAFT) for GENTO 2.25kg HF`);
+  }
 
   // ============================================================
   // SUMMARY

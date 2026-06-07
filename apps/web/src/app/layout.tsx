@@ -7,15 +7,15 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'INDUSTRY360 MES Platform',
-    template: '%s | INDUSTRY360 MES',
+    default: 'STAR-MES Platform',
+    template: '%s | STAR-MES',
   },
   description:
     'Enterprise Manufacturing Execution System — Real-time production monitoring, quality management, maintenance, and industrial IoT integration.',
   keywords: ['MES', 'Manufacturing', 'OEE', 'Production', 'Quality', 'Maintenance', 'IIoT', 'SCADA'],
-  authors: [{ name: 'INDUSTRY360', url: 'https://industry360.sa' }],
-  creator: 'INDUSTRY360',
-  publisher: 'INDUSTRY360',
+  authors: [{ name: 'STAR-MES', url: 'https://industry360.sa' }],
+  creator: 'STAR-MES',
+  publisher: 'STAR-MES',
   manifest: '/manifest.json',
   icons: {
     icon: [
@@ -28,9 +28,9 @@ export const metadata: Metadata = {
     type: 'website',
     locale: 'en_US',
     url: 'https://mes.industry360.sa',
-    title: 'INDUSTRY360 MES Platform',
+    title: 'STAR-MES Platform',
     description: 'Enterprise Manufacturing Execution System',
-    siteName: 'INDUSTRY360 MES',
+    siteName: 'STAR-MES',
   },
   robots: {
     index: false,

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
@@ -15,6 +16,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+
+interface StorageLocationOption {
+  id: string;
+  code: string;
+  name: string;
+  zone: string;
+}
 
 interface MaterialLot {
   id: string;
@@ -30,6 +38,7 @@ interface MaterialLot {
   receivedAt: string;
   expiryDate: string | null;
   storageLocation: string | null;
+  storageLocationId: string | null;
   utilizationPct: number;
   isExpired: boolean;
 }
@@ -53,8 +62,8 @@ export function MaterialsView() {
   const [editLot, setEditLot] = useState<MaterialLot | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; lotNumber: string } | null>(null)
   const [form, setForm] = useState({
-    materialCode: '', materialName: '', lotNumber: '',
-    supplierName: '', quantity: '', unit: 'KG', expiryDate: '', storageLocation: '',
+    rawMaterialId: '', materialCode: '', materialName: '', lotNumber: '',
+    supplierName: '', quantity: '', unit: 'KG', expiryDate: '', storageLocationId: '',
   })
 
   const { data, isLoading } = useQuery({
@@ -89,9 +98,17 @@ export function MaterialsView() {
   const total: number = (data as any)?.total ?? 0;
   const expiredCount = lots.filter(l => l.isExpired).length;
 
+  const { data: rawMatsData } = useQuery({
+    queryKey: ['raw-materials-list'],
+    queryFn: () => api.get('/inventory/raw-materials?limit=500'),
+    staleTime: 60_000,
+    enabled: formOpen,
+  });
+  const rawMaterials: any[] = (rawMatsData as any)?.data ?? [];
+
   const handleOpenCreate = () => {
     setEditLot(null)
-    setForm({ materialCode: '', materialName: '', lotNumber: '', supplierName: '', quantity: '', unit: 'KG', expiryDate: '', storageLocation: '' })
+    setForm({ rawMaterialId: '', materialCode: '', materialName: '', lotNumber: '', supplierName: '', quantity: '', unit: 'KG', expiryDate: '', storageLocationId: '' })
     setFormOpen(true)
   };
 
@@ -100,11 +117,28 @@ export function MaterialsView() {
     setEditLot(null)
   };
 
+  const { data: storageLocData } = useQuery({
+    queryKey: ['inventory', 'storage-locations'],
+    queryFn: () => api.get<{ data: StorageLocationOption[] }>('/inventory/storage-locations'),
+    staleTime: 300_000,
+  });
+  const storageLocations: StorageLocationOption[] = (storageLocData as any)?.data ?? (storageLocData as any) ?? [];
+
   const handleSubmit = () => {
-    createMutation.mutate({ ...form, quantity: parseFloat(form.quantity) })
+    createMutation.mutate({
+      rawMaterialId: form.rawMaterialId || undefined,
+      materialCode: form.materialCode,
+      materialName: form.materialName,
+      lotNumber: form.lotNumber,
+      supplierName: form.supplierName || undefined,
+      quantity: parseFloat(form.quantity),
+      unit: form.unit,
+      expiryDate: form.expiryDate || undefined,
+      storageLocationId: form.storageLocationId || null,
+    })
   };
 
-  const isValid = !!(form.materialCode && form.materialName && form.lotNumber && form.quantity)
+  const isValid = !!(form.rawMaterialId && form.lotNumber && form.quantity)
 
   return (
     <div className="p-6 space-y-6">
@@ -252,13 +286,35 @@ export function MaterialsView() {
         isValid={isValid}
       >
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label>Material Code *</Label>
-            <Input value={form.materialCode} onChange={e => setForm(v => ({ ...v, materialCode: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
-            <Label>Material Name *</Label>
-            <Input value={form.materialName} onChange={e => setForm(v => ({ ...v, materialName: e.target.value }))} className="mt-1" />
+          <div className="col-span-2">
+            <Label>Raw Material (Master) *</Label>
+            <Select
+              value={form.rawMaterialId || '__none__'}
+              onValueChange={v => {
+                if (v === '__none__') {
+                  setForm(f => ({ ...f, rawMaterialId: '', materialCode: '', materialName: '', unit: 'KG' }));
+                  return;
+                }
+                const mat = rawMaterials.find((m: any) => m.id === v);
+                setForm(f => ({
+                  ...f,
+                  rawMaterialId: v,
+                  materialCode: mat?.code ?? '',
+                  materialName: mat?.name ?? '',
+                  unit: mat?.unit ?? f.unit,
+                }));
+              }}
+            >
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select raw material..." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— Select material —</SelectItem>
+                {rawMaterials.map((m: any) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.code} — {m.name} ({m.unit})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label>Lot Number *</Label>
@@ -282,7 +338,20 @@ export function MaterialsView() {
           </div>
           <div>
             <Label>Storage Location</Label>
-            <Input value={form.storageLocation} onChange={e => setForm(v => ({ ...v, storageLocation: e.target.value }))} className="mt-1" />
+            <Select
+              value={form.storageLocationId || '__none__'}
+              onValueChange={v => setForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
+            >
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">None</SelectItem>
+                {storageLocations.map(loc => (
+                  <SelectItem key={loc.id} value={loc.id}>
+                    {loc.code} — {loc.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </FormDialog>

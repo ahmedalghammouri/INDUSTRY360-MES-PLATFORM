@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { HierarchyService } from './hierarchy.service';
+import { WorkCenterService } from './workcenter.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 interface RequestUser {
@@ -12,7 +13,10 @@ interface RequestUser {
 @ApiBearerAuth('JWT-auth')
 @Controller('hierarchy')
 export class HierarchyController {
-  constructor(private readonly hierarchyService: HierarchyService) {}
+  constructor(
+    private readonly hierarchyService: HierarchyService,
+    private readonly workCenterService: WorkCenterService,
+  ) {}
 
   @Get('tree')
   @ApiOperation({ summary: 'Get full ISA-95 hierarchy tree' })
@@ -72,5 +76,63 @@ export class HierarchyController {
   @ApiOperation({ summary: 'Soft-delete a hierarchy node' })
   async deleteNode(@Param('id') id: string, @Body() body: { type: string }) {
     return this.hierarchyService.deleteNode(id, body.type);
+  }
+
+  // ── WorkCenter endpoints ─────────────────────────────────────
+
+  @Get('workcenters/tree')
+  @ApiOperation({ summary: 'Get WorkCenter hierarchy tree (PLANT > AREA > LINE > CELL)' })
+  async getWorkCenterTree(@CurrentUser() user: RequestUser) {
+    const factoryId = user.factoryId ?? await this.resolveFactoryId();
+    return this.workCenterService.getTree(factoryId);
+  }
+
+  @Get('workcenters')
+  @ApiOperation({ summary: 'Flat list of work centers with optional level filter' })
+  async listWorkCenters(
+    @CurrentUser() user: RequestUser,
+    @Query('level') level?: string,
+  ) {
+    const factoryId = user.factoryId ?? await this.resolveFactoryId();
+    return this.workCenterService.findAll(factoryId, level as any);
+  }
+
+  @Get('workcenters/:id/path')
+  @ApiOperation({ summary: 'Get breadcrumb path for a work center' })
+  async getWorkCenterPath(@Param('id') id: string) {
+    return this.workCenterService.getPath(id);
+  }
+
+  @Post('workcenters')
+  @ApiOperation({ summary: 'Create a work center node' })
+  async createWorkCenter(@CurrentUser() user: RequestUser, @Body() dto: any) {
+    const factoryId = user.factoryId ?? await this.resolveFactoryId();
+    return this.workCenterService.create(factoryId, dto);
+  }
+
+  @Patch('workcenters/:id')
+  @ApiOperation({ summary: 'Update a work center' })
+  async updateWorkCenter(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() dto: any,
+  ) {
+    const factoryId = user.factoryId ?? await this.resolveFactoryId();
+    return this.workCenterService.update(factoryId, id, dto);
+  }
+
+  @Delete('workcenters/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Soft-delete a work center' })
+  async deleteWorkCenter(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    const factoryId = user.factoryId ?? await this.resolveFactoryId();
+    return this.workCenterService.delete(factoryId, id);
+  }
+
+  private async resolveFactoryId(): Promise<string> {
+    const factories = await this.hierarchyService.getFactories(null);
+    const id = factories[0]?.id;
+    if (!id) throw new Error('No factory available');
+    return id;
   }
 }

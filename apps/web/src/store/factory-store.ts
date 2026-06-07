@@ -45,7 +45,7 @@ export const useFactoryStore = create<FactoryState & FactoryActions>()(
       clearFactory: () => set({ selectedFactoryId: null, selectedFactory: null }),
     }),
     {
-      name: 'industry360-factory',
+      name: 'star-mes-factory',
       storage: createJSONStorage(() => localStorage),
     },
   ),

@@ -18,7 +18,7 @@ export const configuration = () => ({
   influx: {
     url: process.env.INFLUX_URL || 'http://localhost:8086',
     token: process.env.INFLUX_TOKEN,
-    org: process.env.INFLUX_ORG || 'industry360',
+    org: process.env.INFLUX_ORG || 'star-mes',
     bucket: process.env.INFLUX_BUCKET || 'mes_timeseries',
   },
 
@@ -39,7 +39,7 @@ export const configuration = () => ({
     secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER,
     password: process.env.SMTP_PASSWORD,
-    from: process.env.EMAIL_FROM || 'INDUSTRY360 MES <noreply@industry360.sa>',
+    from: process.env.EMAIL_FROM || 'STAR-MES <noreply@star-mes.sa>',
   },
 
   twilio: {
@@ -53,7 +53,7 @@ export const configuration = () => ({
     brokerUrl: process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883',
     username: process.env.MQTT_USERNAME,
     password: process.env.MQTT_PASSWORD,
-    clientId: process.env.MQTT_CLIENT_ID || 'industry360-mes',
+    clientId: process.env.MQTT_CLIENT_ID || 'star-mes',
   },
 
   opcua: {
@@ -68,7 +68,7 @@ export const configuration = () => ({
       useSSL: process.env.MINIO_USE_SSL === 'true',
       accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
       secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
-      bucket: process.env.MINIO_BUCKET || 'industry360-mes',
+      bucket: process.env.MINIO_BUCKET || 'star-mes',
     },
   },
 

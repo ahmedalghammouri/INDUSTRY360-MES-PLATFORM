@@ -1,6 +1,6 @@
 version: '3.9'
 
-name: industry360-mes
+name: star-mes
 
 networks:
   mes-network:
@@ -23,7 +23,7 @@ services:
     container_name: mes-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: industry360_mes
+      POSTGRES_DB: star_mes
       POSTGRES_USER: mes_user
       POSTGRES_PASSWORD: mes_password
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
@@ -35,7 +35,7 @@ services:
     networks:
       - mes-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mes_user -d industry360_mes"]
+      test: ["CMD-SHELL", "pg_isready -U mes_user -d star_mes"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -64,8 +64,8 @@ services:
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: industry360admin
-      DOCKER_INFLUXDB_INIT_ORG: industry360
+      DOCKER_INFLUXDB_INIT_PASSWORD: starmes_admin
+      DOCKER_INFLUXDB_INIT_ORG: star-mes
       DOCKER_INFLUXDB_INIT_BUCKET: mes_timeseries
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: mes-influx-super-secret-token
     volumes:
@@ -135,13 +135,13 @@ services:
     environment:
       NODE_ENV: development
       API_PORT: 3001
-      DATABASE_URL: postgresql://mes_user:mes_password@postgres:5432/industry360_mes?schema=public
+      DATABASE_URL: postgresql://mes_user:mes_password@postgres:5432/star_mes?schema=public
       REDIS_URL: redis://redis:6379
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: mes-influx-super-secret-token
-      INFLUX_ORG: industry360
+      INFLUX_ORG: star-mes
       INFLUX_BUCKET: mes_timeseries
       MQTT_BROKER_URL: mqtt://mosquitto:1883
       MINIO_ENDPOINT: minio
@@ -149,9 +149,9 @@ services:
       MINIO_USE_SSL: "false"
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET: industry360-mes
-      JWT_SECRET: industry360-mes-jwt-secret-key-change-in-production-32chars
-      JWT_REFRESH_SECRET: industry360-mes-refresh-secret-key-change-in-prod-32ch
+      MINIO_BUCKET: star-mes
+      JWT_SECRET: star-mes-jwt-secret-key-change-in-production-32charss
+      JWT_REFRESH_SECRET: star-mes-refresh-secret-key-change-in-prod-32chars
       JWT_EXPIRES_IN: 8h
       JWT_REFRESH_EXPIRES_IN: 30d
       CORS_ORIGINS: http://localhost:3000,http://localhost:8080,http://web:3000
@@ -237,7 +237,7 @@ services:
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: industry360
+      GF_SECURITY_ADMIN_PASSWORD: starmes
     volumes:
       - ./infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning
     ports:

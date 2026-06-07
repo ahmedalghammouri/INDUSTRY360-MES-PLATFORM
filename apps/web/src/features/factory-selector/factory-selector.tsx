@@ -169,7 +169,7 @@ export function FactorySelector() {
               <Shield size={20} className="text-cyan-400" />
             </div>
             <div>
-              <div className="text-white font-bold text-lg tracking-tight leading-none">INDUSTRY360</div>
+              <div className="text-white font-bold text-lg tracking-tight leading-none">STAR-MES</div>
               <div className="text-cyan-400/70 text-xs font-mono tracking-widest">MES PLATFORM</div>
             </div>
           </div>
@@ -424,7 +424,7 @@ export function FactorySelector() {
 
       {/* Footer */}
       <footer className="relative z-10 px-8 py-2 border-t border-white/[0.04] flex items-center justify-between">
-        <span className="text-[11px] text-white/20 font-mono">INDUSTRY360 MES PLATFORM v1.0 — CONFIDENTIAL</span>
+        <span className="text-[11px] text-white/20 font-mono">STAR-MES PLATFORM v1.0 — CONFIDENTIAL</span>
         <div className="flex items-center gap-4 text-[11px] text-white/20 font-mono">
           <span>5 FACILITIES</span>
           <span>•</span>

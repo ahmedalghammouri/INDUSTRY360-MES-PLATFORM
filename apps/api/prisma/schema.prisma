@@ -1,5 +1,5 @@
 // ============================================================
-// INDUSTRY360 MES Platform — Prisma Schema
+// STAR-MES Platform — Prisma Schema
 // ISA-95 Compliant Enterprise Manufacturing Execution System
 // National Care Company (NCC) — KSA Industrial Network
 // ============================================================
@@ -64,44 +64,50 @@ model Factory {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  enterprise        Enterprise          @relation(fields: [enterpriseId], references: [id])
-  areas             Area[]
-  productionLines   ProductionLine[]
-  machines          Machine[]
-  users             User[]
-  skus              SKU[]
-  shifts            ShiftTemplate[]
-  shiftInstances    ShiftInstance[]
-  productionOrders  ProductionOrder[]
-  workOrders        WorkOrder[]
-  batchRecords      BatchRecord[]
-  materialLots      MaterialLot[]
-  rawMaterials      RawMaterial[]
-  stockMovements    StockMovement[]
-  traceEvents       TraceEvent[]
-  downtimeCauses    DowntimeCause[]
-  downtimeEvents    DowntimeEvent[]
-  oeeRecords        OEERecord[]
-  machineStates     MachineStateRecord[]
-  qualityPlans      QualityPlan[]
-  inspectionResults InspectionResult[]
-  ncrs              NCR[]
-  capas             CAPA[]
-  spcMeasurements   SPCMeasurement[]
-  maintenanceWOs    MaintenanceWO[]
-  pmPlans           PMPlan[]
-  pmTasks           PMTask[]
-  spareParts        SparePart[]
-  energyMeters      EnergyMeter[]
-  energyReadings    EnergyReading[]
-  energySummaries   EnergySummary[]
-  devices           Device[]
-  tagDefinitions    TagDefinition[]
-  alarmDefinitions  AlarmDefinition[]
-  alarmEvents       AlarmEvent[]
-  notifications     Notification[]
-  auditLogs         AuditLog[]
-  notificationRules NotificationRule[]
+  enterprise             Enterprise           @relation(fields: [enterpriseId], references: [id])
+  areas                  Area[]
+  productionLines        ProductionLine[]
+  machines               Machine[]
+  users                  User[]
+  skus                   SKU[]
+  shifts                 ShiftTemplate[]
+  shiftInstances         ShiftInstance[]
+  productionOrders       ProductionOrder[]
+  workOrders             WorkOrder[]
+  batchRecords           BatchRecord[]
+  materialLots           MaterialLot[]
+  rawMaterials           RawMaterial[]
+  storageLocations       StorageLocation[]
+  stockMovements         StockMovement[]
+  traceEvents            TraceEvent[]
+  downtimeCauses         DowntimeCause[]
+  downtimeEvents         DowntimeEvent[]
+  oeeRecords             OEERecord[]
+  machineStates          MachineStateRecord[]
+  qualityPlans           QualityPlan[]
+  inspectionResults      InspectionResult[]
+  ncrs                   NCR[]
+  capas                  CAPA[]
+  spcMeasurements        SPCMeasurement[]
+  maintenanceWOs         MaintenanceWO[]
+  pmPlans                PMPlan[]
+  pmTasks                PMTask[]
+  spareParts             SparePart[]
+  manufacturingProcesses ManufacturingProcess[]
+  energyMeters           EnergyMeter[]
+  energyReadings         EnergyReading[]
+  energySummaries        EnergySummary[]
+  devices                Device[]
+  tagDefinitions         TagDefinition[]
+  alarmDefinitions       AlarmDefinition[]
+  alarmEvents            AlarmEvent[]
+  notifications          Notification[]
+  auditLogs              AuditLog[]
+  notificationRules      NotificationRule[]
+  workCenters            WorkCenter[]
+  recipes                Recipe[]
+  energyWOSummaries      EnergyWOSummary[]
+  traceabilityLinks      TraceabilityLink[]
 
   @@map("factories")
 }
@@ -229,6 +235,7 @@ model Machine {
   tagDefinitions     TagDefinition[]
   alarmEvents        AlarmEvent[]
   energyMeters       EnergyMeter[]
+  routingSteps       RoutingStep[]
 
   @@unique([factoryId, code])
   @@map("machines")
@@ -393,13 +400,18 @@ model SKU {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  factory        Factory            @relation(fields: [factoryId], references: [id])
-  family         ProductFamily?     @relation(fields: [familyId], references: [id])
-  cycleTimes     MachineCycleTime[]
-  bomComponents  BOMComponent[]
-  bomHeaders     BOMHeader[]
-  workOrders     WorkOrder[]
-  batchRecords   BatchRecord[]
+  storageLocationId      String?  // FK to StorageLocation (finished goods / dispatch)
+
+  factory                Factory              @relation(fields: [factoryId], references: [id])
+  family                 ProductFamily?       @relation(fields: [familyId], references: [id])
+  storageLocationRef     StorageLocation?     @relation(fields: [storageLocationId], references: [id])
+  cycleTimes             MachineCycleTime[]
+  bomComponents          BOMComponent[]
+  bomHeaders             BOMHeader[]
+  workOrders             WorkOrder[]
+  batchRecords           BatchRecord[]
+  manufacturingProcesses ManufacturingProcess[]
+  recipes                Recipe[]
 
   @@unique([factoryId, itemNumber])
   @@map("skus")
@@ -494,6 +506,8 @@ model WorkOrder {
   quality             Float?
   downtimeMinutes     Float           @default(0)
   plannedCycleTime    Float?          // seconds per unit
+  recipeId            String?         // locked recipe at WO creation
+  recipeVersion       String?
   notes               String?
   createdById         String?
   startedById         String?
@@ -515,11 +529,13 @@ model WorkOrder {
   completedBy       User?            @relation("WOCompletedBy", fields: [completedById], references: [id])
   operator          User?            @relation("WOOperator", fields: [operatorId], references: [id])
   supervisor        User?            @relation("WOSupervisor", fields: [supervisorId], references: [id])
+  recipe               Recipe?               @relation(fields: [recipeId], references: [id])
   batchRecords         BatchRecord[]
   downtimeEvents       DowntimeEvent[]
   materialConsumptions MaterialConsumption[]
   productionEvents     ProductionEvent[]
   inspectionResults    InspectionResult[]
+  energyWOSummary      EnergyWOSummary?
   maintenanceOrders    MaintenanceWO[]       @relation("MaintLinkedProdWO")
 
   @@map("work_orders")
@@ -623,30 +639,32 @@ enum BatchStatus {
 
 // MATERIAL LOT (incoming raw materials, packaging)
 model MaterialLot {
-  id              String      @id @default(uuid())
-  factoryId       String
-  rawMaterialId   String?     // optional link to RawMaterial master
-  materialCode    String
-  materialName    String
-  lotNumber       String
-  supplierLot     String?
-  supplierId      String?
-  supplierName    String?
-  quantity        Float
-  remainingQty    Float
-  unit            String
-  status          BatchStatus @default(ACTIVE)
-  receivedAt      DateTime    @default(now())
-  expiryDate      DateTime?
-  storageLocation String?
-  binNumber       String?
-  notes           String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id                  String      @id @default(uuid())
+  factoryId           String
+  rawMaterialId       String?     // optional link to RawMaterial master
+  materialCode        String
+  materialName        String
+  lotNumber           String
+  supplierLot         String?
+  supplierId          String?
+  supplierName        String?
+  quantity            Float
+  remainingQty        Float
+  unit                String
+  status              BatchStatus @default(ACTIVE)
+  receivedAt          DateTime    @default(now())
+  expiryDate          DateTime?
+  storageLocation     String?     // free-text (legacy)
+  storageLocationId   String?     // FK to StorageLocation
+  binNumber           String?
+  notes               String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
-  factory      Factory               @relation(fields: [factoryId], references: [id])
-  rawMaterial  RawMaterial?          @relation(fields: [rawMaterialId], references: [id])
-  consumptions MaterialConsumption[]
+  factory            Factory               @relation(fields: [factoryId], references: [id])
+  rawMaterial        RawMaterial?          @relation(fields: [rawMaterialId], references: [id])
+  storageLocationRef StorageLocation?      @relation(fields: [storageLocationId], references: [id])
+  consumptions       MaterialConsumption[]
 
   @@unique([factoryId, lotNumber, materialCode])
   @@map("material_lots")
@@ -809,6 +827,12 @@ model DowntimeCause {
   isActive    Boolean         @default(true)
   createdAt   DateTime        @default(now())
 
+  // 3-level PDM tree: level 1 = top category, 2 = sub-category, 3 = specific reason (leaf)
+  level       Int             @default(3)
+  parentId    String?
+  parent      DowntimeCause?  @relation("DowntimeCauseTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    DowntimeCause[] @relation("DowntimeCauseTree")
+
   factory       Factory              @relation(fields: [factoryId], references: [id])
   machine       Machine?             @relation(fields: [machineId], references: [id])
   stateRecords  MachineStateRecord[]
@@ -817,6 +841,7 @@ model DowntimeCause {
   @@map("downtime_causes")
   @@index([factoryId])
   @@index([machineId])
+  @@index([parentId])
 }
 
 enum DowntimeCategory {
@@ -836,36 +861,56 @@ enum DowntimeCategory {
 }
 
 // DOWNTIME EVENT (logged, can be linked to maintenance WO)
+// ISA-95 standardized 5-category downtime reason codes
+enum DowntimeReasonCode {
+  PLANNED_MAINTENANCE    // PM, calibration, CIP — excluded from OEE Availability loss
+  CHANGEOVER             // format/product change — planned stop, reduces net production time
+  UNPLANNED_BREAKDOWN    // mechanical / electrical / process failure → Availability Loss
+  MICRO_STOP             // <5 min interruption → Performance Loss (speed loss category)
+  STARVED                // waiting for upstream material or step to deliver
+  BLOCKED                // waiting for downstream step / buffer to clear
+  EXTERNAL               // utilities, power, external cause beyond line control
+}
+
 model DowntimeEvent {
-  id              String    @id @default(uuid())
+  id              String              @id @default(uuid())
   factoryId       String
   machineId       String
+  workCenterId    String?             // ISA-95 WorkCenter link (replaces raw machine where routing is used)
   workOrderId     String?
   shiftInstanceId String?
   causeId         String?
-  reason          String?   // free text override
+  operatorId      String?             // operator on shift who reported / triggered
+  reason          String?             // free text override / root cause description
   category        DowntimeCategory
+  reasonCode      DowntimeReasonCode  @default(UNPLANNED_BREAKDOWN)
   startTime       DateTime
   endTime         DateTime?
   durationMinutes Float?
-  isPlanned       Boolean   @default(false)
+  affectsOEE      Boolean             @default(true)   // false for PLANNED_MAINTENANCE, EXTERNAL
+  isPlanned       Boolean             @default(false)
   reportedById    String?
-  acknowledged    Boolean   @default(false)
+  acknowledged    Boolean             @default(false)
   acknowledgedById String?
   acknowledgedAt  DateTime?
   maintenanceWOId String?
+  schedulingImpactMins Float?         // computed cascade delay pushed to dependent WO steps
   notes           String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
-  factory   Factory        @relation(fields: [factoryId], references: [id])
-  machine   Machine        @relation(fields: [machineId], references: [id])
-  workOrder WorkOrder?     @relation(fields: [workOrderId], references: [id])
-  cause     DowntimeCause? @relation(fields: [causeId], references: [id])
+  factory     Factory        @relation(fields: [factoryId], references: [id])
+  machine     Machine        @relation(fields: [machineId], references: [id])
+  workCenter  WorkCenter?    @relation("WCDowntimes", fields: [workCenterId], references: [id])
+  workOrder   WorkOrder?     @relation(fields: [workOrderId], references: [id])
+  cause       DowntimeCause? @relation(fields: [causeId], references: [id])
+  operator    User?          @relation("DowntimeOperator", fields: [operatorId], references: [id])
 
   @@map("downtime_events")
   @@index([factoryId, startTime])
   @@index([machineId, startTime])
+  @@index([workCenterId, startTime])
+  @@index([reasonCode])
 }
 
 // OEE RECORD (calculated and stored for reporting)
@@ -1321,28 +1366,30 @@ enum MaintStatus {
 }
 
 model SparePart {
-  id              String   @id @default(uuid())
-  factoryId       String
-  partNumber      String
-  name            String
-  description     String?
-  category        String?
-  manufacturer    String?
-  model           String?
-  supplier        String?
-  unitCost        Float?
-  stockQty        Float    @default(0)
-  minStockQty     Float    @default(0)
-  maxStockQty     Float?
-  storageLocation String?
-  binNumber       String?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                  String   @id @default(uuid())
+  factoryId           String
+  partNumber          String
+  name                String
+  description         String?
+  category            String?
+  manufacturer        String?
+  model               String?
+  supplier            String?
+  unitCost            Float?
+  stockQty            Float    @default(0)
+  minStockQty         Float    @default(0)
+  maxStockQty         Float?
+  storageLocation     String?  // free-text (legacy)
+  storageLocationId   String?  // FK to StorageLocation
+  binNumber           String?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  factory      Factory            @relation(fields: [factoryId], references: [id])
-  pmPlanLinks  PMPlanSparePart[]
-  woConsumptions MaintWOSparePart[]
+  factory            Factory            @relation(fields: [factoryId], references: [id])
+  storageLocationRef StorageLocation?   @relation(fields: [storageLocationId], references: [id])
+  pmPlanLinks        PMPlanSparePart[]
+  woConsumptions     MaintWOSparePart[]
 
   @@unique([factoryId, partNumber])
   @@map("spare_parts")
@@ -1417,21 +1464,50 @@ model EnergyReading {
   id              String   @id @default(uuid())
   meterId         String
   factoryId       String
-  timestamp       DateTime
-  value           Float
-  unit            String
+  workCenterId    String?  // WorkCenter active at reading time (for production context)
+  workOrderId     String?  // WO active at reading time
+  machineId       String?  // specific machine if meter is machine-level
   shiftInstanceId String?
-  workOrderId     String?
+  timestamp       DateTime
+  value           Float    // cumulative kWh / m³ (delta calculated at aggregation)
+  powerKw         Float?   // instantaneous power draw at this timestamp
+  unit            String
+  machineState    String?  // snapshot: RUNNING | IDLE | BREAKDOWN | PLANNED_STOP
   source          String   @default("AUTO") // AUTO (from IoT), MANUAL
   quality         String   @default("GOOD")
   createdAt       DateTime @default(now())
 
-  factory Factory     @relation(fields: [factoryId], references: [id])
-  meter   EnergyMeter @relation(fields: [meterId], references: [id])
+  factory     Factory      @relation(fields: [factoryId], references: [id])
+  meter       EnergyMeter  @relation(fields: [meterId], references: [id])
+  workCenter  WorkCenter?  @relation("WCEnergyReadings", fields: [workCenterId], references: [id])
 
   @@map("energy_readings")
   @@index([meterId, timestamp])
   @@index([factoryId, timestamp])
+  @@index([workOrderId])
+  @@index([workCenterId, timestamp])
+}
+
+// Aggregated energy consumption per Work Order (computed on WO close)
+model EnergyWOSummary {
+  id              String    @id @default(uuid())
+  workOrderId     String    @unique
+  factoryId       String
+  totalKwh        Float     // total electrical energy over WO duration
+  runningKwh      Float     @default(0) // energy while machineState = RUNNING
+  idleKwh         Float     @default(0) // energy while machineState = IDLE (waste)
+  downtimeKwh     Float     @default(0) // energy while machineState = BREAKDOWN (waste)
+  kwhPerUnit      Float?    // totalKwh / qtyProduced
+  kwhPerKgBatch   Float?    // totalKwh / batchSize (kg)
+  peakPowerKw     Float?    // maximum instantaneous power recorded
+  avgPowerKw      Float?    // average power over run period
+  anomalyCount    Int       @default(0) // #readings where powerKw > threshold during idle/down
+  computedAt      DateTime  @default(now())
+
+  factory   Factory   @relation(fields: [factoryId], references: [id])
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
+
+  @@map("energy_wo_summaries")
 }
 
 model EnergySummary {
@@ -1691,6 +1767,11 @@ model User {
   stockMovements      StockMovement[]    @relation("StockMovementBy")
   traceEvents         TraceEvent[]       @relation("TracePerformedBy")
 
+  // Recipes
+  approvedRecipes     Recipe[]           @relation("RecipeApprovedBy")
+  // Downtime operator relation
+  operatedDowntimes   DowntimeEvent[]    @relation("DowntimeOperator")
+
   @@map("users")
   @@index([enterpriseId])
   @@index([factoryId])
@@ -1819,30 +1900,33 @@ model AuditLog {
 // ============================================================
 
 model RawMaterial {
-  id              String   @id @default(uuid())
-  factoryId       String
-  code            String   // SAP / internal material code
-  name            String
-  nameAr          String?
-  description     String?
-  category        String?  // RAW, PACKAGING, CONSUMABLE, CHEMICAL, LABEL
-  unit            String   @default("KG")
-  unitCost        Float?
-  currentStock    Float    @default(0)
-  reservedStock   Float    @default(0)  // soft-reserved for active WOs
-  minStock        Float    @default(0)
-  maxStock        Float?
-  reorderPoint    Float?
-  storageLocation String?
-  supplierName    String?
-  leadTimeDays    Int?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                  String   @id @default(uuid())
+  factoryId           String
+  code                String   // SAP / internal material code
+  name                String
+  nameAr              String?
+  description         String?
+  category            String?  // RAW, PACKAGING, CONSUMABLE, CHEMICAL, LABEL
+  unit                String   @default("KG")
+  unitCost            Float?
+  currentStock        Float    @default(0)
+  reservedStock       Float    @default(0)  // soft-reserved for active WOs
+  minStock            Float    @default(0)
+  maxStock            Float?
+  reorderPoint        Float?
+  storageLocation     String?  // free-text (legacy)
+  storageLocationId   String?  // FK to StorageLocation
+  supplierName        String?
+  leadTimeDays        Int?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  factory      Factory       @relation(fields: [factoryId], references: [id])
-  materialLots MaterialLot[]
-  bomItems     BOMItem[]
+  factory            Factory            @relation(fields: [factoryId], references: [id])
+  storageLocationRef StorageLocation?   @relation(fields: [storageLocationId], references: [id])
+  materialLots       MaterialLot[]
+  bomItems           BOMItem[]
+  recipeIngredients  RecipeIngredient[]
 
   @@unique([factoryId, code])
   @@map("raw_materials")
@@ -1975,6 +2059,133 @@ model TraceEvent {
 }
 
 // ============================================================
+// TRACEABILITY GENEALOGY (parent-child edge table)
+// Enables backward (root cause) and forward (recall) tracing
+// ============================================================
+
+enum TraceEntityType {
+  MATERIAL_LOT       // incoming raw material / packaging lot
+  WORK_ORDER         // production work order
+  FINISHED_GOODS_LOT // completed product batch
+  RECIPE             // recipe version used
+}
+
+enum TraceLinkType {
+  CONSUMED_BY    // MATERIAL_LOT → WORK_ORDER (material was consumed in WO)
+  PRODUCED_FROM  // WORK_ORDER → FINISHED_GOODS_LOT (WO produced this FG lot)
+  GOVERNED_BY    // WORK_ORDER → RECIPE (WO was executed against this recipe)
+}
+
+model TraceabilityLink {
+  id         String          @id @default(uuid())
+  factoryId  String
+  parentType TraceEntityType // the source entity
+  parentId   String          // FK into the relevant table (materialLotId, workOrderId, etc.)
+  childType  TraceEntityType // the destination entity
+  childId    String
+  linkType   TraceLinkType
+  qty        Float?          // quantity consumed/produced
+  unit       String?
+  createdAt  DateTime        @default(now())
+
+  factory Factory @relation(fields: [factoryId], references: [id])
+
+  @@index([parentId])
+  @@index([childId])
+  @@index([factoryId, createdAt])
+  @@map("traceability_links")
+}
+
+// ============================================================
+// STORAGE LOCATIONS
+// ============================================================
+
+enum StorageZone {
+  RAW_MATERIAL      // RM warehouse
+  FINISHED_GOODS    // FG warehouse
+  SPARE_PARTS       // maintenance parts room
+  QUARANTINE        // QC hold / reject area
+  PRODUCTION        // line-side staging
+  DISPATCH          // shipping/dispatch bay
+}
+
+model StorageLocation {
+  id          String      @id @default(uuid())
+  factoryId   String
+  code        String      // e.g. "RM-A01", "SP-B03"
+  name        String
+  zone        StorageZone
+  description String?
+  capacity    Float?      // max units / pallets / kg — optional
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  factory      Factory       @relation(fields: [factoryId], references: [id])
+  rawMaterials RawMaterial[]
+  materialLots MaterialLot[]
+  spareParts   SparePart[]
+  skus         SKU[]
+
+  @@unique([factoryId, code])
+  @@map("storage_locations")
+}
+
+// ============================================================
+// MANUFACTURING PROCESSES & ROUTING
+// ============================================================
+
+model ManufacturingProcess {
+  id          String   @id @default(uuid())
+  factoryId   String
+  skuId       String
+  version     String   @default("1.0")
+  name        String
+  description String?
+  totalCycleTimeMins Float?
+  isActive    Boolean  @default(true)
+  approvedAt  DateTime?
+  approvedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  factory      Factory        @relation(fields: [factoryId], references: [id])
+  sku          SKU            @relation(fields: [skuId], references: [id])
+  routingSteps RoutingStep[]
+  recipes      Recipe[]
+
+  @@unique([skuId, version])
+  @@map("manufacturing_processes")
+}
+
+model RoutingStep {
+  id            String   @id @default(uuid())
+  processId     String
+  stepNumber    Int
+  operationName String   // e.g. "Mixing", "Filling", "Capping", "Labelling", "Packaging"
+  workCenter    String?  // machine / area code
+  machineId     String?
+  cycleTimeMins Float?
+  setupTimeMins Float?
+  description   String?
+  parameters    Json?    // process parameters: { temperature: 80, pressure: 2.5 }
+  isOptional    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workCenterId  String?   // FK to WorkCenter (logical routing cell)
+
+  process         ManufacturingProcess  @relation(fields: [processId], references: [id], onDelete: Cascade)
+  machine         Machine?              @relation(fields: [machineId], references: [id])
+  workCenterRef   WorkCenter?           @relation(fields: [workCenterId], references: [id])
+  predecessors    StepDependency[]      @relation("DepTo")
+  successors      StepDependency[]      @relation("DepFrom")
+
+  @@unique([processId, stepNumber])
+  @@map("routing_steps")
+}
+
+// ============================================================
 // SHARED ENUMS
 // ============================================================
 
@@ -1983,4 +2194,128 @@ enum Priority {
   MEDIUM
   HIGH
   CRITICAL
+}
+
+// ============================================================
+// WORKCENTER HIERARCHY (ISA-95 Level 1-3)
+// ============================================================
+
+enum WorkCenterLevel {
+  PLANT   // Level 0 – entire site
+  AREA    // Level 1 – e.g. Mixing Hall, Filling Hall
+  LINE    // Level 2 – production line within an area
+  CELL    // Level 3 – individual station / work cell
+}
+
+model WorkCenter {
+  id          String          @id @default(uuid())
+  factoryId   String
+  parentId    String?         // null = root (PLANT level)
+  code        String          // e.g. "WC-MIX-A01"
+  name        String          // e.g. "Mixing Cell A"
+  level       WorkCenterLevel
+  description String?
+  capacity    Float?          // units/hour capacity
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  factory        Factory         @relation(fields: [factoryId], references: [id])
+  parent         WorkCenter?     @relation("WCHierarchy", fields: [parentId], references: [id])
+  children       WorkCenter[]    @relation("WCHierarchy")
+  routingSteps   RoutingStep[]
+  downtimeEvents DowntimeEvent[] @relation("WCDowntimes")
+  energyReadings EnergyReading[] @relation("WCEnergyReadings")
+
+  @@unique([factoryId, code])
+  @@map("work_centers")
+}
+
+// ============================================================
+// STEP DEPENDENCIES (FS / SS / SF / FF)
+// ============================================================
+
+enum DependencyType {
+  FINISH_TO_START   // B cannot start until A finishes (default)
+  START_TO_START    // B cannot start until A starts
+  START_TO_FINISH   // B cannot finish until A starts
+  FINISH_TO_FINISH  // B cannot finish until A finishes
+}
+
+model StepDependency {
+  id         String         @id @default(uuid())
+  fromStepId String         // predecessor step
+  toStepId   String         // successor step
+  type       DependencyType @default(FINISH_TO_START)
+  lagMins    Float          @default(0) // positive = lag, negative = lead
+
+  fromStep RoutingStep @relation("DepFrom", fields: [fromStepId], references: [id], onDelete: Cascade)
+  toStep   RoutingStep @relation("DepTo",   fields: [toStepId],   references: [id], onDelete: Cascade)
+
+  @@unique([fromStepId, toStepId])
+  @@map("step_dependencies")
+}
+
+// ============================================================
+// RECIPE (Master Production Document)
+// ============================================================
+
+enum RecipeStatus {
+  DRAFT      // being authored
+  REVIEW     // submitted for approval
+  APPROVED   // production-ready
+  OBSOLETE   // superseded by newer version
+}
+
+model Recipe {
+  id                String       @id @default(uuid())
+  factoryId         String
+  skuId             String
+  processId         String?      // linked ManufacturingProcess (routing)
+  code              String       // e.g. "RCP-ALWATANI-001"
+  version           String       @default("1.0")
+  name              String
+  description       String?
+  status            RecipeStatus @default(DRAFT)
+  batchSize         Float?       // target batch size (e.g. 1000 KG)
+  batchUnit         String?      // e.g. KG, L, PCS
+  yieldPct          Float?       // expected yield %
+  cycleTimeSecs     Float?       // target cycle time per batch
+  shelfLifeDays     Int?
+  storageConditions String?      // e.g. "Cool, dry, away from direct sunlight"
+  approvedAt        DateTime?
+  approvedById      String?
+  effectiveFrom     DateTime?
+  effectiveTo       DateTime?
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  factory      Factory               @relation(fields: [factoryId], references: [id])
+  sku          SKU                   @relation(fields: [skuId], references: [id])
+  process      ManufacturingProcess? @relation(fields: [processId], references: [id])
+  approvedBy   User?                 @relation("RecipeApprovedBy", fields: [approvedById], references: [id])
+  ingredients  RecipeIngredient[]
+  workOrders   WorkOrder[]
+
+  @@unique([skuId, version])
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id            String  @id @default(uuid())
+  recipeId      String
+  rawMaterialId String
+  phase         String?  // e.g. "Premix A", "Main Mix", "Top-up"
+  quantityPer   Float    // quantity per batch
+  unit          String
+  scrapFactor   Float    @default(0) // % waste allowance
+  isOptional    Boolean  @default(false)
+  notes         String?
+  sortOrder     Int      @default(0)
+
+  recipe      Recipe      @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id])
+
+  @@map("recipe_ingredients")
 }

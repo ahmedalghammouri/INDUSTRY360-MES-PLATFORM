@@ -185,4 +185,47 @@ export class IotController {
   ) {
     return this.iotService.deleteTag(user.factoryId, id);
   }
+
+  // ────────────────────────────────────────────────────────────
+  // ENERGY READINGS
+  // ────────────────────────────────────────────────────────────
+
+  @Post('energy/readings')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Ingest an energy meter reading' })
+  async ingestEnergyReading(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: { meterId: string; value: number; powerKw?: number; timestamp?: string },
+  ) {
+    return this.iotService.ingestEnergyReading(user.factoryId, dto);
+  }
+
+  @Get('energy/timeseries')
+  @ApiOperation({ summary: 'Energy readings timeseries (for chart)' })
+  async getEnergyTimeseries(
+    @CurrentUser() user: RequestUser,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('workOrderId') workOrderId?: string,
+    @Query('workCenterId') workCenterId?: string,
+  ) {
+    return this.iotService.getEnergyTimeseries(user.factoryId, { from, to, workOrderId, workCenterId });
+  }
+
+  @Get('energy/wo/:workOrderId')
+  @ApiOperation({ summary: 'Energy summary for a Work Order' })
+  async getEnergyWOSummary(@Param('workOrderId') workOrderId: string) {
+    return this.iotService.getEnergyWOSummary(workOrderId);
+  }
+
+  @Get('energy/by-workcenter')
+  @ApiOperation({ summary: 'Aggregate energy by WorkCenter (plant energy map)' })
+  async getEnergyByWorkCenter(
+    @CurrentUser() user: RequestUser,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    if (!user.factoryId) return [];
+    return this.iotService.getEnergyByWorkCenter(user.factoryId, from, to);
+  }
 }

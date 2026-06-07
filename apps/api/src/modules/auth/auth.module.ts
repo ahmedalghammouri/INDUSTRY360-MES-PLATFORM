@@ -17,8 +17,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
         secret: config.get<string>('jwt.secret'),
         signOptions: {
           expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? config.get<string>('jwt.expiresIn') ?? '8h',
-          issuer: 'industry360-mes',
-          audience: 'industry360-mes-users',
+          issuer: 'star-mes',
+          audience: 'star-mes-users',
         },
       }),
     }),

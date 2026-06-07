@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Delete, Body, Param, Query,
-  HttpCode, HttpStatus, ParseUUIDPipe, NotFoundException,
+  HttpCode, HttpStatus, ParseUUIDPipe, NotFoundException, Put,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { InventoryService } from './inventory.service';
@@ -286,6 +286,218 @@ export class InventoryController {
       dto.reason,
       user.id,
     );
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // STORAGE LOCATIONS
+  // ────────────────────────────────────────────────────────────
+
+  @Get('storage-locations')
+  @ApiOperation({ summary: 'List storage locations' })
+  @ApiQuery({ name: 'zone', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async findStorageLocations(
+    @CurrentUser() user: RequestUser,
+    @Query('zone') zone?: string,
+    @Query('search') search?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '50',
+  ) {
+    return this.inventoryService.findStorageLocations(user.factoryId, {
+      zone,
+      search,
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+    });
+  }
+
+  @Post('storage-locations')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a storage location' })
+  async createStorageLocation(@CurrentUser() user: RequestUser, @Body() dto: any) {
+    const factoryId = user.factoryId ?? dto.factoryId;
+    if (!factoryId) throw new NotFoundException('Factory context required');
+    return this.inventoryService.createStorageLocation(factoryId, dto);
+  }
+
+  @Patch('storage-locations/:id')
+  @ApiOperation({ summary: 'Update a storage location' })
+  async updateStorageLocation(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: any,
+  ) {
+    return this.inventoryService.updateStorageLocation(user.factoryId, id, dto);
+  }
+
+  @Delete('storage-locations/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Deactivate a storage location' })
+  async deleteStorageLocation(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.deleteStorageLocation(user.factoryId, id);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // BOM MANAGEMENT
+  // ────────────────────────────────────────────────────────────
+
+  @Get('bom')
+  @ApiOperation({ summary: 'List BOMs with items' })
+  @ApiQuery({ name: 'skuId', required: false })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async findBOMs(
+    @CurrentUser() user: RequestUser,
+    @Query('skuId') skuId?: string,
+    @Query('isActive') isActive?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+  ) {
+    return this.inventoryService.findBOMs(user.factoryId, {
+      skuId,
+      isActive: isActive !== undefined ? isActive === 'true' : undefined,
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+    });
+  }
+
+  @Get('bom/:id')
+  @ApiOperation({ summary: 'Get BOM by ID with all items' })
+  async getBOMById(@Param('id', ParseUUIDPipe) id: string) {
+    return this.inventoryService.getBOMById(id);
+  }
+
+  @Post('bom')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create BOM for a SKU' })
+  async createBOM(@CurrentUser() user: RequestUser, @Body() dto: any) {
+    return this.inventoryService.createBOM(user.factoryId, dto);
+  }
+
+  @Patch('bom/:id')
+  @ApiOperation({ summary: 'Update BOM header (version, notes, active)' })
+  async updateBOM(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: any,
+  ) {
+    return this.inventoryService.updateBOM(id, dto);
+  }
+
+  @Post('bom/:id/approve')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Approve BOM (sets active, deactivates other versions)' })
+  async approveBOM(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.approveBOM(id, user.id);
+  }
+
+  @Post('bom/:id/items')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Add or update a BOM line item' })
+  async upsertBOMItem(
+    @Param('id', ParseUUIDPipe) bomId: string,
+    @Body() dto: any,
+  ) {
+    return this.inventoryService.upsertBOMItem(bomId, dto);
+  }
+
+  @Delete('bom/:bomId/items/:itemId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove a BOM line item' })
+  async deleteBOMItem(
+    @Param('bomId', ParseUUIDPipe) bomId: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+  ) {
+    return this.inventoryService.deleteBOMItem(bomId, itemId);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // MANUFACTURING PROCESSES
+  // ────────────────────────────────────────────────────────────
+
+  @Get('manufacturing-processes')
+  @ApiOperation({ summary: 'List manufacturing processes / routings' })
+  @ApiQuery({ name: 'skuId', required: false })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async findProcesses(
+    @CurrentUser() user: RequestUser,
+    @Query('skuId') skuId?: string,
+    @Query('isActive') isActive?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+  ) {
+    return this.inventoryService.findProcesses(user.factoryId, {
+      skuId,
+      isActive: isActive !== undefined ? isActive === 'true' : undefined,
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+    });
+  }
+
+  @Post('manufacturing-processes')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a manufacturing process with routing steps' })
+  async createProcess(@CurrentUser() user: RequestUser, @Body() dto: any) {
+    const factoryId = user.factoryId ?? dto.factoryId;
+    if (!factoryId) throw new NotFoundException('Factory context required');
+    return this.inventoryService.createProcess(factoryId, dto);
+  }
+
+  @Patch('manufacturing-processes/:id')
+  @ApiOperation({ summary: 'Update a manufacturing process' })
+  async updateProcess(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: any,
+  ) {
+    return this.inventoryService.updateProcess(id, dto);
+  }
+
+  @Post('manufacturing-processes/:id/approve')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Approve process (sets active, deactivates others for same SKU)' })
+  async approveProcess(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.approveProcess(id, user.id);
+  }
+
+  @Post('manufacturing-processes/:id/revert-to-draft')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revert an approved process back to draft' })
+  async revertToDraft(
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.revertToDraft(id);
+  }
+
+  @Get('manufacturing-processes/:id')
+  @ApiOperation({ summary: 'Get a single manufacturing process by ID (with full step/dependency detail)' })
+  async getProcess(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.findProcessById(user.factoryId, id);
+  }
+
+  @Delete('manufacturing-processes/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a draft manufacturing process' })
+  async deleteProcess(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.deleteProcess(user.factoryId, id);
   }
 
   // ────────────────────────────────────────────────────────────

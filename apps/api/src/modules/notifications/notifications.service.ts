@@ -81,7 +81,7 @@ export class NotificationsService {
     if (!user?.email) return;
 
     await this.mailer.sendMail({
-      from: this.config.get<string>('smtp.from', 'INDUSTRY360 MES <noreply@industry360.sa>'),
+      from: this.config.get<string>('smtp.from', 'STAR-MES <noreply@star-mes.sa>'),
       to: user.email,
       subject: dto.title,
       html: this.buildEmailHtml(dto.title, dto.message, dto.metadata),
@@ -97,9 +97,9 @@ export class NotificationsService {
     }
 
     await this.mailer.sendMail({
-      from: this.config.get<string>('smtp.from', 'INDUSTRY360 MES <noreply@industry360.sa>'),
+      from: this.config.get<string>('smtp.from', 'STAR-MES <noreply@star-mes.sa>'),
       to: email,
-      subject: 'Password Reset — INDUSTRY360 MES',
+      subject: 'Password Reset — STAR-MES',
       html: this.buildEmailHtml(
         'Password Reset Request',
         `You requested a password reset. Click the link below to set a new password. This link expires in 1 hour.`,
@@ -116,7 +116,7 @@ export class NotificationsService {
     return `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background: #1a1f2e; padding: 20px; border-radius: 8px 8px 0 0;">
-          <h1 style="color: #6175f4; margin: 0; font-size: 18px;">INDUSTRY360 MES</h1>
+          <h1 style="color: #6175f4; margin: 0; font-size: 18px;">STAR-MES</h1>
           <p style="color: #888; margin: 4px 0 0;">Manufacturing Execution System</p>
         </div>
         <div style="background: #f5f7ff; padding: 30px; border-radius: 0 0 8px 8px;">
@@ -125,7 +125,7 @@ export class NotificationsService {
           ${actionButton}
           <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0 20px;">
           <p style="color: #888; font-size: 12px; margin: 0;">
-            This is an automated notification from INDUSTRY360 MES Platform.<br>
+            This is an automated notification from STAR-MES Platform.<br>
             © ${new Date().getFullYear()} National Care Company — SIDCO
           </p>
         </div>

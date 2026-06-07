@@ -1,14 +1,16 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Gauge, DollarSign, Activity, Thermometer } from 'lucide-react';
+import { Zap, Gauge, DollarSign, Activity, Thermometer, AlertTriangle, Factory, TrendingDown } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 import { api } from '@/services/api.client';
@@ -55,6 +57,30 @@ const TYPE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   CHILLED_WATER: Activity,
 };
 
+interface WOEnergySummary {
+  workOrderId: string;
+  totalKwh: number;
+  runningKwh: number;
+  idleKwh: number;
+  downtimeKwh: number;
+  kwhPerUnit: number | null;
+  kwhPerKgBatch: number | null;
+  peakPowerKw: number | null;
+  avgPowerKw: number | null;
+  anomalyCount: number;
+  wasteKwh: number;
+  wastePct: number;
+  efficiencyPct: number;
+}
+
+interface WorkCenterEnergy {
+  workCenterId: string;
+  workCenter: { id: string; code: string; name: string; level: string } | null;
+  totalKwh: number;
+  avgPowerKw: number | null;
+  readingCount: number;
+}
+
 function dateRange(days: number) {
   const to = new Date();
   const from = new Date();
@@ -62,7 +88,166 @@ function dateRange(days: number) {
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
+// ── MES Contextualization Panel ─────────────────────────────────────────────
+
+function EnergyContextPanel() {
+  const [woId, setWoId] = useState('');
+  const [submittedWoId, setSubmittedWoId] = useState('');
+  const { from, to } = dateRange(7);
+
+  const { data: woSummary, isLoading: woLoading } = useQuery({
+    queryKey: ['energy', 'wo', submittedWoId],
+    queryFn: () => api.get<WOEnergySummary>(`/iot/energy/wo/${submittedWoId}`),
+    enabled: !!submittedWoId,
+  });
+
+  const { data: wcData } = useQuery({
+    queryKey: ['energy', 'by-workcenter', from, to],
+    queryFn: () => api.get<WorkCenterEnergy[]>('/iot/energy/by-workcenter', { params: { from, to } }),
+    staleTime: 60_000,
+  });
+
+  const summary = woSummary as WOEnergySummary | null | undefined;
+  const wcEnergy: WorkCenterEnergy[] = Array.isArray(wcData) ? wcData : [];
+
+  const wasteBreakdown = summary ? [
+    { name: 'Running', value: parseFloat((summary.runningKwh ?? 0).toFixed(2)), fill: '#22c55e' },
+    { name: 'Idle Waste', value: parseFloat((summary.idleKwh ?? 0).toFixed(2)), fill: '#f59e0b' },
+    { name: 'Downtime Waste', value: parseFloat((summary.downtimeKwh ?? 0).toFixed(2)), fill: '#ef4444' },
+  ].filter(d => d.value > 0) : [];
+
+  return (
+    <div className="space-y-5">
+      {/* WO Energy lookup */}
+      <div className="glass-card rounded-xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Factory size={16} className="text-primary" />
+          <h2 className="font-semibold">Work Order Energy Analysis</h2>
+        </div>
+        <div className="flex gap-2 mb-4">
+          <Input
+            placeholder="Work Order ID…"
+            value={woId}
+            onChange={e => setWoId(e.target.value)}
+            className="h-8 text-xs font-mono"
+            onKeyDown={e => { if (e.key === 'Enter' && woId.trim()) setSubmittedWoId(woId.trim()); }}
+          />
+          <Button size="sm" className="h-8 text-xs shrink-0" onClick={() => setSubmittedWoId(woId.trim())} disabled={!woId.trim()}>
+            Analyse
+          </Button>
+        </div>
+
+        {woLoading && <div className="shimmer h-32 rounded" />}
+
+        {summary && !woLoading && (
+          <div className="space-y-4">
+            {/* Key metrics */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: 'Total kWh', value: summary.totalKwh?.toFixed(2) ?? '—', color: 'text-yellow-400', icon: Zap },
+                { label: 'kWh / Unit', value: summary.kwhPerUnit != null ? summary.kwhPerUnit.toFixed(3) : '—', color: 'text-blue-400', icon: Gauge },
+                { label: 'Idle Waste %', value: `${summary.wastePct?.toFixed(1) ?? '—'}%`, color: 'text-red-400', icon: TrendingDown },
+                { label: 'Anomalies', value: String(summary.anomalyCount ?? 0), color: summary.anomalyCount > 0 ? 'text-orange-400' : 'text-muted-foreground', icon: AlertTriangle },
+              ].map(({ label, value, color, icon: Icon }) => (
+                <div key={label} className="bg-background/40 rounded-lg border border-border/30 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-muted-foreground">{label}</span>
+                    <Icon size={12} className={color} />
+                  </div>
+                  <p className={cn('text-lg font-bold', color)}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Waste breakdown pie */}
+            {wasteBreakdown.length > 0 && (
+              <div className="flex items-center gap-6">
+                <ResponsiveContainer width={120} height={120}>
+                  <PieChart>
+                    <Pie data={wasteBreakdown} dataKey="value" innerRadius={35} outerRadius={55} paddingAngle={2}>
+                      {wasteBreakdown.map((entry, i) => (
+                        <Cell key={i} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: 11 }}
+                      formatter={(v: number) => [`${v} kWh`]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="space-y-1.5">
+                  {wasteBreakdown.map(d => (
+                    <div key={d.name} className="flex items-center gap-2 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.fill }} />
+                      <span className="text-muted-foreground">{d.name}</span>
+                      <span className="font-semibold ml-auto">{d.value} kWh</span>
+                    </div>
+                  ))}
+                  <div className="pt-1 border-t border-border/30 flex items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">Efficiency</span>
+                    <span className="font-bold text-green-400 ml-auto">{summary.efficiencyPct?.toFixed(1)}%</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Anomaly warning */}
+            {summary.anomalyCount > 0 && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-orange-500/10 border border-orange-500/30 text-xs text-orange-400">
+                <AlertTriangle size={13} />
+                <span>{summary.anomalyCount} anomaly reading{summary.anomalyCount > 1 ? 's' : ''} detected — high power draw during idle/downtime state.</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!summary && !woLoading && submittedWoId && (
+          <div className="text-center text-muted-foreground text-sm py-4">No energy data found for this WO.</div>
+        )}
+      </div>
+
+      {/* Plant energy map by WorkCenter */}
+      {wcEnergy.length > 0 && (
+        <div className="glass-card rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-sm">Energy by WorkCenter (Last 7 days)</h2>
+            <Badge variant="outline" className="text-xs">kWh</Badge>
+          </div>
+          <div className="space-y-2">
+            {wcEnergy
+              .sort((a, b) => b.totalKwh - a.totalKwh)
+              .map(wc => {
+                const maxKwh = wcEnergy[0]?.totalKwh ?? 1;
+                const pct = (wc.totalKwh / maxKwh) * 100;
+                return (
+                  <div key={wc.workCenterId} className="space-y-0.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">{wc.workCenter?.name ?? wc.workCenterId.slice(0, 8)}</span>
+                      <div className="flex items-center gap-3">
+                        {wc.avgPowerKw != null && (
+                          <span className="text-[10px] text-muted-foreground">{wc.avgPowerKw.toFixed(1)} kW avg</span>
+                        )}
+                        <span className="font-semibold">{wc.totalKwh.toFixed(1)} kWh</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-muted/30">
+                      <div
+                        className="h-full rounded-full bg-yellow-500/70"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function EnergyOverview() {
+  const [activeTab, setActiveTab] = useState<'overview' | 'mes'>('overview');
   const { data: overview, isLoading: ovLoading } = useQuery({
     queryKey: ['energy', 'overview'],
     queryFn: () => api.get<EnergyOverview>('/energy/overview'),
@@ -110,11 +295,31 @@ export function EnergyOverview() {
           <h1 className="text-2xl font-bold">Energy Monitoring</h1>
           <p className="text-muted-foreground text-sm mt-1">Real-time energy consumption and cost tracking</p>
         </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/energy/meters">Manage Meters</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-border overflow-hidden text-xs">
+            <button
+              className={cn('px-4 py-1.5 transition-colors', activeTab === 'overview' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted/20')}
+              onClick={() => setActiveTab('overview')}
+            >
+              Overview
+            </button>
+            <button
+              className={cn('px-4 py-1.5 flex items-center gap-1.5 transition-colors', activeTab === 'mes' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted/20')}
+              onClick={() => setActiveTab('mes')}
+            >
+              <Factory size={11} />
+              MES Context
+            </button>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/energy/meters">Manage Meters</Link>
+          </Button>
+        </div>
       </div>
 
+      {activeTab === 'mes' && <EnergyContextPanel />}
+
+      {activeTab === 'overview' && (<>
       {/* KPI cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {kpis.map((kpi, i) => {
@@ -270,6 +475,7 @@ export function EnergyOverview() {
           </table>
         </div>
       </div>
+      </>)}
     </div>
   );
 }

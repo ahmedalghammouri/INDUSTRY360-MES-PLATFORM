@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   compress: true,
 
   images: {
-    domains: ['localhost', 'industry360.sa', 'storage.industry360.sa'],
+    domains: ['localhost', 'star-mes.sa', 'storage.star-mes.sa'],
     formats: ['image/avif', 'image/webp'],
   },
 

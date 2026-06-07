@@ -8,11 +8,19 @@ import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
+
+interface StorageLocationOption {
+  id: string;
+  code: string;
+  name: string;
+  zone: string;
+}
 
 interface BOMComponent {
   componentCode: string;
@@ -34,6 +42,8 @@ interface SKU {
   innersPerCarton: number;
   cartonsPerPallet: number;
   baseUnit: string;
+  storageLocationId: string | null;
+  storageLocationRef: { id: string; code: string; name: string } | null;
   family: { name: string; brand: string | null } | null;
   bomComponents: BOMComponent[];
 }
@@ -86,6 +96,12 @@ function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onD
             <span className="text-muted-foreground text-[10px]">—</span>
           )}
         </td>
+        <td className="p-3 text-xs text-muted-foreground">
+          {sku.storageLocationRef
+            ? <span className="font-mono text-[10px]">{sku.storageLocationRef.code}</span>
+            : <span>—</span>
+          }
+        </td>
         <td className="p-3 text-center">
           <DropdownMenu>
             <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
@@ -106,7 +122,7 @@ function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onD
       </motion.tr>
       {expanded && hasBOM && (
         <tr className="bg-white/2 border-b border-border/20">
-          <td colSpan={10} className="px-6 py-3">
+          <td colSpan={11} className="px-6 py-3">
             <div className="text-xs font-semibold text-muted-foreground mb-2">Bill of Materials</div>
             <table className="w-full text-xs">
               <thead>
@@ -145,11 +161,18 @@ export function ProductsView() {
   const [brand, setBrand] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<SKU | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', brand: '', category: '', baseUnit: '' });
-  const [formData, setFormData] = useState({ code: '', name: '', itemNumber: '', brand: '', category: '', packagingType: '', unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '', baseUnit: 'PCS' });
+  const [editForm, setEditForm] = useState({ name: '', brand: '', category: '', baseUnit: '', storageLocationId: '' });
+  const [formData, setFormData] = useState({ code: '', name: '', itemNumber: '', brand: '', category: '', packagingType: '', unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '', baseUnit: 'PCS', storageLocationId: '' });
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const { data: storageLocData } = useQuery({
+    queryKey: ['inventory', 'storage-locations'],
+    queryFn: () => api.get<{ data: StorageLocationOption[] }>('/inventory/storage-locations'),
+    staleTime: 300_000,
+  });
+  const storageLocations: StorageLocationOption[] = (storageLocData as any)?.data ?? (storageLocData as any) ?? [];
 
   const { data, isLoading } = useQuery({
     queryKey: ['inventory', 'products', search, category, brand],
@@ -173,7 +196,7 @@ export function ProductsView() {
       queryClient.invalidateQueries({ queryKey: ['inventory', 'products'] });
       toast({ title: 'Product created successfully' });
       setFormOpen(false);
-      setFormData({ code: '', name: '', itemNumber: '', brand: '', category: '', packagingType: '', unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '', baseUnit: 'PCS' });
+      setFormData({ code: '', name: '', itemNumber: '', brand: '', category: '', packagingType: '', unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '', baseUnit: 'PCS', storageLocationId: '' });
     },
     onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to create product', variant: 'destructive' }),
   });
@@ -204,6 +227,7 @@ export function ProductsView() {
       brand: sku.brand ?? '',
       category: sku.category ?? '',
       baseUnit: sku.baseUnit,
+      storageLocationId: sku.storageLocationId ?? '',
     });
   };
 
@@ -220,6 +244,7 @@ export function ProductsView() {
       innersPerCarton: formData.innersPerCarton ? parseInt(formData.innersPerCarton) : 1,
       cartonsPerPallet: formData.cartonsPerPallet ? parseInt(formData.cartonsPerPallet) : 1,
       baseUnit: formData.baseUnit,
+      storageLocationId: formData.storageLocationId || null,
     });
   };
 
@@ -263,17 +288,18 @@ export function ProductsView() {
                 <th className="text-left p-3 text-muted-foreground font-medium text-xs">Packaging</th>
                 <th className="text-right p-3 text-muted-foreground font-medium text-xs">Units/Inner/Carton/Pallet</th>
                 <th className="text-center p-3 text-muted-foreground font-medium text-xs">BOM</th>
+                <th className="text-left p-3 text-muted-foreground font-medium text-xs">Storage</th>
                 <th className="text-center p-3 text-muted-foreground font-medium text-xs w-16">Actions</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}><td colSpan={10} className="p-3"><div className="shimmer h-5 rounded" /></td></tr>
+                  <tr key={i}><td colSpan={11} className="p-3"><div className="shimmer h-5 rounded" /></td></tr>
                 ))
               ) : skus.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-12 text-center text-muted-foreground">
+                  <td colSpan={11} className="p-12 text-center text-muted-foreground">
                     <BoxesIcon className="w-12 h-12 mx-auto mb-3 opacity-30" />
                     No products found
                   </td>
@@ -331,6 +357,21 @@ export function ProductsView() {
               <Label className="text-xs">Cartons per Pallet</Label>
               <Input type="number" value={formData.cartonsPerPallet} onChange={e => setFormData(v => ({ ...v, cartonsPerPallet: e.target.value }))} className="h-9 mt-1" />
             </div>
+            <div className="col-span-2">
+              <Label className="text-xs">Storage Location (Finished Goods)</Label>
+              <Select
+                value={formData.storageLocationId || '__none__'}
+                onValueChange={v => setFormData(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
+              >
+                <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {storageLocations.map(loc => (
+                    <SelectItem key={loc.id} value={loc.id}>{loc.code} — {loc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setFormOpen(false)}>Cancel</Button>
@@ -362,6 +403,21 @@ export function ProductsView() {
               <Label className="text-xs">Base Unit</Label>
               <Input value={editForm.baseUnit} onChange={e => setEditForm(v => ({ ...v, baseUnit: e.target.value }))} className="h-9 mt-1" />
             </div>
+            <div className="col-span-2">
+              <Label className="text-xs">Storage Location (Finished Goods)</Label>
+              <Select
+                value={editForm.storageLocationId || '__none__'}
+                onValueChange={v => setEditForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
+              >
+                <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {storageLocations.map(loc => (
+                    <SelectItem key={loc.id} value={loc.id}>{loc.code} — {loc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setEditTarget(null)}>Cancel</Button>
@@ -375,6 +431,7 @@ export function ProductsView() {
                   brand: editForm.brand || null,
                   category: editForm.category || null,
                   unit: editForm.baseUnit || undefined,
+                  storageLocationId: editForm.storageLocationId || null,
                 },
               })}
             >

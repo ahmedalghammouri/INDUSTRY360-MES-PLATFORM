@@ -111,7 +111,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       },
     })),
     {
-      name: 'industry360-auth',
+      name: 'star-mes-auth',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         user: state.user,

@@ -104,7 +104,7 @@ async function bootstrap() {
 
   // Swagger API Documentation
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('INDUSTRY360 MES Platform API')
+    .setTitle('STAR-MES Platform API')
     .setDescription(
       'Enterprise Manufacturing Execution System REST API. ' +
       'Provides endpoints for production, quality, maintenance, IIoT, and analytics.',
@@ -137,7 +137,7 @@ async function bootstrap() {
   const port = configService.get<number>('API_PORT', 4001);
   await app.listen(port);
 
-  appLogger.log(`🚀 INDUSTRY360 MES API running on port ${port}`);
+  appLogger.log(`🚀 STAR-MES API running on port ${port}`);
   appLogger.log(`📚 Swagger docs: http://localhost:${port}${apiPrefix}/docs`);
   appLogger.log(`🌍 Environment: ${configService.get('NODE_ENV', 'development')}`);
 }

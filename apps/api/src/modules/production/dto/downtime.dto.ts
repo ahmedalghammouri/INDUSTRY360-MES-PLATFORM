@@ -1,9 +1,8 @@
 import {
-  IsString, IsUUID, IsBoolean, IsOptional, IsDateString,
-  IsEnum, MaxLength, IsInt, Min,
+  IsString, IsBoolean, IsOptional, IsDateString,
+  IsEnum, MaxLength, IsNotEmpty,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
 
 export enum DowntimeCategory {
   MECHANICAL = 'MECHANICAL',
@@ -21,34 +20,61 @@ export enum DowntimeCategory {
   OTHER = 'OTHER',
 }
 
+export enum DowntimeReasonCodeEnum {
+  PLANNED_MAINTENANCE  = 'PLANNED_MAINTENANCE',
+  CHANGEOVER           = 'CHANGEOVER',
+  UNPLANNED_BREAKDOWN  = 'UNPLANNED_BREAKDOWN',
+  MICRO_STOP           = 'MICRO_STOP',
+  STARVED              = 'STARVED',
+  BLOCKED              = 'BLOCKED',
+  EXTERNAL             = 'EXTERNAL',
+}
+
 export class CreateDowntimeEventDto {
-  @ApiProperty({ example: 'uuid-machine-id' })
-  @IsUUID()
-  machineId!: string;
+  @ApiPropertyOptional({ example: 'uuid-machine-id' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  machineId?: string;
+
+  @ApiPropertyOptional({ example: 'uuid-work-center-id' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  workCenterId?: string;
 
   @ApiPropertyOptional({ example: 'uuid-work-order-id' })
   @IsOptional()
-  @IsUUID()
+  @IsString()
+  @IsNotEmpty()
   workOrderId?: string;
 
-  @ApiPropertyOptional({ example: 'uuid-cause-id' })
+  @ApiPropertyOptional({ example: 'cause-id' })
   @IsOptional()
-  @IsUUID()
+  @IsString()
+  @IsNotEmpty()
   causeId?: string;
+
+  @ApiPropertyOptional({ enum: DowntimeReasonCodeEnum, example: 'UNPLANNED_BREAKDOWN' })
+  @IsOptional()
+  @IsEnum(DowntimeReasonCodeEnum)
+  reasonCode?: DowntimeReasonCodeEnum;
+
+  @ApiPropertyOptional({ enum: DowntimeCategory })
+  @IsOptional()
+  @IsEnum(DowntimeCategory)
+  category?: DowntimeCategory;
 
   @ApiPropertyOptional({ example: 'Cartoning machine feeder jam' })
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  reason?: string;
+  description?: string;
 
-  @ApiProperty({ enum: DowntimeCategory })
-  @IsEnum(DowntimeCategory)
-  category!: DowntimeCategory;
-
-  @ApiProperty({ example: '2026-06-06T08:15:00.000Z' })
+  @ApiPropertyOptional({ example: '2026-06-06T08:15:00.000Z' })
+  @IsOptional()
   @IsDateString()
-  startTime!: string;
+  startTime?: string;
 
   @ApiPropertyOptional({ example: '2026-06-06T08:42:00.000Z' })
   @IsOptional()
@@ -68,9 +94,10 @@ export class CreateDowntimeEventDto {
 }
 
 export class UpdateDowntimeEventDto {
-  @ApiPropertyOptional({ example: 'uuid-cause-id' })
+  @ApiPropertyOptional({ example: 'cause-id' })
   @IsOptional()
-  @IsUUID()
+  @IsString()
+  @IsNotEmpty()
   causeId?: string;
 
   @ApiPropertyOptional()
@@ -97,13 +124,15 @@ export class UpdateDowntimeEventDto {
 }
 
 export class EndDowntimeEventDto {
-  @ApiProperty({ example: '2026-06-06T08:42:00.000Z' })
-  @IsDateString()
-  endTime!: string;
-
-  @ApiPropertyOptional({ example: 'uuid-cause-id' })
+  @ApiPropertyOptional({ example: '2026-06-06T08:42:00.000Z' })
   @IsOptional()
-  @IsUUID()
+  @IsDateString()
+  endTime?: string;
+
+  @ApiPropertyOptional({ example: 'cause-id' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
   causeId?: string;
 
   @ApiPropertyOptional({ example: 'Jam cleared, production resumed' })
