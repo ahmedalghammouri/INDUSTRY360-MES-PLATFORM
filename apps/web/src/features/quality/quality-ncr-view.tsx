@@ -16,6 +16,7 @@ import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 type Severity = 'MINOR' | 'MAJOR' | 'CRITICAL';
 type NcrStatus = 'OPEN' | 'IN_REVIEW' | 'CAPA_PENDING' | 'RESOLVED' | 'CLOSED';
@@ -63,6 +64,7 @@ const EMPTY_NCR_FORM = {
 };
 
 export function QualityNcrView() {
+  const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<NcrStatus | null>(null)
   const [severityFilter, setSeverityFilter] = useState<Severity | null>(null)
@@ -75,9 +77,9 @@ export function QualityNcrView() {
   const { toast } = useToast()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['quality', 'ncr', { search, status: statusFilter, severity: severityFilter }],
+    queryKey: ['quality', 'ncr', { search, status: statusFilter, severity: severityFilter, page }],
     queryFn: () => api.get('/quality/ncr', {
-      params: { search: search || undefined, status: statusFilter || undefined, severity: severityFilter || undefined, limit: 50 },
+      params: { search: search || undefined, status: statusFilter || undefined, severity: severityFilter || undefined, limit: 20, page },
     }),
     staleTime: 20_000,
   })
@@ -98,6 +100,7 @@ export function QualityNcrView() {
   const workOrders: Array<{ id: string; orderNumber: string; sku?: { name: string } }> = (workOrdersData as any)?.data ?? []
 
   const ncrs: NCR[] = (data as any)?.data ?? (data as any) ?? [];
+  const total: number = (data as any)?.total ?? 0;
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/quality/ncr', dto),
@@ -231,7 +234,7 @@ export function QualityNcrView() {
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 pl-7 w-40 text-xs" />
+                <Input placeholder="Search..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="h-8 pl-7 w-40 text-xs" />
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -242,9 +245,9 @@ export function QualityNcrView() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setStatusFilter(null)}>All Status</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setStatusFilter(null); setPage(1); }}>All Status</DropdownMenuItem>
                   {(Object.keys(STATUS_LABELS) as NcrStatus[]).map((k) => (
-                    <DropdownMenuItem key={k} onClick={() => setStatusFilter(k)}>{STATUS_LABELS[k]}</DropdownMenuItem>
+                    <DropdownMenuItem key={k} onClick={() => { setStatusFilter(k); setPage(1); }}>{STATUS_LABELS[k]}</DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -349,6 +352,7 @@ export function QualityNcrView() {
               </TableBody>
             </Table>
           </div>
+          <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
         </div>
       </div>
 

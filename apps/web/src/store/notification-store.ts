@@ -25,6 +25,8 @@ interface NotificationStore {
   markAllRead: () => void;
   remove: (id: string) => void;
   clear: () => void;
+  /** Sync the unread count from the API (does not touch the notifications list) */
+  setUnreadCount: (count: number) => void;
 }
 
 export const useNotificationStore = create<NotificationStore>()(
@@ -68,6 +70,12 @@ export const useNotificationStore = create<NotificationStore>()(
       set((s) => {
         s.notifications = [];
         s.unreadCount = 0;
+      }),
+
+    setUnreadCount: (count) =>
+      set((s) => {
+        // Only update if API count is larger (WS may have added more since last fetch)
+        s.unreadCount = Math.max(s.unreadCount, count);
       }),
   })),
 );

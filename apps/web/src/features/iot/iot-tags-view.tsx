@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { formatDate } from '@/lib/utils';
@@ -21,6 +22,7 @@ export function IotTagsView() {
   const { toast } = useToast()
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [formOpen, setFormOpen] = useState(false)
   const [editTag, setEditTag] = useState<any | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; name: string } | null>(null)
@@ -29,12 +31,13 @@ export function IotTagsView() {
   })
 
   const { data: tags, isLoading } = useQuery({
-    queryKey: ['iot', 'tags', { search }],
-    queryFn: () => api.get('/iot/tags', { params: { search } }),
+    queryKey: ['iot', 'tags', { search, page }],
+    queryFn: () => api.get('/iot/tags', { params: { search, limit: 20, page } }),
     staleTime: 10_000,
   })
 
   const tagList = (tags as any)?.data ?? [];
+  const total: number = (tags as any)?.total ?? 0;
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/iot/tags', dto),
@@ -129,7 +132,7 @@ export function IotTagsView() {
               <Input
                 placeholder="Search tags..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                 className="h-8 pl-7 w-48 text-xs"
               />
             </div>
@@ -215,6 +218,7 @@ export function IotTagsView() {
                 )}
               </TableBody>
             </Table>
+            <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
           </div>
         </div>
       </div>

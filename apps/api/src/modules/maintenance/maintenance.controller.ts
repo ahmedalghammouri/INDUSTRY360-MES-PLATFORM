@@ -17,6 +17,9 @@ import {
   StartWODto,
   CompleteWODto,
   CancelWODto,
+  HoldWODto,
+  AddSparePartsToWODto,
+  IssueSparePartDto,
 } from './dto/maintenance.dto';
 
 interface RequestUser {
@@ -165,6 +168,31 @@ export class MaintenanceController {
     return this.maintenanceService.completeWO(user.factoryId, id, dto);
   }
 
+  @Patch('work-orders/:id/hold')
+  @RequirePermissions('maintenance:write')
+  @AuditLog('MAINTENANCE_WO_HOLD')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Put a maintenance WO on hold → ON_HOLD' })
+  async holdWO(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: HoldWODto,
+  ) {
+    return this.maintenanceService.holdWO(user.factoryId, id, dto.reason);
+  }
+
+  @Patch('work-orders/:id/resume')
+  @RequirePermissions('maintenance:write')
+  @AuditLog('MAINTENANCE_WO_RESUME')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resume a WO from ON_HOLD → IN_PROGRESS or ASSIGNED' })
+  async resumeWO(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.maintenanceService.resumeWO(user.factoryId, id);
+  }
+
   @Patch('work-orders/:id/cancel')
   @RequirePermissions('maintenance:write')
   @AuditLog('MAINTENANCE_WO_CANCEL')
@@ -179,7 +207,79 @@ export class MaintenanceController {
   }
 
   // ────────────────────────────────────────────────────────────
-  // SPARE PARTS
+  // SPARE PART REQUESTS (per WO)
+  // ────────────────────────────────────────────────────────────
+
+  @Get('work-orders/:id/spare-parts')
+  @ApiOperation({ summary: 'Get spare part requests for a work order' })
+  async getWOSpareParts(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.maintenanceService.getWOSpareParts(user.factoryId, id);
+  }
+
+  @Post('work-orders/:id/spare-parts')
+  @RequirePermissions('maintenance:write')
+  @ApiOperation({ summary: 'Add spare part requests to a work order' })
+  async addSpareParts(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddSparePartsToWODto,
+  ) {
+    return this.maintenanceService.addSpareParts(user.factoryId, id, dto.parts);
+  }
+
+  @Patch('work-orders/:id/spare-parts/:requestId/issue')
+  @RequirePermissions('maintenance:write')
+  @AuditLog('SPARE_PART_ISSUED')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Inventory confirms issuing spare parts to the work order' })
+  async issueSparePart(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Body() dto: IssueSparePartDto,
+  ) {
+    return this.maintenanceService.issueSparePart(user.factoryId, id, requestId, user.id, dto);
+  }
+
+  @Patch('work-orders/:id/spare-parts/:requestId/cancel')
+  @RequirePermissions('maintenance:write')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel a pending spare part request' })
+  async cancelSparePartRequest(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+  ) {
+    return this.maintenanceService.cancelSparePartRequest(user.factoryId, id, requestId);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // PENDING PARTS REQUESTS (inventory team view)
+  // ────────────────────────────────────────────────────────────
+
+  @Get('pending-parts')
+  @ApiOperation({ summary: 'List all pending spare part requests across active WOs (for inventory team)' })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getPendingPartsRequests(
+    @CurrentUser() user: RequestUser,
+    @Query('search') search?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '50',
+  ) {
+    return this.maintenanceService.getPendingPartsRequests(user.factoryId, {
+      search,
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // SPARE PARTS INVENTORY
   // ────────────────────────────────────────────────────────────
 
   @Get('spare-parts')

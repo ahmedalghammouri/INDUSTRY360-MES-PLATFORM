@@ -22,6 +22,36 @@ export enum MaintPriority {
   CRITICAL = 'CRITICAL',
 }
 
+export class SparePartRequestItemDto {
+  @ApiProperty({ example: 'uuid-spare-part-id' })
+  @IsUUID()
+  sparePartId!: string;
+
+  @ApiProperty({ example: 2, description: 'Quantity needed' })
+  @IsNumber()
+  @IsPositive()
+  quantityRequested!: number;
+
+  @ApiPropertyOptional({ description: 'Optional notes for this part' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
+export class IssueSparePartDto {
+  @ApiProperty({ example: 2, description: 'Quantity actually issued from inventory' })
+  @IsNumber()
+  @IsPositive()
+  quantityIssued!: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
 export class CreateMaintenanceWODto {
   @ApiProperty({ enum: MaintType })
   @IsEnum(MaintType)
@@ -78,9 +108,26 @@ export class CreateMaintenanceWODto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  @ApiPropertyOptional({ example: 'uuid-production-wo-id', description: 'Link to a production work order (optional)' })
+  @IsOptional()
+  @IsUUID()
+  productionWOId?: string;
+
+  @ApiPropertyOptional({ type: [SparePartRequestItemDto], description: 'Spare parts needed for this work order' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SparePartRequestItemDto)
+  spareParts?: SparePartRequestItemDto[];
 }
 
 export class UpdateMaintenanceWODto {
+  @ApiPropertyOptional({ enum: MaintType })
+  @IsOptional()
+  @IsEnum(MaintType)
+  type?: MaintType;
+
   @ApiPropertyOptional({ enum: MaintPriority })
   @IsOptional()
   @IsEnum(MaintPriority)
@@ -114,6 +161,21 @@ export class UpdateMaintenanceWODto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  @ApiPropertyOptional({ example: 'uuid-machine-id' })
+  @IsOptional()
+  @IsUUID()
+  machineId?: string;
+
+  @ApiPropertyOptional({ example: 'uuid-technician-id' })
+  @IsOptional()
+  @IsUUID()
+  assignedToId?: string;
+
+  @ApiPropertyOptional({ example: 'uuid-production-wo-id', description: 'Link to a production work order (optional)' })
+  @IsOptional()
+  @IsUUID()
+  productionWOId?: string;
 }
 
 export class AssignWODto {
@@ -157,6 +219,14 @@ export class SparePartUsageDto {
   @IsNumber()
   @Min(0)
   unitCost?: number;
+}
+
+export class AddSparePartsToWODto {
+  @ApiProperty({ type: [SparePartRequestItemDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SparePartRequestItemDto)
+  parts!: SparePartRequestItemDto[];
 }
 
 export class CompleteWODto {
@@ -203,4 +273,12 @@ export class CancelWODto {
   @MinLength(5)
   @MaxLength(500)
   reason!: string;
+}
+
+export class HoldWODto {
+  @ApiPropertyOptional({ example: 'Waiting for replacement part from supplier' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }

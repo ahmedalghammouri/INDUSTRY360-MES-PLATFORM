@@ -16,6 +16,7 @@ import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 const RESULT_CONFIG = {
   PASS:        { label: 'Pass',        color: 'text-green-400',  icon: CheckCircle2 },
@@ -44,6 +45,7 @@ interface Inspection {
 export function QualityInspectionsView() {
   const { toast } = useToast()
   const qc = useQueryClient()
+  const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [resultFilter, setResultFilter] = useState<string | null>(null)
@@ -55,9 +57,9 @@ export function QualityInspectionsView() {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['quality', 'inspections', { search, type: typeFilter, result: resultFilter }],
+    queryKey: ['quality', 'inspections', { search, type: typeFilter, result: resultFilter, page }],
     queryFn: () => api.get('/quality/inspections', {
-      params: { search: search || undefined, type: typeFilter || undefined, result: resultFilter || undefined, limit: 50 },
+      params: { search: search || undefined, type: typeFilter || undefined, result: resultFilter || undefined, limit: 20, page },
     }),
     staleTime: 20_000,
   })
@@ -71,6 +73,7 @@ export function QualityInspectionsView() {
   const workOrders: Array<{ id: string; orderNumber: string; sku?: { name: string } }> = (workOrdersData as any)?.data ?? []
 
   const inspections: Inspection[] = (data as any)?.data ?? (data as any) ?? [];
+  const total: number = (data as any)?.total ?? 0;
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/quality/inspections', dto),
@@ -196,7 +199,7 @@ export function QualityInspectionsView() {
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 pl-7 w-40 text-xs" />
+                <Input placeholder="Search..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="h-8 pl-7 w-40 text-xs" />
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -207,9 +210,9 @@ export function QualityInspectionsView() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setTypeFilter(null)}>All Types</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setTypeFilter(null); setPage(1); }}>All Types</DropdownMenuItem>
                   {Object.entries(TYPE_LABELS).map(([k, v]) => (
-                    <DropdownMenuItem key={k} onClick={() => setTypeFilter(k)}>{v}</DropdownMenuItem>
+                    <DropdownMenuItem key={k} onClick={() => { setTypeFilter(k); setPage(1); }}>{v}</DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -222,9 +225,9 @@ export function QualityInspectionsView() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setResultFilter(null)}>All Results</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setResultFilter(null); setPage(1); }}>All Results</DropdownMenuItem>
                   {Object.entries(RESULT_CONFIG).map(([k, v]) => (
-                    <DropdownMenuItem key={k} onClick={() => setResultFilter(k)}>{v.label}</DropdownMenuItem>
+                    <DropdownMenuItem key={k} onClick={() => { setResultFilter(k); setPage(1); }}>{v.label}</DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -311,6 +314,7 @@ export function QualityInspectionsView() {
               </TableBody>
             </Table>
           </div>
+          <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
         </div>
       </div>
 

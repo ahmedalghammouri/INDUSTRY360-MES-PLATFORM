@@ -3,16 +3,18 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
-import { MaintStatus, MaintType, Priority, type Prisma } from '@prisma/client';
+import { MaintStatus, MaintType, Priority, SpareIssueStatus, type Prisma } from '@prisma/client';
 import type {
   CreateMaintenanceWODto, UpdateMaintenanceWODto, AssignWODto,
   StartWODto, CompleteWODto, CancelWODto,
+  SparePartRequestItemDto, IssueSparePartDto,
 } from './dto/maintenance.dto';
 
 const VALID_MAINT_TRANSITIONS: Record<MaintStatus, MaintStatus[]> = {
-  OPEN: ['ASSIGNED', 'IN_PROGRESS', 'CANCELLED'],
-  ASSIGNED: ['IN_PROGRESS', 'ON_HOLD', 'CANCELLED'],
-  IN_PROGRESS: ['ON_HOLD', 'COMPLETED', 'CANCELLED'],
+  OPEN: ['ASSIGNED', 'AWAITING_PARTS', 'IN_PROGRESS', 'CANCELLED'],
+  AWAITING_PARTS: ['ASSIGNED', 'IN_PROGRESS', 'CANCELLED'],
+  ASSIGNED: ['IN_PROGRESS', 'AWAITING_PARTS', 'ON_HOLD', 'CANCELLED'],
+  IN_PROGRESS: ['ON_HOLD', 'AWAITING_PARTS', 'COMPLETED', 'CANCELLED'],
   ON_HOLD: ['IN_PROGRESS', 'CANCELLED'],
   COMPLETED: [],
   CANCELLED: [],
@@ -100,7 +102,13 @@ export class MaintenanceService {
     const resolvedFactoryId = factoryId ?? machine.factoryId;
     const woNumber = await this.generateWONumber(resolvedFactoryId);
 
-    const initialStatus: MaintStatus = dto.assignedToId ? MaintStatus.ASSIGNED : MaintStatus.OPEN;
+    // If spare parts are requested, WO starts in AWAITING_PARTS until inventory issues them
+    const hasParts = !!(dto.spareParts?.length);
+    const initialStatus: MaintStatus = hasParts
+      ? MaintStatus.AWAITING_PARTS
+      : dto.assignedToId
+        ? MaintStatus.ASSIGNED
+        : MaintStatus.OPEN;
 
     const wo = await this.prisma.maintenanceWO.create({
       data: {
@@ -119,13 +127,34 @@ export class MaintenanceService {
         requestedById: userId,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         notes: dto.notes,
+        productionWOId: dto.productionWOId,
       },
       include: {
         machine: { select: { name: true, code: true } },
         assignedTo: { select: { name: true, email: true } },
         requestedBy: { select: { name: true } },
+        productionWO: { select: { id: true, orderNumber: true, status: true, sku: { select: { name: true, code: true } } } },
       },
     });
+
+    // Create spare part requests if provided
+    if (dto.spareParts?.length) {
+      for (const sp of dto.spareParts) {
+        const part = await this.prisma.sparePart.findFirst({
+          where: { id: sp.sparePartId },
+        });
+        if (!part) throw new NotFoundException(`Spare part ${sp.sparePartId} not found`);
+        await this.prisma.maintWOSparePart.create({
+          data: {
+            woId: wo.id,
+            sparePartId: sp.sparePartId,
+            quantityRequested: sp.quantityRequested,
+            notes: sp.notes,
+          },
+        });
+      }
+      this.logger.log(`WO ${woNumber} created with ${dto.spareParts.length} spare part request(s) — status: AWAITING_PARTS`);
+    }
 
     // If EMERGENCY type, immediately update machine state to MAINTENANCE
     if (dto.type === 'EMERGENCY') {
@@ -154,6 +183,7 @@ export class MaintenanceService {
         machine: { include: { area: true, line: true } },
         assignedTo: { select: { id: true, name: true, email: true } },
         requestedBy: { select: { id: true, name: true } },
+        productionWO: { select: { id: true, orderNumber: true, status: true, sku: { select: { name: true, code: true } } } },
         sparesUsed: {
           include: {
             sparePart: { select: { partNumber: true, name: true, unitCost: true } },
@@ -178,12 +208,19 @@ export class MaintenanceService {
     return this.prisma.maintenanceWO.update({
       where: { id },
       data: {
+        ...(dto.type && { type: dto.type }),
         ...(dto.priority && { priority: dto.priority as Priority }),
         ...(dto.title && { title: dto.title }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.estimatedHours !== undefined && { estimatedHours: dto.estimatedHours }),
         ...(dto.dueDate && { dueDate: new Date(dto.dueDate) }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
+        ...(dto.machineId && { machineId: dto.machineId }),
+        ...(dto.assignedToId !== undefined && {
+          assignedToId: dto.assignedToId || null,
+          status: dto.assignedToId && wo.status === 'OPEN' ? 'ASSIGNED' : wo.status,
+        }),
+        ...(dto.productionWOId !== undefined && { productionWOId: dto.productionWOId || null }),
       },
     });
   }
@@ -238,6 +275,8 @@ export class MaintenanceService {
           machine: { select: { name: true, code: true } },
           assignedTo: { select: { name: true } },
           requestedBy: { select: { name: true } },
+          productionWO: { select: { id: true, orderNumber: true, status: true } },
+          _count: { select: { sparesUsed: { where: { status: SpareIssueStatus.PENDING } } } },
         },
         orderBy: [{ priority: 'desc' }, { dueDate: 'asc' }],
         skip: (page - 1) * limit,
@@ -246,7 +285,7 @@ export class MaintenanceService {
     ]);
 
     return {
-      data: data.map((wo) => ({
+      data: (data as any[]).map((wo) => ({
         id: wo.id,
         woNumber: wo.woNumber,
         title: wo.title,
@@ -255,6 +294,7 @@ export class MaintenanceService {
         status: wo.status,
         asset: wo.machine.name,
         assetCode: wo.machine.code,
+        machineId: wo.machineId,
         assignedTo: wo.assignedTo?.name ?? null,
         requestedBy: wo.requestedBy?.name ?? null,
         createdAt: wo.createdAt.toISOString(),
@@ -266,6 +306,7 @@ export class MaintenanceService {
         totalCost: wo.totalCost,
         description: wo.description,
         isOverdue: wo.dueDate ? wo.dueDate < new Date() && !['COMPLETED', 'CANCELLED'].includes(wo.status) : false,
+        hasPendingParts: (wo._count?.sparesUsed ?? 0) > 0,
       })),
       total,
       page,
@@ -306,6 +347,17 @@ export class MaintenanceService {
   async startWO(factoryId: string | null, id: string, dto: StartWODto) {
     const wo = await this.assertTransition(factoryId, id, MaintStatus.IN_PROGRESS);
 
+    // Block start if there are still pending (un-issued) spare parts
+    const pendingParts = await this.prisma.maintWOSparePart.count({
+      where: { woId: id, status: SpareIssueStatus.PENDING },
+    });
+    if (pendingParts > 0) {
+      throw new BadRequestException(
+        `Cannot start work order: ${pendingParts} spare part(s) are still pending inventory approval. ` +
+        'All requested parts must be issued or cancelled before starting.',
+      );
+    }
+
     const updated = await this.prisma.maintenanceWO.update({
       where: { id },
       data: {
@@ -339,7 +391,7 @@ export class MaintenanceService {
     const totalCost = partsCost + laborCost;
     const completedAt = new Date();
 
-    // Handle spare parts consumption
+    // Handle additional (unplanned) spare parts logged at completion time
     if (dto.sparesUsed?.length) {
       for (const spare of dto.sparesUsed) {
         const part = await this.prisma.sparePart.findFirst({
@@ -354,14 +406,35 @@ export class MaintenanceService {
           );
         }
 
-        await this.prisma.maintWOSparePart.create({
-          data: {
-            woId: id,
-            sparePartId: spare.sparePartId,
-            quantity: spare.quantity,
-            unitCost: spare.unitCost ?? part.unitCost ?? 0,
-          },
+        // Check if a PENDING request already exists for this part on this WO
+        const existing = await this.prisma.maintWOSparePart.findFirst({
+          where: { woId: id, sparePartId: spare.sparePartId, status: SpareIssueStatus.PENDING },
         });
+        if (existing) {
+          // Update the existing request to ISSUED
+          await this.prisma.maintWOSparePart.update({
+            where: { id: existing.id },
+            data: {
+              quantityIssued: spare.quantity,
+              status: SpareIssueStatus.ISSUED,
+              issuedAt: new Date(),
+              unitCost: spare.unitCost ?? part.unitCost ?? 0,
+            },
+          });
+        } else {
+          // Create a new ISSUED record for the unplanned part
+          await this.prisma.maintWOSparePart.create({
+            data: {
+              woId: id,
+              sparePartId: spare.sparePartId,
+              quantityRequested: spare.quantity,
+              quantityIssued: spare.quantity,
+              unitCost: spare.unitCost ?? part.unitCost ?? 0,
+              status: SpareIssueStatus.ISSUED,
+              issuedAt: new Date(),
+            },
+          });
+        }
 
         // Deduct stock
         await this.prisma.sparePart.update({
@@ -426,6 +499,23 @@ export class MaintenanceService {
     return updated;
   }
 
+  async holdWO(factoryId: string | null, id: string, reason?: string) {
+    const wo = await this.assertTransition(factoryId, id, MaintStatus.ON_HOLD);
+    return this.prisma.maintenanceWO.update({
+      where: { id },
+      data: { status: MaintStatus.ON_HOLD, ...(reason && { notes: reason }) },
+    });
+  }
+
+  async resumeWO(factoryId: string | null, id: string) {
+    const wo = await this.assertTransition(factoryId, id, MaintStatus.IN_PROGRESS);
+    const resumeStatus = wo.startedAt ? MaintStatus.IN_PROGRESS : MaintStatus.ASSIGNED;
+    return this.prisma.maintenanceWO.update({
+      where: { id },
+      data: { status: resumeStatus },
+    });
+  }
+
   // ────────────────────────────────────────────────────────────
   // SPARE PARTS
   // ────────────────────────────────────────────────────────────
@@ -477,6 +567,271 @@ export class MaintenanceService {
       limit,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // SPARE PART REQUESTS (per WO)
+  // ────────────────────────────────────────────────────────────
+
+  async getWOSpareParts(factoryId: string | null, woId: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const wo = await this.prisma.maintenanceWO.findFirst({
+      where: { id: woId, ...factoryFilter, deletedAt: null },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+
+    return this.prisma.maintWOSparePart.findMany({
+      where: { woId },
+      include: {
+        sparePart: { select: { partNumber: true, name: true, unitCost: true, stockQty: true, storageLocation: true } },
+        issuedBy: { select: { name: true } },
+      },
+      orderBy: { requestedAt: 'asc' },
+    });
+  }
+
+  async addSpareParts(
+    factoryId: string | null,
+    woId: string,
+    parts: SparePartRequestItemDto[],
+  ) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const wo = await this.prisma.maintenanceWO.findFirst({
+      where: { id: woId, ...factoryFilter, deletedAt: null },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+    if (['COMPLETED', 'CANCELLED'].includes(wo.status)) {
+      throw new BadRequestException(`Cannot add parts to a ${wo.status} work order`);
+    }
+
+    const created = [];
+    for (const p of parts) {
+      const part = await this.prisma.sparePart.findFirst({ where: { id: p.sparePartId } });
+      if (!part) throw new NotFoundException(`Spare part ${p.sparePartId} not found`);
+
+      const record = await this.prisma.maintWOSparePart.create({
+        data: {
+          woId,
+          sparePartId: p.sparePartId,
+          quantityRequested: p.quantityRequested,
+          notes: p.notes,
+          status: SpareIssueStatus.PENDING,
+        },
+        include: {
+          sparePart: { select: { partNumber: true, name: true, stockQty: true } },
+        },
+      });
+      created.push(record);
+    }
+
+    // If WO is OPEN or ASSIGNED and now has pending parts → move to AWAITING_PARTS
+    const openOrAssigned: string[] = [MaintStatus.OPEN, MaintStatus.ASSIGNED];
+    if (openOrAssigned.includes(wo.status)) {
+      await this.prisma.maintenanceWO.update({
+        where: { id: woId },
+        data: { status: MaintStatus.AWAITING_PARTS },
+      });
+    }
+
+    return created;
+  }
+
+  /** For the inventory team — all PENDING spare part requests across all active WOs */
+  async getPendingPartsRequests(factoryId: string | null, filters: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const { search, page = 1, limit = 50 } = filters;
+    const factoryFilter = factoryId ? { wo: { factoryId } } : {};
+
+    const where: Prisma.MaintWOSparePartWhereInput = {
+      ...factoryFilter,
+      status: SpareIssueStatus.PENDING,
+      wo: {
+        ...((factoryId) ? { factoryId } : {}),
+        deletedAt: null,
+      },
+      ...(search && {
+        OR: [
+          { sparePart: { name: { contains: search, mode: 'insensitive' as const } } },
+          { sparePart: { partNumber: { contains: search, mode: 'insensitive' as const } } },
+          { wo: { woNumber: { contains: search, mode: 'insensitive' as const } } },
+        ],
+      }),
+    };
+
+    const [total, data] = await Promise.all([
+      this.prisma.maintWOSparePart.count({ where }),
+      this.prisma.maintWOSparePart.findMany({
+        where,
+        include: {
+          sparePart: {
+            select: { partNumber: true, name: true, category: true, stockQty: true, minStockQty: true, storageLocation: true, unitCost: true },
+          },
+          wo: {
+            select: { woNumber: true, title: true, priority: true, dueDate: true, machine: { select: { name: true, code: true } } },
+          },
+          issuedBy: { select: { name: true } },
+        },
+        orderBy: [{ wo: { priority: 'desc' } }, { requestedAt: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    return {
+      data: data.map((r) => ({
+        id: r.id,
+        woId: r.woId,
+        woNumber: (r.wo as any).woNumber,
+        woTitle: (r.wo as any).title,
+        woPriority: (r.wo as any).priority,
+        woDueDate: (r.wo as any).dueDate,
+        machine: (r.wo as any).machine,
+        sparePartId: r.sparePartId,
+        partNumber: (r.sparePart as any).partNumber,
+        partName: (r.sparePart as any).name,
+        category: (r.sparePart as any).category,
+        stockQty: (r.sparePart as any).stockQty,
+        minStockQty: (r.sparePart as any).minStockQty,
+        storageLocation: (r.sparePart as any).storageLocation,
+        unitCost: (r.sparePart as any).unitCost,
+        quantityRequested: r.quantityRequested,
+        quantityIssued: r.quantityIssued,
+        status: r.status,
+        requestedAt: r.requestedAt,
+        notes: r.notes,
+        insufficientStock: (r.sparePart as any).stockQty < r.quantityRequested,
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async issueSparePart(
+    factoryId: string | null,
+    woId: string,
+    requestId: string,
+    userId: string,
+    dto: IssueSparePartDto,
+  ) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const wo = await this.prisma.maintenanceWO.findFirst({
+      where: { id: woId, ...factoryFilter, deletedAt: null },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+
+    const request = await this.prisma.maintWOSparePart.findFirst({
+      where: { id: requestId, woId },
+      include: { sparePart: true },
+    });
+    if (!request) throw new NotFoundException('Spare part request not found');
+    if (request.status === SpareIssueStatus.ISSUED) {
+      throw new BadRequestException('This part request has already been fully issued');
+    }
+    if (request.status === SpareIssueStatus.CANCELLED) {
+      throw new BadRequestException('This part request has been cancelled');
+    }
+
+    const part = request.sparePart;
+    if (part.stockQty < dto.quantityIssued) {
+      throw new BadRequestException(
+        `Insufficient stock for ${part.partNumber}: ${part.stockQty} available, ${dto.quantityIssued} requested`,
+      );
+    }
+
+    const newIssuedQty = request.quantityIssued + dto.quantityIssued;
+    const newStatus: SpareIssueStatus =
+      newIssuedQty >= request.quantityRequested
+        ? SpareIssueStatus.ISSUED
+        : SpareIssueStatus.PARTIAL;
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.maintWOSparePart.update({
+        where: { id: requestId },
+        data: {
+          quantityIssued: newIssuedQty,
+          status: newStatus,
+          issuedAt: new Date(),
+          issuedById: userId,
+          notes: dto.notes ?? request.notes,
+        },
+        include: {
+          sparePart: { select: { partNumber: true, name: true, stockQty: true } },
+          issuedBy: { select: { name: true } },
+        },
+      }),
+      this.prisma.sparePart.update({
+        where: { id: part.id },
+        data: { stockQty: { decrement: dto.quantityIssued } },
+      }),
+    ]);
+
+    // Auto-transition WO from AWAITING_PARTS once all parts are issued or cancelled
+    if (wo.status === MaintStatus.AWAITING_PARTS) {
+      const remainingPending = await this.prisma.maintWOSparePart.count({
+        where: {
+          woId,
+          status: { notIn: [SpareIssueStatus.ISSUED, SpareIssueStatus.CANCELLED] },
+        },
+      });
+      if (remainingPending === 0) {
+        // All parts resolved → transition to OPEN (or ASSIGNED if technician already set)
+        const nextStatus = wo.assignedToId ? MaintStatus.ASSIGNED : MaintStatus.OPEN;
+        await this.prisma.maintenanceWO.update({
+          where: { id: woId },
+          data: { status: nextStatus },
+        });
+        this.logger.log(`WO ${wo.woNumber} auto-transitioned from AWAITING_PARTS → ${nextStatus} (all parts issued)`);
+        this.eventEmitter.emit('maintenance.wo.parts_ready', {
+          woId,
+          woNumber: wo.woNumber,
+          nextStatus,
+          factoryId: wo.factoryId,
+        });
+      }
+    }
+
+    this.eventEmitter.emit('maintenance.spare_part.issued', {
+      woId,
+      woNumber: wo.woNumber,
+      partNumber: part.partNumber,
+      partName: part.name,
+      quantityIssued: dto.quantityIssued,
+      issuedByUserId: userId,
+      factoryId: wo.factoryId,
+    });
+
+    this.logger.log(`Spare part ${part.partNumber} x${dto.quantityIssued} issued for WO ${wo.woNumber}`);
+    return updated;
+  }
+
+  async cancelSparePartRequest(
+    factoryId: string | null,
+    woId: string,
+    requestId: string,
+  ) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const wo = await this.prisma.maintenanceWO.findFirst({
+      where: { id: woId, ...factoryFilter, deletedAt: null },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+
+    const request = await this.prisma.maintWOSparePart.findFirst({
+      where: { id: requestId, woId },
+    });
+    if (!request) throw new NotFoundException('Spare part request not found');
+    if (request.status !== SpareIssueStatus.PENDING) {
+      throw new BadRequestException('Only PENDING requests can be cancelled');
+    }
+
+    return this.prisma.maintWOSparePart.update({
+      where: { id: requestId },
+      data: { status: SpareIssueStatus.CANCELLED },
+    });
   }
 
   // ────────────────────────────────────────────────────────────
@@ -734,24 +1089,44 @@ export class MaintenanceService {
         skip: (filters.page - 1) * filters.limit,
         take: filters.limit,
         include: {
-          area: { select: { name: true } },
-          currentStatus: { select: { state: true, currentSKUId: true } },
+          area: { select: { id: true, name: true, code: true } },
+          line: { select: { id: true, name: true, code: true } },
+          currentStatus: { select: { state: true } },
         },
       }),
       this.prisma.machine.count({ where }),
     ]);
 
-    return { data, total };
+    return {
+      data: data.map(m => ({
+        id: m.id,
+        code: m.code,
+        name: m.name,
+        machineType: m.machineType,
+        manufacturer: m.manufacturer,
+        model: m.model,
+        serialNumber: m.serialNumber,
+        criticality: m.criticality,
+        installDate: m.installDate?.toISOString() ?? null,
+        warrantyExpiry: m.warrantyExpiry?.toISOString() ?? null,
+        area: m.area ? { id: m.area.id, name: m.area.name, code: m.area.code } : null,
+        line: m.line ? { id: m.line.id, name: m.line.name, code: m.line.code } : null,
+        status: m.currentStatus?.state ?? 'OFFLINE',
+        isActive: m.isActive,
+      })),
+      total,
+    };
   }
 
   async createAsset(factoryId: string | null, dto: {
     name: string; code: string; machineType?: string; manufacturer?: string;
-    model?: string; serialNumber?: string; areaId?: string; criticality?: string;
+    model?: string; serialNumber?: string; areaId?: string; lineId?: string;
+    criticality?: string; installDate?: string; warrantyExpiry?: string;
   }) {
     const resolvedFactoryId = factoryId ?? await this.getDefaultFactoryId();
     const { MachineType, Criticality } = await import('@prisma/client');
 
-    return this.prisma.machine.create({
+    const machine = await this.prisma.machine.create({
       data: {
         factoryId: resolvedFactoryId,
         code: dto.code,
@@ -760,16 +1135,24 @@ export class MaintenanceService {
         manufacturer: dto.manufacturer,
         model: dto.model,
         serialNumber: dto.serialNumber,
-        areaId: dto.areaId,
+        areaId: dto.areaId || undefined,
+        lineId: dto.lineId || undefined,
         criticality: (Criticality[dto.criticality as keyof typeof Criticality] ?? Criticality.MEDIUM),
+        installDate: dto.installDate ? new Date(dto.installDate) : undefined,
+        warrantyExpiry: dto.warrantyExpiry ? new Date(dto.warrantyExpiry) : undefined,
       },
-      include: { area: { select: { name: true } } },
+      include: {
+        area: { select: { id: true, name: true, code: true } },
+        line: { select: { id: true, name: true, code: true } },
+      },
     });
+    return machine;
   }
 
   async updateAsset(factoryId: string | null, id: string, dto: {
     name?: string; machineType?: string; manufacturer?: string; model?: string;
-    serialNumber?: string; criticality?: string;
+    serialNumber?: string; areaId?: string; lineId?: string; criticality?: string;
+    installDate?: string; warrantyExpiry?: string;
   }) {
     const factoryFilter = factoryId ? { factoryId } : {};
     const machine = await this.prisma.machine.findFirst({ where: { id, ...factoryFilter } });
@@ -784,9 +1167,16 @@ export class MaintenanceService {
         ...(dto.manufacturer !== undefined && { manufacturer: dto.manufacturer }),
         ...(dto.model !== undefined && { model: dto.model }),
         ...(dto.serialNumber !== undefined && { serialNumber: dto.serialNumber }),
+        ...(dto.areaId !== undefined && { areaId: dto.areaId || null }),
+        ...(dto.lineId !== undefined && { lineId: dto.lineId || null }),
         ...(dto.criticality && { criticality: Criticality[dto.criticality as keyof typeof Criticality] ?? Criticality.MEDIUM }),
+        ...(dto.installDate !== undefined && { installDate: dto.installDate ? new Date(dto.installDate) : null }),
+        ...(dto.warrantyExpiry !== undefined && { warrantyExpiry: dto.warrantyExpiry ? new Date(dto.warrantyExpiry) : null }),
       },
-      include: { area: { select: { name: true } } },
+      include: {
+        area: { select: { id: true, name: true, code: true } },
+        line: { select: { id: true, name: true, code: true } },
+      },
     });
   }
 

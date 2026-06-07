@@ -82,7 +82,7 @@ function dispatch(action: Action) {
 
 type Toast = Omit<ToasterToast, 'id'>;
 
-function toast({ duration = 4000, ...props }: Toast) {
+function toast({ duration = 3000, ...props }: Toast) {
   const id = genId();
 
   const dismiss = () => dispatch({ type: 'DISMISS_TOAST', toastId: id });

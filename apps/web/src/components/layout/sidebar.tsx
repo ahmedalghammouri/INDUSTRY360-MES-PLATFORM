@@ -35,11 +35,19 @@ import {
   Layers3,
   BoxesIcon,
   Zap,
+  ClipboardCheck,
+  PackageSearch,
+  LineChart,
+  Sparkles,
+  GitCommit,
+  FlaskConical,
+  Truck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSidebarStore } from '@/store/ui-store';
 import { useAuthStore } from '@/store/auth-store';
 import { useFactoryStore } from '@/store/factory-store';
+import { useNotificationStore } from '@/store/notification-store';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -50,120 +58,145 @@ interface NavItem {
   icon: React.ElementType;
   badge?: string | number;
   badgeVariant?: 'default' | 'destructive' | 'secondary' | 'outline';
+  badgeDynamic?: boolean; // if true, badge value will be injected at render time
   children?: NavItem[];
   permission?: string;
 }
 
 const navItems: NavItem[] = [
+  // ── Core ────────────────────────────────────────────────────
   {
     label: 'Dashboard',
     href: '/dashboard',
     icon: LayoutDashboard,
   },
+
+  // ── Operations ──────────────────────────────────────────────
   {
     label: 'Production',
     icon: Factory,
     children: [
-      { label: 'Overview', href: '/production', icon: Gauge },
-      { label: 'Work Orders', href: '/production/orders', icon: ClipboardList },
-      { label: 'Batches', href: '/production/batches', icon: Boxes },
-      { label: 'OEE Analytics', href: '/production/oee', icon: TrendingUp },
-      { label: 'Scheduling', href: '/production/scheduling', icon: Calendar },
-      { label: 'Recipes', href: '/production/recipes', icon: FileText },
+      { label: 'Overview',      href: '/production',            icon: Gauge        },
+      { label: 'Work Orders',   href: '/production/orders',     icon: ClipboardList },
+      { label: 'Batches & Lots',href: '/production/batches',    icon: Boxes        },
+      { label: 'Scheduling',    href: '/production/scheduling', icon: Calendar     },
+      { label: 'OEE Analytics', href: '/production/oee',        icon: TrendingUp   },
+      { label: 'Recipes',       href: '/production/recipes',    icon: FileText     },
     ],
   },
   {
     label: 'Quality',
     icon: ShieldCheck,
     children: [
-      { label: 'Overview', href: '/quality', icon: Activity },
-      { label: 'Inspections', href: '/quality/inspections', icon: ClipboardList },
-      { label: 'NCR Management', href: '/quality/ncr', icon: AlertTriangle, badge: 3, badgeVariant: 'destructive' },
-      { label: 'CAPA', href: '/quality/capa', icon: ShieldCheck },
-      { label: 'SPC Charts', href: '/quality/spc', icon: TrendingUp },
+      { label: 'Overview',          href: '/quality',             icon: Activity      },
+      { label: 'Inspections',       href: '/quality/inspections', icon: ClipboardCheck },
+      { label: 'Non-Conformance',   href: '/quality/ncr',         icon: AlertTriangle, badge: 3, badgeVariant: 'destructive' },
+      { label: 'CAPA',              href: '/quality/capa',        icon: ShieldCheck   },
+      { label: 'SPC Charts',        href: '/quality/spc',         icon: LineChart     },
     ],
   },
   {
     label: 'Maintenance',
     icon: Wrench,
     children: [
-      { label: 'Overview', href: '/maintenance', icon: Activity },
-      { label: 'Work Orders', href: '/maintenance/work-orders', icon: ClipboardList },
-      { label: 'Assets', href: '/maintenance/assets', icon: Cpu },
-      { label: 'Preventive PM', href: '/maintenance/preventive', icon: Calendar },
-      { label: 'Spare Parts', href: '/maintenance/spare-parts', icon: Package },
+      { label: 'Overview',              href: '/maintenance',             icon: Gauge        },
+      { label: 'Maintenance Orders',     href: '/maintenance/work-orders', icon: ClipboardList },
+      { label: 'Assets & Equipment',    href: '/maintenance/assets',      icon: Cpu          },
+      { label: 'Preventive Maintenance',href: '/maintenance/preventive',  icon: Calendar     },
+      { label: 'Spare Parts',           href: '/maintenance/spare-parts', icon: PackageSearch },
     ],
   },
-  {
-    label: 'Reports',
-    icon: BarChart3,
-    children: [
-      { label: 'Report Builder', href: '/reports', icon: FileText },
-      { label: 'Production Reports', href: '/reports/production', icon: Factory },
-      { label: 'Quality Reports', href: '/reports/quality', icon: ShieldCheck },
-      { label: 'Maintenance Reports', href: '/reports/maintenance', icon: Wrench },
-    ],
-  },
-  {
-    label: 'IIoT & Connectivity',
-    icon: Radio,
-    children: [
-      { label: 'Devices', href: '/iot/devices', icon: Cpu },
-      { label: 'Tag Browser', href: '/iot/tags', icon: Network },
-      { label: 'Drivers', href: '/iot/drivers', icon: Radio },
-      { label: 'Data Streams', href: '/iot/streams', icon: Activity },
-    ],
-  },
+
+  // ── Resources ───────────────────────────────────────────────
   {
     label: 'Inventory',
     icon: Package,
     children: [
-      { label: 'Overview', href: '/inventory', icon: Boxes },
-      { label: 'Spare Parts', href: '/inventory/spare-parts', icon: Package },
-      { label: 'Products (SKUs)', href: '/inventory/products', icon: BoxesIcon },
-      { label: 'Material Lots', href: '/inventory/materials', icon: Layers3 },
+      { label: 'Overview',            href: '/inventory',                  icon: Boxes       },
+      { label: 'Spare Parts',         href: '/inventory/spare-parts',      icon: PackageSearch },
+      { label: 'Spare Part Requests', href: '/inventory/spare-requests',   icon: Truck       },
+      { label: 'Raw Materials',       href: '/inventory/raw-materials',    icon: FlaskConical },
+      { label: 'Products (SKUs)',     href: '/inventory/products',         icon: BoxesIcon   },
+      { label: 'Material Lots',       href: '/inventory/materials',        icon: Layers3     },
     ],
   },
   {
     label: 'Energy',
     icon: Zap,
     children: [
-      { label: 'Overview', href: '/energy', icon: Activity },
-      { label: 'Meters', href: '/energy/meters', icon: Gauge },
+      { label: 'Overview', href: '/energy',        icon: Activity },
+      { label: 'Meters',   href: '/energy/meters', icon: Gauge    },
     ],
   },
+
+  // ── Infrastructure ───────────────────────────────────────────
   {
     label: 'Plant Hierarchy',
     href: '/hierarchy',
     icon: GitBranch,
   },
   {
+    label: 'IIoT & Connectivity',
+    icon: Radio,
+    children: [
+      { label: 'Devices',      href: '/iot/devices',  icon: Cpu      },
+      { label: 'Tag Browser',  href: '/iot/tags',     icon: Network  },
+      { label: 'Drivers',      href: '/iot/drivers',  icon: Radio    },
+      { label: 'Data Streams', href: '/iot/streams',  icon: Activity },
+    ],
+  },
+
+  // ── Traceability ──────────────────────────────────────────────
+  {
+    label: 'Traceability',
+    href: '/traceability',
+    icon: GitCommit,
+  },
+
+  // ── Analytics & AI ───────────────────────────────────────────
+  {
+    label: 'Reports & Analytics',
+    icon: BarChart3,
+    children: [
+      { label: 'Report Builder',      href: '/reports',             icon: FileText    },
+      { label: 'Production Reports',  href: '/reports/production',  icon: Factory     },
+      { label: 'Quality Reports',     href: '/reports/quality',     icon: ShieldCheck },
+      { label: 'Maintenance Reports', href: '/reports/maintenance', icon: Wrench      },
+    ],
+  },
+  {
     label: 'AI Intelligence',
     href: '/ai',
-    icon: Bot,
+    icon: Sparkles,
     badge: 'New',
+    badgeVariant: 'default',
   },
+
+  // ── System ──────────────────────────────────────────────────
   {
     label: 'Notifications',
     href: '/notifications',
     icon: Bell,
-    badge: 7,
+    badgeDynamic: true, // rendered dynamically from store
     badgeVariant: 'destructive',
   },
 ];
 
 const bottomNavItems: NavItem[] = [
-  { label: 'Users & Roles', href: '/users', icon: Users },
-  { label: 'Settings', href: '/settings', icon: Settings },
+  { label: 'Users & Roles', href: '/users',    icon: Users    },
+  { label: 'Settings',      href: '/settings', icon: Settings },
 ];
+
+// ── SidebarItem ─────────────────────────────────────────────────
 
 interface SidebarItemProps {
   item: NavItem;
   isCollapsed: boolean;
   depth?: number;
+  dynamicBadge?: number;
 }
 
-function SidebarItem({ item, isCollapsed, depth = 0 }: SidebarItemProps) {
+function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge }: SidebarItemProps) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(() => {
     if (!item.children) return false;
@@ -175,6 +208,7 @@ function SidebarItem({ item, isCollapsed, depth = 0 }: SidebarItemProps) {
     : item.children?.some((c) => c.href && pathname.startsWith(c.href));
 
   const Icon = item.icon;
+  const badge = item.badgeDynamic ? (dynamicBadge && dynamicBadge > 0 ? dynamicBadge : undefined) : item.badge;
 
   if (item.children) {
     return (
@@ -189,7 +223,7 @@ function SidebarItem({ item, isCollapsed, depth = 0 }: SidebarItemProps) {
             isCollapsed && 'justify-center px-2',
           )}
         >
-          <Icon className={cn('shrink-0 w-4.5 h-4.5', isActive && 'text-sidebar-primary')} size={18} />
+          <Icon className={cn('shrink-0', isActive && 'text-sidebar-primary')} size={18} />
           <AnimatePresence>
             {!isCollapsed && (
               <motion.span
@@ -220,7 +254,12 @@ function SidebarItem({ item, isCollapsed, depth = 0 }: SidebarItemProps) {
               className="overflow-hidden ml-3 mt-0.5 pl-4 border-l border-sidebar-border/50"
             >
               {item.children.map((child) => (
-                <SidebarItem key={child.href || child.label} item={child} isCollapsed={false} depth={depth + 1} />
+                <SidebarItem
+                  key={child.href || child.label}
+                  item={child}
+                  isCollapsed={false}
+                  depth={depth + 1}
+                />
               ))}
             </motion.div>
           )}
@@ -257,12 +296,12 @@ function SidebarItem({ item, isCollapsed, depth = 0 }: SidebarItemProps) {
           </motion.span>
         )}
       </AnimatePresence>
-      {!isCollapsed && item.badge && (
+      {!isCollapsed && badge !== undefined && (
         <Badge
           variant={item.badgeVariant || 'secondary'}
           className="ml-auto text-[10px] h-4 min-w-4 px-1"
         >
-          {item.badge}
+          {typeof badge === 'number' && badge > 99 ? '99+' : badge}
         </Badge>
       )}
     </Link>
@@ -275,9 +314,9 @@ function SidebarItem({ item, isCollapsed, depth = 0 }: SidebarItemProps) {
           <TooltipTrigger asChild>{content}</TooltipTrigger>
           <TooltipContent side="right" className="font-medium">
             {item.label}
-            {item.badge && (
+            {badge && (
               <Badge variant={item.badgeVariant || 'secondary'} className="ml-2 text-[10px]">
-                {item.badge}
+                {badge}
               </Badge>
             )}
           </TooltipContent>
@@ -288,6 +327,8 @@ function SidebarItem({ item, isCollapsed, depth = 0 }: SidebarItemProps) {
 
   return content;
 }
+
+// ── BackToMapButton ──────────────────────────────────────────────
 
 function BackToMapButton({ isCollapsed }: { isCollapsed: boolean }) {
   const router = useRouter();
@@ -311,11 +352,8 @@ function BackToMapButton({ isCollapsed }: { isCollapsed: boolean }) {
         isCollapsed && 'justify-center px-2',
       )}
     >
-      {/* Animated left border accent */}
       <span className="absolute left-0 top-0 h-full w-0.5 bg-cyan-400/50 group-hover:bg-cyan-400 transition-colors" />
-
       <Map size={15} className="shrink-0 text-cyan-400 group-hover:text-cyan-300 transition-colors" />
-
       <AnimatePresence>
         {!isCollapsed && (
           <motion.div
@@ -339,7 +377,6 @@ function BackToMapButton({ isCollapsed }: { isCollapsed: boolean }) {
           </motion.div>
         )}
       </AnimatePresence>
-
       {!isCollapsed && (
         <LogOut size={12} className="shrink-0 opacity-40 group-hover:opacity-80 transition-opacity" />
       )}
@@ -362,9 +399,12 @@ function BackToMapButton({ isCollapsed }: { isCollapsed: boolean }) {
   return btn;
 }
 
+// ── Sidebar ──────────────────────────────────────────────────────
+
 export function Sidebar() {
   const { isCollapsed, toggle } = useSidebarStore();
   const { user } = useAuthStore();
+  const { unreadCount } = useNotificationStore();
 
   return (
     <motion.aside
@@ -397,7 +437,6 @@ export function Sidebar() {
           </AnimatePresence>
         </div>
 
-        {/* Collapse toggle */}
         <button
           onClick={toggle}
           className={cn(
@@ -405,18 +444,19 @@ export function Sidebar() {
             isCollapsed && 'mx-auto',
           )}
         >
-          {isCollapsed ? (
-            <ChevronRight size={14} />
-          ) : (
-            <ChevronLeft size={14} />
-          )}
+          {isCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 space-y-0.5 no-scrollbar">
         {navItems.map((item) => (
-          <SidebarItem key={item.href || item.label} item={item} isCollapsed={isCollapsed} />
+          <SidebarItem
+            key={item.href || item.label}
+            item={item}
+            isCollapsed={isCollapsed}
+            dynamicBadge={item.badgeDynamic ? unreadCount : undefined}
+          />
         ))}
       </nav>
 

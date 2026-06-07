@@ -14,6 +14,7 @@ import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 interface SparePart {
   id: string;
@@ -52,6 +53,7 @@ export function SparePartsView() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [page, setPage] = useState(1);
   const [adjustTarget, setAdjustTarget] = useState<SparePart | null>(null);
   const [adjustQty, setAdjustQty] = useState('');
   const [adjustType, setAdjustType] = useState<'ADD' | 'REMOVE' | 'SET'>('ADD');
@@ -61,13 +63,14 @@ export function SparePartsView() {
   const [createForm, setCreateForm] = useState(EMPTY_PART_FORM);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['inventory', 'spare-parts', search, category, lowStockOnly],
+    queryKey: ['inventory', 'spare-parts', search, category, lowStockOnly, page],
     queryFn: () => api.get<{ data: SparePart[]; total: number }>('/inventory/spare-parts', {
       params: {
         search: search || undefined,
         category: category || undefined,
         lowStock: lowStockOnly ? 'true' : undefined,
-        limit: 50,
+        page,
+        limit: 20,
       },
     }),
     staleTime: 30_000,
@@ -139,20 +142,20 @@ export function SparePartsView() {
           <Input
             placeholder="Search parts…"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
             className="pl-8 h-9 w-64"
           />
         </div>
         <Input
           placeholder="Category…"
           value={category}
-          onChange={e => setCategory(e.target.value)}
+          onChange={e => { setCategory(e.target.value); setPage(1); }}
           className="h-9 w-40"
         />
         <Button
           variant={lowStockOnly ? 'default' : 'outline'}
           size="sm"
-          onClick={() => setLowStockOnly(v => !v)}
+          onClick={() => { setLowStockOnly(v => !v); setPage(1); }}
         >
           <AlertTriangle className="w-3.5 h-3.5 mr-1.5" />
           Low Stock Only
@@ -257,6 +260,7 @@ export function SparePartsView() {
             </tbody>
           </table>
         </div>
+        <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
       </div>
 
       {/* Adjust stock modal */}

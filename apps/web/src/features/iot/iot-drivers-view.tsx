@@ -11,18 +11,20 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui/use-toast';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { api } from '@/services/api.client';
 
 export function IotDriversView() {
   const qc = useQueryClient();
+  const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [editDriver, setEditDriver] = useState<any | null>(null);
   const [deleteDriver, setDeleteDriver] = useState<any | null>(null);
   const { register, handleSubmit, reset, setValue } = useForm();
 
   const { data: drivers, isLoading } = useQuery({
-    queryKey: ['iot', 'drivers'],
-    queryFn: () => api.get('/iot/drivers'),
+    queryKey: ['iot', 'drivers', { page }],
+    queryFn: () => api.get('/iot/drivers', { params: { limit: 20, page } }),
     staleTime: 30_000,
   });
 
@@ -73,6 +75,7 @@ export function IotDriversView() {
   };
 
   const driverList = (drivers as any)?.data ?? [];
+  const total: number = (drivers as any)?.total ?? 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -167,6 +170,7 @@ export function IotDriversView() {
                 )}
               </TableBody>
             </Table>
+            <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
           </div>
         </div>
       </div>

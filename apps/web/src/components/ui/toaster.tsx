@@ -33,34 +33,41 @@ const VARIANT_STYLES = {
 };
 
 function ToastItem({
-  id, title, description, variant = 'default', duration = 4000, open,
+  title, description, variant = 'default', duration = 3000, open,
   onDismiss,
 }: {
-  id: string; title?: React.ReactNode; description?: React.ReactNode;
+  title?: React.ReactNode;
+  description?: React.ReactNode;
   variant?: 'default' | 'destructive' | 'success' | 'warning';
-  duration?: number; open?: boolean; onDismiss: () => void;
+  duration?: number;
+  open?: boolean;
+  onDismiss: () => void;
 }) {
   const [visible, setVisible] = useState(false);
+  const [removed, setRemoved] = useState(false);
   const [progress, setProgress] = useState(100);
   const startRef = useRef<number>(Date.now());
   const rafRef = useRef<number>();
 
-  // Slide-in on mount
+  // Slide-in after mount
   useEffect(() => {
-    const t = setTimeout(() => setVisible(true), 10);
-    return () => clearTimeout(t);
+    const t = requestAnimationFrame(() => setVisible(true));
+    return () => cancelAnimationFrame(t);
   }, []);
 
-  // Slide-out when open=false
+  // Slide-out + fade when dismissed
   useEffect(() => {
-    if (open === false) setVisible(false);
+    if (open === false) {
+      setVisible(false);
+      const t = setTimeout(() => setRemoved(true), 320);
+      return () => clearTimeout(t);
+    }
   }, [open]);
 
   // Progress bar countdown
   useEffect(() => {
     if (!duration || duration === 0) return;
     startRef.current = Date.now();
-
     const tick = () => {
       const elapsed = Date.now() - startRef.current;
       const pct = Math.max(0, 100 - (elapsed / duration) * 100);
@@ -71,36 +78,39 @@ function ToastItem({
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [duration]);
 
+  if (removed) return null;
+
   const cfg = VARIANT_STYLES[variant] ?? VARIANT_STYLES.default;
   const Icon = cfg.icon;
 
   return (
     <div
       className={cn(
-        'relative flex items-start gap-3 rounded-xl border p-4 shadow-lg backdrop-blur-sm',
-        'transition-all duration-300 ease-out overflow-hidden',
+        'relative flex items-start gap-3 rounded-xl border p-4 shadow-2xl backdrop-blur-sm min-w-[300px] max-w-[380px]',
+        'overflow-hidden',
         cfg.container,
-        visible ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0',
+        // Slide in from right, slide out to right
+        'transition-[transform,opacity] duration-300 ease-out',
+        visible ? 'translate-x-0 opacity-100' : 'translate-x-[110%] opacity-0',
       )}
     >
-      {/* Icon */}
       <Icon size={16} className={cn('shrink-0 mt-0.5', cfg.iconCls)} />
 
-      {/* Content */}
       <div className="flex-1 min-w-0">
         {title && <div className="text-sm font-semibold leading-snug">{title}</div>}
-        {description && <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</div>}
+        {description && (
+          <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</div>
+        )}
       </div>
 
-      {/* Close */}
       <button
         onClick={onDismiss}
-        className="shrink-0 rounded-md p-0.5 opacity-60 hover:opacity-100 hover:bg-muted/50 transition-opacity"
+        className="shrink-0 rounded-md p-0.5 opacity-50 hover:opacity-100 hover:bg-muted/50 transition-opacity"
       >
         <X size={13} />
       </button>
 
-      {/* Auto-dismiss progress bar */}
+      {/* Progress bar */}
       {duration > 0 && (
         <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-muted/30">
           <div
@@ -117,11 +127,11 @@ export function Toaster() {
   const { toasts, dismiss } = useToast();
 
   return (
-    <div className="fixed bottom-4 right-4 z-[200] flex flex-col-reverse gap-2 w-full max-w-sm pointer-events-none">
-      {toasts.map(t => (
+    // Top-right, stack newest on top (flex-col → first toast rendered = newest = on top)
+    <div className="fixed top-4 right-4 z-[200] flex flex-col gap-2 w-full max-w-sm pointer-events-none">
+      {toasts.map((t) => (
         <div key={t.id} className="pointer-events-auto">
           <ToastItem
-            id={t.id}
             title={t.title}
             description={t.description}
             variant={t.variant}

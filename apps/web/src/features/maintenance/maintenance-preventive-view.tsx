@@ -14,6 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { KPICard } from '@/components/widgets/kpi-card';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { formatDate } from '@/lib/utils';
@@ -22,6 +23,7 @@ export function MaintenancePreventiveView() {
   const { toast } = useToast()
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [formOpen, setFormOpen] = useState(false)
   const [editSchedule, setEditSchedule] = useState<any | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; task: string } | null>(null)
@@ -30,8 +32,8 @@ export function MaintenancePreventiveView() {
   })
 
   const { data: pmSchedules, isLoading } = useQuery({
-    queryKey: ['maintenance', 'preventive', { search }],
-    queryFn: () => api.get('/maintenance/preventive', { params: { search } }),
+    queryKey: ['maintenance', 'preventive', { search, page }],
+    queryFn: () => api.get('/maintenance/preventive', { params: { search, limit: 20, page } }),
     staleTime: 30_000,
   })
 
@@ -57,6 +59,7 @@ export function MaintenancePreventiveView() {
   })
 
   const schedules = (pmSchedules as any)?.data ?? [];
+  const total: number = (pmSchedules as any)?.total ?? 0;
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/maintenance/preventive', dto),
@@ -165,7 +168,7 @@ export function MaintenancePreventiveView() {
               <Input
                 placeholder="Search schedules..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                 className="h-8 pl-7 w-48 text-xs"
               />
             </div>
@@ -211,7 +214,7 @@ export function MaintenancePreventiveView() {
                       <TableCell className="text-xs text-muted-foreground">{formatDate(schedule.lastDone)}</TableCell>
                       <TableCell className="text-xs font-medium">{formatDate(schedule.nextDue)}</TableCell>
                       <TableCell>
-                        <Badge 
+                        <Badge
                           variant={schedule.status === 'OVERDUE' ? 'destructive' : schedule.status === 'DUE' ? 'outline' : 'secondary'}
                           className="text-[10px] h-5"
                         >
@@ -243,6 +246,7 @@ export function MaintenancePreventiveView() {
               </TableBody>
             </Table>
           </div>
+          <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
         </div>
       </div>
 

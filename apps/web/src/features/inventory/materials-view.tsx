@@ -14,6 +14,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 interface MaterialLot {
   id: string;
@@ -47,6 +48,7 @@ export function MaterialsView() {
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
+  const [page, setPage] = useState(1)
   const [formOpen, setFormOpen] = useState(false)
   const [editLot, setEditLot] = useState<MaterialLot | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; lotNumber: string } | null>(null)
@@ -56,9 +58,9 @@ export function MaterialsView() {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['inventory', 'materials', search, status],
+    queryKey: ['inventory', 'materials', search, status, page],
     queryFn: () => api.get<{ data: MaterialLot[]; total: number }>('/inventory/materials', {
-      params: { search: search || undefined, status: status || undefined, limit: 50 },
+      params: { search: search || undefined, status: status || undefined, page, limit: 20 },
     }),
     staleTime: 30_000,
   })
@@ -125,13 +127,13 @@ export function MaterialsView() {
           <Input
             placeholder="Search material, lot #…"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
             className="pl-8 h-9 w-64"
           />
         </div>
         <select
           value={status}
-          onChange={e => setStatus(e.target.value)}
+          onChange={e => { setStatus(e.target.value); setPage(1); }}
           className="h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground"
         >
           <option value="">All Status</option>
@@ -237,6 +239,7 @@ export function MaterialsView() {
             </tbody>
           </table>
         </div>
+        <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
       </div>
 
       <FormDialog

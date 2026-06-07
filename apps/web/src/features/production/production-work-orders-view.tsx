@@ -23,6 +23,7 @@ import { TableRowActions } from '@/components/ui/table-row-actions';
 import { MachineTreePicker } from '@/components/ui/machine-tree-picker';
 import { api } from '@/services/api.client';
 import { cn, formatDate, formatPercent } from '@/lib/utils';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 const STATUS_COLORS: Record<string, 'secondary' | 'default' | 'outline' | 'destructive'> = {
   PLANNED: 'secondary', RELEASED: 'secondary', IN_PROGRESS: 'default',
@@ -80,6 +81,7 @@ function DetailRow({ label, value }: { label: string; value?: React.ReactNode })
 }
 
 export function ProductionWorkOrdersView() {
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
@@ -99,13 +101,14 @@ export function ProductionWorkOrdersView() {
   const { toast } = useToast();
 
   const { data: workOrdersData, isLoading } = useQuery({
-    queryKey: ['production', 'work-orders', { search, status: statusFilter }],
+    queryKey: ['production', 'work-orders', { search, status: statusFilter, page }],
     queryFn: () => api.get('/production/work-orders', {
-      params: { search: search || undefined, status: statusFilter || undefined, limit: 50 },
+      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page },
     }),
     staleTime: 15_000,
   });
   const orders: WorkOrder[] = (workOrdersData as any)?.data ?? [];
+  const total: number = (workOrdersData as any)?.total ?? 0;
 
   const { data: woDetail, isLoading: detailLoading } = useQuery({
     queryKey: ['production', 'work-orders', viewId],
@@ -235,7 +238,7 @@ export function ProductionWorkOrdersView() {
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Search orders…" value={search} onChange={e => setSearch(e.target.value)} className="h-8 pl-7 w-48 text-xs" />
+                <Input placeholder="Search orders…" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="h-8 pl-7 w-48 text-xs" />
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -244,9 +247,9 @@ export function ProductionWorkOrdersView() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setStatusFilter(null)}>All Status</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setStatusFilter(null); setPage(1); }}>All Status</DropdownMenuItem>
                   {Object.keys(STATUS_LABELS).map(s => (
-                    <DropdownMenuItem key={s} onClick={() => setStatusFilter(s)}>{STATUS_LABELS[s]}</DropdownMenuItem>
+                    <DropdownMenuItem key={s} onClick={() => { setStatusFilter(s); setPage(1); }}>{STATUS_LABELS[s]}</DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -373,6 +376,7 @@ export function ProductionWorkOrdersView() {
               </TableBody>
             </Table>
           </div>
+          <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
         </div>
       </div>
 

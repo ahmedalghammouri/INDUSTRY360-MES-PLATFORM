@@ -13,6 +13,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { KPICard } from '@/components/widgets/kpi-card';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
 
@@ -43,6 +44,7 @@ export function MaintenanceSparePartsView() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<SparePart | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; name: string } | null>(null);
@@ -52,8 +54,8 @@ export function MaintenanceSparePartsView() {
   const [form, setForm] = useState(EMPTY_FORM);
 
   const { data: partsData, isLoading } = useQuery({
-    queryKey: ['maintenance', 'spare-parts', { search }],
-    queryFn: () => api.get('/maintenance/spare-parts', { params: { search: search || undefined, limit: 50 } }),
+    queryKey: ['maintenance', 'spare-parts', { search, page }],
+    queryFn: () => api.get('/maintenance/spare-parts', { params: { search: search || undefined, limit: 20, page } }),
     staleTime: 30_000,
   });
 
@@ -64,6 +66,7 @@ export function MaintenanceSparePartsView() {
   });
 
   const parts: SparePart[] = (partsData as any)?.data ?? [];
+  const total: number = (partsData as any)?.total ?? 0;
   const outOfStock = parts.filter(p => p.stockQty === 0).length;
 
   const createMutation = useMutation({
@@ -193,7 +196,7 @@ export function MaintenanceSparePartsView() {
               <Input
                 placeholder="Search parts..."
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={e => { setSearch(e.target.value); setPage(1); }}
                 className="h-8 pl-7 w-48 text-xs"
               />
             </div>
@@ -294,6 +297,7 @@ export function MaintenanceSparePartsView() {
               </TableBody>
             </Table>
           </div>
+          <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
         </div>
       </div>
 

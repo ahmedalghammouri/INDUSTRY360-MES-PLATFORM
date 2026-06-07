@@ -14,6 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { KPICard } from '@/components/widgets/kpi-card';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { formatDate } from '@/lib/utils';
@@ -22,6 +23,7 @@ export function IotDevicesView() {
   const { toast } = useToast()
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [formOpen, setFormOpen] = useState(false)
   const [editDevice, setEditDevice] = useState<any | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; name: string } | null>(null)
@@ -30,8 +32,8 @@ export function IotDevicesView() {
   })
 
   const { data: devices, isLoading } = useQuery({
-    queryKey: ['iot', 'devices', { search }],
-    queryFn: () => api.get('/iot/devices', { params: { search } }),
+    queryKey: ['iot', 'devices', { search, page }],
+    queryFn: () => api.get('/iot/devices', { params: { search, limit: 20, page } }),
     staleTime: 15_000,
   })
 
@@ -42,6 +44,7 @@ export function IotDevicesView() {
   })
 
   const deviceList = (devices as any)?.data ?? [];
+  const total: number = (devices as any)?.total ?? 0;
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/iot/devices', dto),
@@ -144,7 +147,7 @@ export function IotDevicesView() {
               <Input
                 placeholder="Search devices..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                 className="h-8 pl-7 w-48 text-xs"
               />
             </div>
@@ -190,7 +193,7 @@ export function IotDevicesView() {
                       <TableCell className="text-xs text-muted-foreground">{device.type}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{device.protocol}</TableCell>
                       <TableCell>
-                        <Badge 
+                        <Badge
                           variant={device.status === 'ONLINE' ? 'default' : 'destructive'}
                           className="text-[10px] h-5 gap-1"
                         >
@@ -224,6 +227,7 @@ export function IotDevicesView() {
                 )}
               </TableBody>
             </Table>
+            <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
           </div>
         </div>
       </div>

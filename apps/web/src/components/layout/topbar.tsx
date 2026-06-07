@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -22,10 +23,12 @@ import {
   Map,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
+import { useQuery } from '@tanstack/react-query';
 
 import { useAuthStore } from '@/store/auth-store';
 import { useNotificationStore } from '@/store/notification-store';
 import { useFactoryStore } from '@/store/factory-store';
+import { api } from '@/services/api.client';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,16 +57,19 @@ const breadcrumbLabels: Record<string, string> = {
   capa: 'CAPA Management',
   spc: 'SPC Charts',
   maintenance: 'Maintenance',
-  'work-orders': 'Work Orders',
+  'work-orders': 'Maintenance Orders',
   assets: 'Assets',
   preventive: 'Preventive Maintenance',
   'spare-parts': 'Spare Parts',
+  'spare-requests': 'Spare Part Requests',
+  'raw-materials': 'Raw Materials',
   reports: 'Reports',
   iot: 'IIoT & Connectivity',
   devices: 'Devices',
   tags: 'Tag Browser',
   drivers: 'Drivers',
   hierarchy: 'Plant Hierarchy',
+  traceability: 'Traceability',
   ai: 'AI Intelligence',
   notifications: 'Notifications',
   users: 'Users & Roles',
@@ -178,9 +184,21 @@ function FactoryChip() {
 
 export function Topbar() {
   const { user, logout } = useAuthStore();
-  const { unreadCount } = useNotificationStore();
+  const { unreadCount, setUnreadCount } = useNotificationStore();
   const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Sync unread count from API on mount and every minute
+  const { data: countData } = useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: () => api.get('/notifications/unread-count'),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+  useEffect(() => {
+    const count = (countData as any)?.count;
+    if (typeof count === 'number') setUnreadCount(count);
+  }, [countData, setUnreadCount]);
 
   return (
     <header className="h-14 border-b border-border/50 bg-background/80 backdrop-blur-xl flex items-center px-4 gap-3 shrink-0 sticky top-0 z-40">
@@ -211,18 +229,21 @@ export function Topbar() {
         <ThemeSwitcher />
 
         {/* Notifications */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-muted-foreground hover:text-foreground relative"
-        >
-          <Bell size={15} />
-          {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-destructive text-[10px] font-bold text-white flex items-center justify-center">
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </span>
-          )}
-        </Button>
+        <Link href="/notifications">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground relative"
+            asChild={false}
+          >
+            <Bell size={15} />
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-destructive text-[10px] font-bold text-white flex items-center justify-center">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </Button>
+        </Link>
 
         {/* Divider */}
         <div className="w-px h-5 bg-border mx-1" />

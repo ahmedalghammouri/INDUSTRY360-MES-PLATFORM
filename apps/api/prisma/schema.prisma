@@ -76,6 +76,9 @@ model Factory {
   workOrders        WorkOrder[]
   batchRecords      BatchRecord[]
   materialLots      MaterialLot[]
+  rawMaterials      RawMaterial[]
+  stockMovements    StockMovement[]
+  traceEvents       TraceEvent[]
   downtimeCauses    DowntimeCause[]
   downtimeEvents    DowntimeEvent[]
   oeeRecords        OEERecord[]
@@ -394,6 +397,7 @@ model SKU {
   family         ProductFamily?     @relation(fields: [familyId], references: [id])
   cycleTimes     MachineCycleTime[]
   bomComponents  BOMComponent[]
+  bomHeaders     BOMHeader[]
   workOrders     WorkOrder[]
   batchRecords   BatchRecord[]
 
@@ -511,11 +515,12 @@ model WorkOrder {
   completedBy       User?            @relation("WOCompletedBy", fields: [completedById], references: [id])
   operator          User?            @relation("WOOperator", fields: [operatorId], references: [id])
   supervisor        User?            @relation("WOSupervisor", fields: [supervisorId], references: [id])
-  batchRecords      BatchRecord[]
-  downtimeEvents    DowntimeEvent[]
+  batchRecords         BatchRecord[]
+  downtimeEvents       DowntimeEvent[]
   materialConsumptions MaterialConsumption[]
-  productionEvents  ProductionEvent[]
-  inspectionResults InspectionResult[]
+  productionEvents     ProductionEvent[]
+  inspectionResults    InspectionResult[]
+  maintenanceOrders    MaintenanceWO[]       @relation("MaintLinkedProdWO")
 
   @@map("work_orders")
   @@index([factoryId, status])
@@ -620,6 +625,7 @@ enum BatchStatus {
 model MaterialLot {
   id              String      @id @default(uuid())
   factoryId       String
+  rawMaterialId   String?     // optional link to RawMaterial master
   materialCode    String
   materialName    String
   lotNumber       String
@@ -638,7 +644,8 @@ model MaterialLot {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
-  factory    Factory               @relation(fields: [factoryId], references: [id])
+  factory      Factory               @relation(fields: [factoryId], references: [id])
+  rawMaterial  RawMaterial?          @relation(fields: [rawMaterialId], references: [id])
   consumptions MaterialConsumption[]
 
   @@unique([factoryId, lotNumber, materialCode])
@@ -1280,11 +1287,14 @@ model MaintenanceWO {
   updatedAt            DateTime     @updatedAt
   deletedAt            DateTime?
 
-  factory    Factory   @relation(fields: [factoryId], references: [id])
-  machine    Machine   @relation(fields: [machineId], references: [id])
-  assignedTo User?     @relation("MaintAssignedTo", fields: [assignedToId], references: [id])
-  requestedBy User?    @relation("MaintRequestedBy", fields: [requestedById], references: [id])
-  sparesUsed MaintWOSparePart[]
+  productionWOId String?
+
+  factory      Factory    @relation(fields: [factoryId], references: [id])
+  machine      Machine    @relation(fields: [machineId], references: [id])
+  assignedTo   User?      @relation("MaintAssignedTo", fields: [assignedToId], references: [id])
+  requestedBy  User?      @relation("MaintRequestedBy", fields: [requestedById], references: [id])
+  productionWO WorkOrder? @relation("MaintLinkedProdWO", fields: [productionWOId], references: [id])
+  sparesUsed   MaintWOSparePart[]
 
   @@map("maintenance_wos")
   @@index([factoryId, status])
@@ -1302,6 +1312,7 @@ enum MaintType {
 
 enum MaintStatus {
   OPEN
+  AWAITING_PARTS  // waiting for inventory to issue requested spare parts
   ASSIGNED
   IN_PROGRESS
   ON_HOLD
@@ -1337,15 +1348,29 @@ model SparePart {
   @@map("spare_parts")
 }
 
+enum SpareIssueStatus {
+  PENDING
+  ISSUED
+  PARTIAL
+  CANCELLED
+}
+
 model MaintWOSparePart {
-  id          String  @id @default(uuid())
-  woId        String
-  sparePartId String
-  quantity    Float
-  unitCost    Float?
+  id                String           @id @default(uuid())
+  woId              String
+  sparePartId       String
+  quantityRequested Float
+  quantityIssued    Float            @default(0)
+  unitCost          Float?
+  status            SpareIssueStatus @default(PENDING)
+  notes             String?
+  requestedAt       DateTime         @default(now())
+  issuedAt          DateTime?
+  issuedById        String?
 
   wo        MaintenanceWO @relation(fields: [woId], references: [id], onDelete: Cascade)
   sparePart SparePart     @relation(fields: [sparePartId], references: [id])
+  issuedBy  User?         @relation("SpareIssuedBy", fields: [issuedById], references: [id])
 
   @@map("maint_wo_spare_parts")
 }
@@ -1657,9 +1682,14 @@ model User {
   capaAssigned  CAPA[]             @relation("CAPAAssignedTo")
 
   // Maintenance
-  maintAssigned   MaintenanceWO[] @relation("MaintAssignedTo")
-  maintRequested  MaintenanceWO[] @relation("MaintRequestedBy")
-  pmTasksAssigned PMTask[]       @relation("PMTaskAssignedTo")
+  maintAssigned       MaintenanceWO[]    @relation("MaintAssignedTo")
+  maintRequested      MaintenanceWO[]    @relation("MaintRequestedBy")
+  pmTasksAssigned     PMTask[]           @relation("PMTaskAssignedTo")
+  sparePartsIssued    MaintWOSparePart[] @relation("SpareIssuedBy")
+
+  // Inventory & Traceability
+  stockMovements      StockMovement[]    @relation("StockMovementBy")
+  traceEvents         TraceEvent[]       @relation("TracePerformedBy")
 
   @@map("users")
   @@index([enterpriseId])
@@ -1782,6 +1812,166 @@ model AuditLog {
   @@index([factoryId, createdAt])
   @@index([userId])
   @@index([entityType, entityId])
+}
+
+// ============================================================
+// INVENTORY — RAW MATERIALS MASTER
+// ============================================================
+
+model RawMaterial {
+  id              String   @id @default(uuid())
+  factoryId       String
+  code            String   // SAP / internal material code
+  name            String
+  nameAr          String?
+  description     String?
+  category        String?  // RAW, PACKAGING, CONSUMABLE, CHEMICAL, LABEL
+  unit            String   @default("KG")
+  unitCost        Float?
+  currentStock    Float    @default(0)
+  reservedStock   Float    @default(0)  // soft-reserved for active WOs
+  minStock        Float    @default(0)
+  maxStock        Float?
+  reorderPoint    Float?
+  storageLocation String?
+  supplierName    String?
+  leadTimeDays    Int?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  factory      Factory       @relation(fields: [factoryId], references: [id])
+  materialLots MaterialLot[]
+  bomItems     BOMItem[]
+
+  @@unique([factoryId, code])
+  @@map("raw_materials")
+}
+
+// ============================================================
+// BILL OF MATERIALS (proper BOM linking SKU → RawMaterials)
+// ============================================================
+
+model BOMHeader {
+  id          String   @id @default(uuid())
+  factoryId   String
+  skuId       String
+  version     String   @default("1.0")
+  isActive    Boolean  @default(true)
+  approvedAt  DateTime?
+  approvedById String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sku   SKU       @relation(fields: [skuId], references: [id])
+  items BOMItem[]
+
+  @@unique([skuId, version])
+  @@map("bom_headers")
+}
+
+model BOMItem {
+  id              String   @id @default(uuid())
+  bomId           String
+  rawMaterialId   String
+  quantityPer     Float    // quantity needed per 1 unit of finished product
+  unit            String
+  scrapFactor     Float    @default(0)  // additional scrap % (0.05 = 5%)
+  isOptional      Boolean  @default(false)
+  notes           String?
+
+  bom         BOMHeader   @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id])
+
+  @@map("bom_items")
+}
+
+// ============================================================
+// STOCK MOVEMENTS (universal ledger for all inventory moves)
+// ============================================================
+
+model StockMovement {
+  id              String          @id @default(uuid())
+  factoryId       String
+  entityType      StockEntityType
+  entityId        String          // sparePartId or rawMaterialId
+  entityCode      String
+  entityName      String
+  movementType    MovementType
+  quantity        Float           // positive = in, negative = out (for ISSUE/CONSUMPTION)
+  unitCost        Float?
+  totalCost       Float?
+  stockBefore     Float?
+  stockAfter      Float?
+  referenceType   String?         // MAINTENANCE_WO, PRODUCTION_WO, PURCHASE_ORDER, ADJUSTMENT
+  referenceId     String?
+  referenceNumber String?
+  performedById   String?
+  notes           String?
+  createdAt       DateTime        @default(now())
+
+  factory     Factory @relation(fields: [factoryId], references: [id])
+  performedBy User?   @relation("StockMovementBy", fields: [performedById], references: [id])
+
+  @@map("stock_movements")
+  @@index([factoryId, createdAt])
+  @@index([entityType, entityId])
+  @@index([referenceType, referenceId])
+}
+
+enum StockEntityType {
+  SPARE_PART
+  RAW_MATERIAL
+  PRODUCT
+}
+
+enum MovementType {
+  RECEIPT      // incoming stock (purchase, transfer in)
+  ISSUE        // outgoing (to maintenance WO, to production)
+  RETURN       // returned unused stock
+  ADJUSTMENT   // manual count adjustment
+  RESERVATION  // soft reserve (pending approval)
+  RELEASE      // release reservation (WO cancelled)
+  CONSUMPTION  // production consumption
+}
+
+// ============================================================
+// TRACEABILITY — PLATFORM-WIDE EVENT LOG
+// ============================================================
+
+model TraceEvent {
+  id            String   @id @default(uuid())
+  factoryId     String?
+
+  // Entity this event concerns
+  entityType    String   // MAINT_WO, PROD_WO, BATCH, SPARE_PART, RAW_MATERIAL, MACHINE, PRODUCT
+  entityId      String
+  entityCode    String?  // human-readable code/number
+
+  // Event description
+  eventType     String   // CREATED, STATUS_CHANGED, PARTS_REQUESTED, PARTS_ISSUED, STOCK_IN, STOCK_OUT, CONSUMED, RELEASED, etc.
+  fromValue     String?  // previous status / quantity
+  toValue       String?  // new status / quantity
+  quantity      Float?
+  eventData     Json?    // arbitrary extra metadata
+
+  // Who/when/where
+  performedById String?
+  performedAt   DateTime @default(now())
+  notes         String?
+
+  // Optional cross-reference (e.g., spare part issued TO a maintenance WO)
+  relatedType   String?
+  relatedId     String?
+
+  factory     Factory? @relation(fields: [factoryId], references: [id])
+  performedBy User?    @relation("TracePerformedBy", fields: [performedById], references: [id])
+
+  @@map("trace_events")
+  @@index([entityType, entityId])
+  @@index([factoryId, performedAt])
+  @@index([performedAt])
 }
 
 // ============================================================

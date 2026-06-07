@@ -17,6 +17,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { TableRowActions } from '@/components/ui/table-row-actions';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 type BatchStatus = 'ACTIVE' | 'COMPLETED' | 'RELEASED' | 'REJECTED' | 'ON_HOLD' | 'QUARANTINE';
 
@@ -51,6 +52,7 @@ const STATUS_CONFIG: Record<BatchStatus, { label: string; variant: 'default' | '
 const EMPTY_FORM = { batchNumber: '', skuId: '', plannedQty: '', workOrderId: '' };
 
 export function ProductionBatchesView() {
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -63,9 +65,9 @@ export function ProductionBatchesView() {
   const { toast } = useToast();
 
   const { data, isLoading } = useQuery({
-    queryKey: ['production', 'batches', { search, status: statusFilter }],
+    queryKey: ['production', 'batches', { search, status: statusFilter, page }],
     queryFn: () => api.get('/production/batches', {
-      params: { search: search || undefined, status: statusFilter || undefined, limit: 50 },
+      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page },
     }),
     staleTime: 15_000,
   });
@@ -84,6 +86,7 @@ export function ProductionBatchesView() {
   });
 
   const batches: Batch[] = (data as any)?.data ?? [];
+  const total: number = (data as any)?.total ?? 0;
   const skus: SKU[] = (skusData as any)?.data ?? [];
   const workOrders: WorkOrder[] = (workOrdersData as any)?.data ?? [];
 
@@ -190,7 +193,7 @@ export function ProductionBatchesView() {
           <div className="flex items-center justify-between p-4 border-b border-border/30">
             <div className="relative">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Search batch or product..." value={search} onChange={e => setSearch(e.target.value)} className="h-8 pl-7 w-56 text-xs" />
+              <Input placeholder="Search batch or product..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="h-8 pl-7 w-56 text-xs" />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -199,9 +202,9 @@ export function ProductionBatchesView() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => setStatusFilter(null)}>All Status</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { setStatusFilter(null); setPage(1); }}>All Status</DropdownMenuItem>
                 {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-                  <DropdownMenuItem key={k} onClick={() => setStatusFilter(k)}>{v.label}</DropdownMenuItem>
+                  <DropdownMenuItem key={k} onClick={() => { setStatusFilter(k); setPage(1); }}>{v.label}</DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -276,6 +279,7 @@ export function ProductionBatchesView() {
               )}
             </TableBody>
           </Table>
+          <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
         </div>
       </div>
 

@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
-  Plus, Search, Filter, ChevronDown, MoreHorizontal,
-  Wrench, AlertTriangle, Clock, User, CheckCircle, Pencil, Trash2,
+  Plus, Search, Filter, ChevronDown, Wrench, AlertTriangle, Clock,
+  User, CheckCircle, Trash2, Package, X, PackageCheck, PackageMinus,
+  PackageX, ChevronRight, Info, Play, Ban,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
-
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,203 +15,411 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { FormDialog } from '@/components/ui/form-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { TableRowActions } from '@/components/ui/table-row-actions';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
+import { MachineTreePicker } from '@/components/ui/machine-tree-picker';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
 
+// ── Types ────────────────────────────────────────────────────
+
 const STATUS_COLORS: Record<string, 'secondary' | 'default' | 'outline' | 'destructive'> = {
-  OPEN: 'secondary',
-  ASSIGNED: 'outline',
-  IN_PROGRESS: 'default',
-  ON_HOLD: 'outline',
-  COMPLETED: 'default',
-  CANCELLED: 'destructive',
+  OPEN: 'secondary', AWAITING_PARTS: 'outline', ASSIGNED: 'outline',
+  IN_PROGRESS: 'default', ON_HOLD: 'outline', COMPLETED: 'default', CANCELLED: 'destructive',
 };
-
 const STATUS_LABELS: Record<string, string> = {
-  OPEN: 'Open',
-  ASSIGNED: 'Assigned',
-  IN_PROGRESS: 'In Progress',
-  ON_HOLD: 'On Hold',
-  COMPLETED: 'Completed',
-  CANCELLED: 'Cancelled',
+  OPEN: 'Open', AWAITING_PARTS: 'Awaiting Parts', ASSIGNED: 'Assigned',
+  IN_PROGRESS: 'In Progress', ON_HOLD: 'On Hold', COMPLETED: 'Completed', CANCELLED: 'Cancelled',
 };
-
+const STATUS_EXTRA_CLS: Record<string, string> = {
+  AWAITING_PARTS: 'text-amber-400 border-amber-400/30 bg-amber-400/10',
+};
 const PRIORITY_CONFIG: Record<string, { label: string; color: string }> = {
-  LOW:      { label: 'Low',      color: 'text-muted-foreground' },
-  MEDIUM:   { label: 'Medium',   color: 'text-brand-400' },
-  HIGH:     { label: 'High',     color: 'text-amber-400' },
+  LOW: { label: 'Low', color: 'text-muted-foreground' },
+  MEDIUM: { label: 'Medium', color: 'text-brand-400' },
+  HIGH: { label: 'High', color: 'text-amber-400' },
   CRITICAL: { label: 'Critical', color: 'text-red-400' },
 };
-
 const TYPE_LABELS: Record<string, string> = {
-  CORRECTIVE: 'Corrective', PREVENTIVE: 'Preventive', PREDICTIVE: 'Predictive', EMERGENCY: 'Emergency',
+  CORRECTIVE: 'Corrective', PREVENTIVE: 'Preventive',
+  PREDICTIVE: 'Predictive', EMERGENCY: 'Emergency',
+  INSPECTION: 'Inspection', LUBRICATION: 'Lubrication',
+};
+
+const SPARE_STATUS_CONFIG: Record<string, { label: string; icon: React.ElementType; cls: string }> = {
+  PENDING:   { label: 'Pending',   icon: Clock,         cls: 'text-amber-400 border-amber-400/30 bg-amber-400/10' },
+  ISSUED:    { label: 'Issued',    icon: PackageCheck,  cls: 'text-green-400 border-green-400/30 bg-green-400/10' },
+  PARTIAL:   { label: 'Partial',   icon: PackageMinus,  cls: 'text-blue-400  border-blue-400/30  bg-blue-400/10'  },
+  CANCELLED: { label: 'Cancelled', icon: PackageX,      cls: 'text-muted-foreground border-border bg-muted/20'   },
 };
 
 interface MaintWO {
-  id: string;
-  woNumber: string;
-  title: string;
-  type: string;
-  priority: string;
-  status: string;
-  machine?: { name: string; code: string };
-  assignedTo?: { name: string };
-  reportedAt: string;
-  dueDate?: string;
-  estimatedHours?: number;
-  actualHours?: number;
+  id: string; woNumber: string; title: string; type: string; priority: string;
+  status: string; asset: string; assetCode: string; machineId?: string;
+  assignedTo: string | null; assignedToId: string | null; requestedBy: string | null;
+  createdAt: string; dueDate: string | null; startedAt: string | null; completedAt: string | null;
+  estimatedHours: number | null; actualHours: number | null; totalCost: number | null;
+  description: string | null; notes: string | null; isOverdue: boolean; hasPendingParts: boolean;
+  productionWOId: string | null;
+  productionWO: { id: string; orderNumber: string; status: string } | null;
+}
+
+interface SparePart {
+  id: string; partNumber: string; name: string; category: string | null;
+  stockQty: number; minStockQty: number; unitCost: number | null; storageLocation: string | null;
+}
+
+interface SparePartRequest {
+  id: string; sparePartId: string; quantityRequested: number; quantityIssued: number;
+  unitCost: number | null; status: string; notes: string | null;
+  requestedAt: string; issuedAt: string | null;
+  sparePart: { partNumber: string; name: string; unitCost: number | null; stockQty: number; storageLocation: string | null };
+  issuedBy: { name: string } | null;
+}
+
+interface SpareLineItem {
+  sparePartId: string;
+  partNumber: string;
+  name: string;
+  stockQty: number;
+  unitCost: number | null;
+  quantityRequested: number;
 }
 
 const SUMMARY_CARDS = [
-  { label: 'Open WOs', key: 'OPEN', icon: AlertTriangle, color: 'text-amber-400' },
-  { label: 'In Progress', key: 'IN_PROGRESS', icon: Wrench, color: 'text-brand-400' },
-  { label: 'Completed Today', key: 'COMPLETED', icon: CheckCircle, color: 'text-green-400' },
+  { label: 'Open Orders', key: 'OPEN',        icon: AlertTriangle, color: 'text-amber-400' },
+  { label: 'In Progress', key: 'IN_PROGRESS',  icon: Wrench,        color: 'text-brand-400' },
+  { label: 'Completed',   key: 'COMPLETED',    icon: CheckCircle,   color: 'text-green-400' },
 ];
 
-const EMPTY_FORM = { woNumber: '', title: '', type: 'CORRECTIVE', priority: 'MEDIUM', machineId: '__none__', description: '', dueDate: '', estimatedHours: '' };
+const EMPTY_FORM = {
+  title: '', type: 'CORRECTIVE', priority: 'MEDIUM',
+  machineId: '', machineName: '',
+  description: '', dueDate: '', estimatedHours: '',
+  assignedToId: '',
+  notes: '',
+  productionWOId: '',
+};
+
+// ── Component ────────────────────────────────────────────────
 
 export function MaintenanceWorkOrdersView() {
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
-  const [formOpen, setFormOpen] = useState(false)
-  const [editWO, setEditWO] = useState<MaintWO | null>(null)
-  const [deleteDialog, setDeleteDialog] = useState<{ id: string; woNumber: string } | null>(null)
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editWO, setEditWO] = useState<MaintWO | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{ id: string; woNumber: string } | null>(null);
+  const [viewWO, setViewWO] = useState<MaintWO | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [spareLines, setSpareLines] = useState<SpareLineItem[]>([]);
+  const [spareSearch, setSpareSearch] = useState('');
+  const [showPartPicker, setShowPartPicker] = useState(false);
 
-  const queryClient = useQueryClient()
-  const { toast } = useToast()
+  // Issue dialog state
+  const [issueDialog, setIssueDialog] = useState<{ request: SparePartRequest } | null>(null);
+  const [issueQty, setIssueQty] = useState('');
+  const [issueNotes, setIssueNotes] = useState('');
+
+  // Lifecycle dialog state
+  const [assignDialog, setAssignDialog] = useState<{ wo: MaintWO } | null>(null);
+  const [assignUserId, setAssignUserId] = useState('');
+  const [assignNotes, setAssignNotes] = useState('');
+
+  const [completeDialog, setCompleteDialog] = useState<{ wo: MaintWO } | null>(null);
+  const [completeForm, setCompleteForm] = useState({ actualHours: '', laborCost: '', partsCost: '', notes: '' });
+
+  const [holdDialog, setHoldDialog] = useState<{ wo: MaintWO } | null>(null);
+  const [holdReason, setHoldReason] = useState('');
+
+  const [cancelDialog, setCancelDialog] = useState<{ wo: MaintWO } | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // ── Queries ─────────────────────────────────────────────────
 
   const { data, isLoading } = useQuery({
-    queryKey: ['maintenance', 'work-orders', { search, status: statusFilter }],
+    queryKey: ['maintenance', 'work-orders', { search, status: statusFilter, page }],
     queryFn: () => api.get('/maintenance/work-orders', {
-      params: { search: search || undefined, status: statusFilter || undefined, limit: 50 },
+      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page },
     }),
     staleTime: 15_000,
-  })
+  });
 
-  const { data: machinesData } = useQuery({
-    queryKey: ['hierarchy', 'machines', 'maint-wo-dropdown'],
-    queryFn: () => api.get('/hierarchy/machines'),
-    staleTime: 120_000,
+  const total: number = (data as any)?.total ?? 0;
+
+  const { data: sparePartsData } = useQuery({
+    queryKey: ['maintenance', 'spare-parts', 'all'],
+    queryFn: () => api.get('/maintenance/spare-parts', { params: { limit: 200 } }),
+    staleTime: 60_000,
     enabled: formOpen,
-  })
-  const machines: Array<{ id: string; name: string; code: string }> = (machinesData as any) ?? []
+  });
 
-  const orders: MaintWO[] = (data as any)?.data ?? (data as any) ?? [];
+  const { data: woSparePartsData, refetch: refetchSpareParts } = useQuery({
+    queryKey: ['maintenance', 'wo-spare-parts', viewWO?.id],
+    queryFn: () => api.get(`/maintenance/work-orders/${viewWO!.id}/spare-parts`),
+    staleTime: 10_000,
+    enabled: !!viewWO,
+  });
 
-  // Count by status for summary cards
+  const { data: usersData } = useQuery({
+    queryKey: ['users', 'maintenance-dropdown'],
+    queryFn: () => api.get('/users', { params: { limit: 100 } }),
+    staleTime: 120_000,
+    enabled: formOpen || !!assignDialog,
+  });
+  const technicianOptions: Array<{ id: string; name: string; role: string }> = (usersData as any)?.data ?? [];
+
+  const { data: prodWOsData } = useQuery({
+    queryKey: ['production', 'work-orders', 'maint-dropdown'],
+    queryFn: () => api.get('/production/work-orders', { params: { limit: 100, status: 'IN_PROGRESS,PLANNED,RELEASED' } }),
+    staleTime: 60_000,
+    enabled: formOpen,
+  });
+  const prodWOOptions: Array<{ id: string; orderNumber: string; status: string }> =
+    (prodWOsData as any)?.data ?? [];
+
+  const orders: MaintWO[] = (data as any)?.data ?? [];
+  const allParts: SparePart[] = (sparePartsData as any)?.data ?? [];
+  const woSpareParts: SparePartRequest[] = Array.isArray(woSparePartsData) ? woSparePartsData : [];
+
   const counts = orders.reduce<Record<string, number>>((acc, wo) => {
     acc[wo.status] = (acc[wo.status] ?? 0) + 1;
     return acc;
-  }, {})
+  }, {});
 
-  const startMutation = useMutation({
-    mutationFn: (woId: string) => api.patch(`/maintenance/work-orders/${woId}/start`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] })
-      toast({ title: 'Maintenance work order started' })
-    },
-    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to start work order', variant: 'destructive' }),
-  })
+  // Filter parts not already added
+  const availableParts = useMemo(() => {
+    const q = spareSearch.toLowerCase();
+    const usedIds = new Set(spareLines.map(l => l.sparePartId));
+    return allParts.filter(p =>
+      !usedIds.has(p.id) &&
+      (p.name.toLowerCase().includes(q) || p.partNumber.toLowerCase().includes(q))
+    );
+  }, [allParts, spareLines, spareSearch]);
+
+  // ── Mutations ────────────────────────────────────────────────
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/maintenance/work-orders', dto),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] })
-      toast({ title: 'Work order created successfully' })
-      handleCloseForm()
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      toast({ title: 'Maintenance order created', variant: 'success' });
+      handleCloseForm();
     },
-    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to create work order', variant: 'destructive' }),
-  })
+    onError: (e: any) => toast({ title: 'Failed to create maintenance order', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, dto }: { id: string; dto: any }) => api.patch(`/maintenance/work-orders/${id}`, dto),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] })
-      toast({ title: 'Work order updated successfully' })
-      handleCloseForm()
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      toast({ title: 'Maintenance order updated', variant: 'success' });
+      handleCloseForm();
     },
-    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to update work order', variant: 'destructive' }),
-  })
+    onError: (e: any) => toast({ title: 'Failed to update maintenance order', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/maintenance/work-orders/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] })
-      toast({ title: 'Work order deleted successfully' })
-      setDeleteDialog(null)
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      toast({ title: 'Maintenance order deleted' });
+      setDeleteDialog(null);
     },
-    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to delete', variant: 'destructive' }),
-  })
+    onError: (e: any) => toast({ title: 'Failed to delete', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const startMutation = useMutation({
+    mutationFn: (woId: string) => api.patch(`/maintenance/work-orders/${woId}/start`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      toast({ title: 'Maintenance order started', variant: 'success' });
+    },
+    onError: (e: any) => toast({ title: 'Failed to start', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: ({ woId, dto }: { woId: string; dto: any }) =>
+      api.patch(`/maintenance/work-orders/${woId}/assign`, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      toast({ title: 'Maintenance order assigned', variant: 'success' });
+      setAssignDialog(null); setAssignUserId(''); setAssignNotes('');
+      setViewWO(null);
+    },
+    onError: (e: any) => toast({ title: 'Failed to assign', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: ({ woId, dto }: { woId: string; dto: any }) =>
+      api.patch(`/maintenance/work-orders/${woId}/complete`, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      toast({ title: 'Maintenance order completed', variant: 'success' });
+      setCompleteDialog(null); setCompleteForm({ actualHours: '', laborCost: '', partsCost: '', notes: '' });
+      setViewWO(null);
+    },
+    onError: (e: any) => toast({ title: 'Failed to complete', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const holdMutation = useMutation({
+    mutationFn: ({ woId, dto }: { woId: string; dto: any }) =>
+      api.patch(`/maintenance/work-orders/${woId}/hold`, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      toast({ title: 'Maintenance order put on hold' });
+      setHoldDialog(null); setHoldReason('');
+    },
+    onError: (e: any) => toast({ title: 'Failed', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: (woId: string) => api.patch(`/maintenance/work-orders/${woId}/resume`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      toast({ title: 'Maintenance order resumed', variant: 'success' });
+    },
+    onError: (e: any) => toast({ title: 'Failed', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
 
   const cancelMutation = useMutation({
-    mutationFn: (woId: string) => api.patch(`/maintenance/work-orders/${woId}/cancel`, { reason: 'Cancelled by user' }),
+    mutationFn: ({ woId, reason }: { woId: string; reason: string }) =>
+      api.patch(`/maintenance/work-orders/${woId}/cancel`, { reason }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] })
-      toast({ title: 'Work order cancelled' })
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      toast({ title: 'Maintenance order cancelled' });
+      setCancelDialog(null); setCancelReason('');
+      setViewWO(null);
     },
-    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to cancel work order', variant: 'destructive' }),
-  })
+    onError: (e: any) => toast({ title: 'Failed to cancel', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const issueMutation = useMutation({
+    mutationFn: ({ woId, requestId, dto }: { woId: string; requestId: string; dto: any }) =>
+      api.patch(`/maintenance/work-orders/${woId}/spare-parts/${requestId}/issue`, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'wo-spare-parts', viewWO?.id] });
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'spare-parts', 'all'] });
+      toast({ title: 'Parts issued to maintenance order', variant: 'success' });
+      setIssueDialog(null);
+      setIssueQty('');
+      setIssueNotes('');
+    },
+    onError: (e: any) => toast({ title: 'Failed to issue parts', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  const cancelPartMutation = useMutation({
+    mutationFn: ({ woId, requestId }: { woId: string; requestId: string }) =>
+      api.patch(`/maintenance/work-orders/${woId}/spare-parts/${requestId}/cancel`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenance', 'wo-spare-parts', viewWO?.id] });
+      toast({ title: 'Part request cancelled' });
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message, variant: 'destructive' }),
+  });
+
+  // ── Handlers ─────────────────────────────────────────────────
 
   const handleOpenCreate = () => {
-    setEditWO(null)
-    setForm(EMPTY_FORM)
-    setFormOpen(true)
+    setEditWO(null);
+    setForm(EMPTY_FORM);
+    setSpareLines([]);
+    setFormOpen(true);
   };
 
   const handleOpenEdit = (wo: MaintWO) => {
-    setEditWO(wo)
+    setEditWO(wo);
     setForm({
-      woNumber: wo.woNumber,
       title: wo.title,
       type: wo.type,
       priority: wo.priority,
-      machineId: wo.machine ? (wo as any).machineId ?? '__none__' : '__none__',
-      description: (wo as any).description ?? '',
+      machineId: wo.machineId ?? '',
+      machineName: wo.asset ?? '',
+      description: wo.description ?? '',
       dueDate: wo.dueDate?.slice(0, 10) ?? '',
       estimatedHours: wo.estimatedHours?.toString() ?? '',
-    })
-    setFormOpen(true)
+      assignedToId: wo.assignedToId ?? '',
+      notes: wo.notes ?? '',
+      productionWOId: wo.productionWOId ?? '',
+    });
+    setSpareLines([]);
+    setFormOpen(true);
   };
 
   const handleCloseForm = () => {
-    setFormOpen(false)
-    setEditWO(null)
-    setForm(EMPTY_FORM)
+    setFormOpen(false);
+    setEditWO(null);
+    setForm(EMPTY_FORM);
+    setSpareLines([]);
+    setSpareSearch('');
+    setShowPartPicker(false);
   };
 
   const handleSubmit = () => {
-    const dto = {
+    const dto: any = {
       title: form.title,
       type: form.type,
       priority: form.priority,
-      machineId: (form.machineId && form.machineId !== '__none__') ? form.machineId : undefined,
+      machineId: form.machineId || undefined,
       description: form.description || undefined,
       dueDate: form.dueDate || undefined,
       estimatedHours: form.estimatedHours ? parseFloat(form.estimatedHours) : undefined,
+      assignedToId: form.assignedToId || undefined,
+      notes: form.notes || undefined,
+      productionWOId: form.productionWOId || undefined,
+    };
+    if (!editWO && spareLines.length > 0) {
+      dto.spareParts = spareLines.map(l => ({
+        sparePartId: l.sparePartId,
+        quantityRequested: l.quantityRequested,
+      }));
     }
-    if (editWO) {
-      updateMutation.mutate({ id: editWO.id, dto })
-    } else {
-      createMutation.mutate({ ...dto, woNumber: form.woNumber })
-    }
+    if (editWO) updateMutation.mutate({ id: editWO.id, dto });
+    else createMutation.mutate(dto);
   };
 
-  const isValid = !!((editWO ? true : form.woNumber) && form.title && form.type && form.priority)
+  const addSpareLine = (part: SparePart) => {
+    setSpareLines(prev => [...prev, {
+      sparePartId: part.id,
+      partNumber: part.partNumber,
+      name: part.name,
+      stockQty: part.stockQty,
+      unitCost: part.unitCost,
+      quantityRequested: 1,
+    }]);
+    setSpareSearch('');
+    setShowPartPicker(false);
+  };
+
+  const removeSpareLine = (sparePartId: string) => {
+    setSpareLines(prev => prev.filter(l => l.sparePartId !== sparePartId));
+  };
+
+  const updateSpareQty = (sparePartId: string, qty: number) => {
+    setSpareLines(prev => prev.map(l => l.sparePartId === sparePartId ? { ...l, quantityRequested: qty } : l));
+  };
+
+  const isValid = !!(form.title && form.type && form.priority && form.machineId);
+  const pendingParts = woSpareParts.filter(p => p.status === 'PENDING');
+  const allIssued = woSpareParts.length > 0 && woSpareParts.every(p => p.status === 'ISSUED' || p.status === 'CANCELLED');
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
         <div>
-          <h1 className="text-lg font-bold">Maintenance Work Orders</h1>
+          <h1 className="text-lg font-bold">Maintenance Orders</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Corrective, preventive, and emergency maintenance</p>
         </div>
         <Button size="sm" className="gap-1.5 h-8 text-xs" onClick={handleOpenCreate}>
-          <Plus size={13} />
-          New Work Order
+          <Plus size={13} />New Maintenance Order
         </Button>
       </div>
 
@@ -229,19 +437,14 @@ export function MaintenanceWorkOrdersView() {
           ))}
         </div>
 
-        {/* Work orders table */}
+        {/* Table */}
         <div className="industrial-card p-4">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <h3 className="text-sm font-semibold">All Work Orders</h3>
+            <h3 className="text-sm font-semibold">All Maintenance Orders</h3>
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="h-8 pl-7 w-44 text-xs"
-                />
+                <Input placeholder="Search..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="h-8 pl-7 w-44 text-xs" />
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -252,9 +455,9 @@ export function MaintenanceWorkOrdersView() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setStatusFilter(null)}>All Status</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setStatusFilter(null); setPage(1); }}>All Status</DropdownMenuItem>
                   {Object.entries(STATUS_LABELS).map(([k, v]) => (
-                    <DropdownMenuItem key={k} onClick={() => setStatusFilter(k)}>{v}</DropdownMenuItem>
+                    <DropdownMenuItem key={k} onClick={() => { setStatusFilter(k); setPage(1); }}>{v}</DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -265,16 +468,9 @@ export function MaintenanceWorkOrdersView() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border/30">
-                  <TableHead className="text-[11px] font-semibold">WO #</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Title</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Type</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Priority</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Status</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Machine</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Assigned To</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Due</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Est. hrs</TableHead>
-                  <TableHead />
+                  {['MO #', 'Title', 'Type', 'Priority', 'Status', 'Machine', 'Assigned To', 'Parts', 'Due', ''].map(h => (
+                    <TableHead key={h} className="text-[11px] font-semibold">{h}</TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -289,7 +485,7 @@ export function MaintenanceWorkOrdersView() {
                 ) : orders.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
-                      No maintenance work orders found
+                      No maintenance orders found
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -299,157 +495,838 @@ export function MaintenanceWorkOrdersView() {
                       <TableRow key={wo.id} className="border-border/20 hover:bg-muted/20">
                         <TableCell className="font-mono text-xs font-semibold text-primary">{wo.woNumber}</TableCell>
                         <TableCell>
-                          <div className="text-xs font-medium max-w-[160px] truncate">{wo.title}</div>
+                          <div className="text-xs font-medium max-w-[140px] truncate">{wo.title}</div>
+                          {wo.isOverdue && (
+                            <span className="text-[10px] text-red-400">Overdue</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{TYPE_LABELS[wo.type] ?? wo.type}</TableCell>
                         <TableCell>
                           <span className={cn('text-xs font-semibold', priority?.color)}>{priority?.label ?? wo.priority}</span>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={STATUS_COLORS[wo.status] ?? 'secondary'} className="text-[10px] h-5">
+                          <Badge
+                            variant={STATUS_COLORS[wo.status] ?? 'secondary'}
+                            className={cn('text-[10px] h-5', STATUS_EXTRA_CLS[wo.status])}
+                          >
                             {STATUS_LABELS[wo.status] ?? wo.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{wo.machine?.name ?? '—'}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{wo.asset ?? '—'}</TableCell>
                         <TableCell>
                           {wo.assignedTo ? (
                             <div className="flex items-center gap-1 text-xs">
                               <User size={10} className="text-muted-foreground" />
-                              {wo.assignedTo.name}
+                              {wo.assignedTo}
                             </div>
                           ) : (
                             <span className="text-xs text-muted-foreground">Unassigned</span>
                           )}
                         </TableCell>
+                        <TableCell>
+                          {wo.hasPendingParts && (
+                            <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-400/10 border border-amber-400/30 rounded-full px-1.5 py-0.5 w-fit">
+                              <Package size={9} />Pending
+                            </span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {wo.dueDate ? formatDate(wo.dueDate) : '—'}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {wo.estimatedHours ? `${wo.estimatedHours}h` : '—'}
-                        </TableCell>
                         <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-7 w-7">
-                                <MoreHorizontal size={13} />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem className="gap-2 text-xs" onClick={() => handleOpenEdit(wo)}>
-                                <Pencil size={12} /> Edit
-                              </DropdownMenuItem>
-                              {wo.status === 'ASSIGNED' && (
-                                <DropdownMenuItem
-                                  className="gap-2 text-xs text-brand-400"
-                                  onClick={() => startMutation.mutate(wo.id)}
-                                >
-                                  <Wrench size={12} /> Start Work
-                                </DropdownMenuItem>
-                              )}
-                              {['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD'].includes(wo.status) && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    className="gap-2 text-xs text-destructive"
-                                    onClick={() => setDeleteDialog({ id: wo.id, woNumber: wo.woNumber })}
-                                  >
-                                    <Trash2 size={12} /> Delete
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <TableRowActions
+                            onView={() => setViewWO(wo)}
+                            onEdit={!['COMPLETED', 'CANCELLED'].includes(wo.status) ? () => handleOpenEdit(wo) : undefined}
+                            onDelete={!['COMPLETED', 'CANCELLED', 'IN_PROGRESS'].includes(wo.status)
+                              ? () => setDeleteDialog({ id: wo.id, woNumber: wo.woNumber })
+                              : undefined}
+                            extraActions={[
+                              {
+                                label: 'Start Maintenance Order',
+                                icon: Play,
+                                onClick: () => startMutation.mutate(wo.id),
+                                variant: 'success',
+                                hidden: wo.status !== 'ASSIGNED',
+                              },
+                              {
+                                label: 'Cancel Order',
+                                icon: Ban,
+                                onClick: () => { setCancelDialog({ wo }); setCancelReason(''); },
+                                variant: 'destructive',
+                                separator: true,
+                                hidden: !['OPEN', 'AWAITING_PARTS', 'ASSIGNED', 'ON_HOLD'].includes(wo.status),
+                              },
+                            ]}
+                          />
                         </TableCell>
                       </TableRow>
-                    )
+                    );
                   })
                 )}
               </TableBody>
             </Table>
           </div>
+          <TablePagination page={page} total={total} limit={20} onPageChange={setPage} isLoading={isLoading} />
         </div>
       </div>
 
-      <FormDialog
-        open={formOpen}
-        onClose={handleCloseForm}
-        title={editWO ? 'Edit Maintenance Work Order' : 'Create Maintenance Work Order'}
-        onSubmit={handleSubmit}
-        isSubmitting={createMutation.isPending || updateMutation.isPending}
-        isValid={isValid}
-      >
-        <div className="grid grid-cols-2 gap-4">
-          {!editWO && (
+      {/* ── Create / Edit Dialog ─────────────────────────────── */}
+      <Dialog open={formOpen} onOpenChange={o => !o && handleCloseForm()}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="px-6 pt-5 pb-4 border-b border-border/50 shrink-0">
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <Wrench size={14} className="text-brand-400" />
+              {editWO ? `Edit — ${editWO.woNumber}` : 'Create Maintenance Order'}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {editWO ? 'Update maintenance order details.' : 'Fill in the details and optionally pre-request spare parts from inventory.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+            {/* Core fields */}
             <div>
-              <Label>WO Number *</Label>
-              <Input value={form.woNumber} onChange={e => setForm(v => ({ ...v, woNumber: e.target.value }))} className="mt-1" placeholder="e.g. MWO-001" />
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Maintenance Order Details</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2 space-y-1.5">
+                  <Label className="text-xs">Title <span className="text-destructive">*</span></Label>
+                  <Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Brief description of the maintenance task" className="h-9" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Type <span className="text-destructive">*</span></Label>
+                  <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v }))}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(TYPE_LABELS).map(([k, v]) => (
+                        <SelectItem key={k} value={k}>{v}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Priority <span className="text-destructive">*</span></Label>
+                  <Select value={form.priority} onValueChange={v => setForm(f => ({ ...f, priority: v }))}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(PRIORITY_CONFIG).map(([k, v]) => (
+                        <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-2 space-y-1.5">
+                  <Label className="text-xs">Machine <span className="text-destructive">*</span></Label>
+                  <MachineTreePicker
+                    value={form.machineId}
+                    valueName={form.machineName}
+                    placeholder="Browse hierarchy to select machine…"
+                    onSelect={(id, _type, name) => setForm(f => ({ ...f, machineId: id, machineName: name }))}
+                    onClear={() => setForm(f => ({ ...f, machineId: '', machineName: '' }))}
+                  />
+                </div>
+                {/* Assigned To */}
+                <div className="col-span-2 space-y-1.5">
+                  <Label className="text-xs">Assign To Technician</Label>
+                  <Select value={form.assignedToId || '__none__'} onValueChange={v => setForm(f => ({ ...f, assignedToId: v === '__none__' ? '' : v }))}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Unassigned</SelectItem>
+                      {technicianOptions.map(u => (
+                        <SelectItem key={u.id} value={u.id}>{u.name} — {u.role}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Due Date</Label>
+                  <Input type="date" value={form.dueDate} onChange={e => setForm(f => ({ ...f, dueDate: e.target.value }))} className="h-9" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Estimated Hours</Label>
+                  <Input type="number" min="0" step="0.5" value={form.estimatedHours} onChange={e => setForm(f => ({ ...f, estimatedHours: e.target.value }))} className="h-9" placeholder="0.0" />
+                </div>
+                <div className="col-span-2 space-y-1.5">
+                  <Label className="text-xs">Description</Label>
+                  <textarea
+                    className="w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                    value={form.description}
+                    onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                    placeholder="Additional details..."
+                  />
+                </div>
+                <div className="col-span-2 space-y-1.5">
+                  <Label className="text-xs">Internal Notes</Label>
+                  <textarea
+                    className="w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                    value={form.notes}
+                    onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                    placeholder="Internal notes for this maintenance order..."
+                  />
+                </div>
+                {/* Production Work Order Link */}
+                <div className="col-span-2 space-y-1.5">
+                  <Label className="text-xs">Link to Production Order <span className="text-[10px] font-normal text-muted-foreground">(optional)</span></Label>
+                  <Select
+                    value={form.productionWOId || '__none__'}
+                    onValueChange={v => setForm(f => ({ ...f, productionWOId: v === '__none__' ? '' : v }))}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Not linked to production" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not linked to production</SelectItem>
+                      {prodWOOptions.map(wo => (
+                        <SelectItem key={wo.id} value={wo.id}>
+                          {wo.orderNumber} — {wo.status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* Spare Parts — only on create */}
+            {!editWO && (
+              <div>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Package size={10} className="text-brand-400" />
+                  Spare Parts Required
+                  <span className="font-normal text-muted-foreground/60 normal-case tracking-normal">(optional)</span>
+                </p>
+
+                {spareLines.length > 0 && (
+                  <div className="mb-2 border border-border/40 rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-muted/30 border-b border-border/30">
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">Part</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">In Stock</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">Qty Needed</th>
+                          <th className="px-3 py-2 w-8" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {spareLines.map(line => (
+                          <tr key={line.sparePartId} className="border-b border-border/20 last:border-0">
+                            <td className="px-3 py-2">
+                              <div className="font-medium">{line.name}</div>
+                              <div className="text-[10px] text-muted-foreground font-mono">{line.partNumber}</div>
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className={cn('font-medium', line.stockQty <= 0 ? 'text-red-400' : 'text-green-400')}>
+                                {line.stockQty}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              <Input
+                                type="number"
+                                min={1}
+                                value={line.quantityRequested}
+                                onChange={e => updateSpareQty(line.sparePartId, parseInt(e.target.value) || 1)}
+                                className={cn('h-7 w-20', line.quantityRequested > line.stockQty && 'border-amber-400/60')}
+                              />
+                              {line.quantityRequested > line.stockQty && (
+                                <div className="text-[10px] text-amber-400 mt-0.5">Exceeds stock</div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              <button onClick={() => removeSpareLine(line.sparePartId)} className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-destructive transition-colors">
+                                <X size={12} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Part picker */}
+                {showPartPicker ? (
+                  <div className="border border-border/50 rounded-lg p-2 space-y-2">
+                    <div className="relative">
+                      <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        autoFocus
+                        value={spareSearch}
+                        onChange={e => setSpareSearch(e.target.value)}
+                        placeholder="Search by part name or number…"
+                        className="h-8 pl-7 text-xs"
+                      />
+                    </div>
+                    <div className="max-h-40 overflow-y-auto space-y-0.5">
+                      {availableParts.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-3">
+                          {spareSearch ? 'No matching parts' : 'All parts already added'}
+                        </p>
+                      ) : (
+                        availableParts.slice(0, 20).map(p => (
+                          <button
+                            key={p.id}
+                            onClick={() => addSpareLine(p)}
+                            className="w-full flex items-center justify-between px-2.5 py-2 rounded-md hover:bg-muted/60 text-left transition-colors"
+                          >
+                            <div>
+                              <div className="text-xs font-medium">{p.name}</div>
+                              <div className="text-[10px] text-muted-foreground font-mono">{p.partNumber}</div>
+                            </div>
+                            <div className="text-right shrink-0 ml-4">
+                              <div className={cn('text-xs font-medium', p.stockQty <= 0 ? 'text-red-400' : 'text-green-400')}>
+                                {p.stockQty} in stock
+                              </div>
+                              {p.unitCost && <div className="text-[10px] text-muted-foreground">{p.unitCost} SAR/ea</div>}
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    <Button variant="outline" size="sm" className="h-7 text-xs w-full" onClick={() => setShowPartPicker(false)}>
+                      Done
+                    </Button>
+                  </div>
+                ) : (
+                  <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 w-full" onClick={() => setShowPartPicker(true)}>
+                    <Plus size={12} />Add Spare Part
+                  </Button>
+                )}
+
+                {spareLines.length > 0 && (
+                  <div className="flex items-center gap-1.5 mt-2 text-[11px] text-brand-400 bg-brand-400/5 border border-brand-400/20 rounded-md px-2.5 py-1.5">
+                    <Info size={10} />
+                    {spareLines.length} part{spareLines.length > 1 ? 's' : ''} requested — inventory team will confirm delivery before work starts
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="px-6 py-4 border-t border-border/50 shrink-0 gap-2">
+            <Button variant="outline" size="sm" onClick={handleCloseForm}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!isValid || createMutation.isPending || updateMutation.isPending}
+              onClick={handleSubmit}
+            >
+              {createMutation.isPending || updateMutation.isPending
+                ? (editWO ? 'Saving…' : 'Creating…')
+                : (editWO ? 'Save Changes' : 'Create Maintenance Order')
+              }
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── MO Detail Sheet ──────────────────────────────────── */}
+      <Sheet open={!!viewWO} onOpenChange={o => !o && setViewWO(null)}>
+        <SheetContent className="w-full max-w-xl flex flex-col">
+          <SheetHeader className="pr-6 shrink-0">
+            {viewWO && (
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <SheetTitle className="font-mono text-sm">{viewWO.woNumber}</SheetTitle>
+                  <SheetDescription className="mt-0.5 text-xs line-clamp-2">{viewWO.title}</SheetDescription>
+                </div>
+                <Badge
+                  variant={STATUS_COLORS[viewWO.status] ?? 'secondary'}
+                  className={cn(STATUS_EXTRA_CLS[viewWO.status])}
+                >
+                  {STATUS_LABELS[viewWO.status] ?? viewWO.status}
+                </Badge>
+              </div>
+            )}
+          </SheetHeader>
+
+          {viewWO && (
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+              {/* Details grid */}
+              <div>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Maintenance Order Details</p>
+                <div className="industrial-card rounded-lg px-3">
+                  {[
+                    { label: 'Type',        value: TYPE_LABELS[viewWO.type] ?? viewWO.type },
+                    { label: 'Priority',    value: PRIORITY_CONFIG[viewWO.priority]?.label ?? viewWO.priority },
+                    { label: 'Machine',     value: viewWO.asset },
+                    { label: 'Assigned To', value: viewWO.assignedTo },
+                    { label: 'Due Date',    value: viewWO.dueDate ? formatDate(viewWO.dueDate) : null },
+                    { label: 'Est. Hours',  value: viewWO.estimatedHours ? `${viewWO.estimatedHours}h` : null },
+                    { label: 'Actual Hours',value: viewWO.actualHours ? `${viewWO.actualHours}h` : null },
+                    { label: 'Total Cost',  value: viewWO.totalCost ? `${viewWO.totalCost} SAR` : null },
+                    { label: 'Created',     value: formatDate(viewWO.createdAt) },
+                    { label: 'Started',     value: viewWO.startedAt ? formatDate(viewWO.startedAt) : null },
+                    { label: 'Completed',   value: viewWO.completedAt ? formatDate(viewWO.completedAt) : null },
+                    { label: 'Production Order', value: viewWO.productionWO ? (
+                      <span className="font-mono text-xs font-semibold text-blue-400">{viewWO.productionWO.orderNumber}</span>
+                    ) : null },
+                  ].map(row => (
+                    <div key={row.label} className="flex items-start gap-2 py-2 border-b border-border/20 last:border-0">
+                      <span className="text-[11px] text-muted-foreground w-24 shrink-0 pt-0.5">{row.label}</span>
+                      <span className="text-xs font-medium flex-1">{row.value ?? <span className="text-muted-foreground">—</span>}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {viewWO.description && (
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Description</p>
+                  <div className="industrial-card rounded-lg px-3 py-2.5">
+                    <p className="text-xs text-muted-foreground">{viewWO.description}</p>
+                  </div>
+                </div>
+              )}
+
+              {viewWO.notes && (
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Internal Notes</p>
+                  <div className="industrial-card rounded-lg px-3 py-2.5">
+                    <p className="text-xs text-muted-foreground">{viewWO.notes}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Spare Parts Section ─────────────────────── */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <Package size={10} className="text-brand-400" />
+                    Spare Parts
+                    {woSpareParts.length > 0 && (
+                      <span className="normal-case tracking-normal font-normal">
+                        — {pendingParts.length > 0 ? (
+                          <span className="text-amber-400">{pendingParts.length} pending delivery</span>
+                        ) : allIssued ? (
+                          <span className="text-green-400">all issued</span>
+                        ) : (
+                          <span>{woSpareParts.length} parts</span>
+                        )}
+                      </span>
+                    )}
+                  </p>
+                </div>
+
+                {woSpareParts.length === 0 ? (
+                  <div className="industrial-card rounded-lg px-3 py-4 text-center">
+                    <Package size={20} className="mx-auto mb-1.5 text-muted-foreground/30" />
+                    <p className="text-xs text-muted-foreground">No spare parts requested for this maintenance order</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {woSpareParts.map(req => {
+                      const cfg = SPARE_STATUS_CONFIG[req.status] ?? SPARE_STATUS_CONFIG.PENDING;
+                      const Icon = cfg.icon;
+                      const remaining = req.quantityRequested - req.quantityIssued;
+                      return (
+                        <div key={req.id} className="industrial-card rounded-lg p-3 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-medium truncate">{req.sparePart.name}</div>
+                              <div className="text-[10px] text-muted-foreground font-mono">{req.sparePart.partNumber}</div>
+                              {req.sparePart.storageLocation && (
+                                <div className="text-[10px] text-muted-foreground mt-0.5">📍 {req.sparePart.storageLocation}</div>
+                              )}
+                            </div>
+                            <span className={cn('flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border shrink-0', cfg.cls)}>
+                              <Icon size={9} />{cfg.label}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2 text-[11px]">
+                            <div className="industrial-card rounded px-2 py-1 text-center">
+                              <div className="text-muted-foreground">Requested</div>
+                              <div className="font-bold tabular-nums">{req.quantityRequested}</div>
+                            </div>
+                            <div className="industrial-card rounded px-2 py-1 text-center">
+                              <div className="text-muted-foreground">Issued</div>
+                              <div className={cn('font-bold tabular-nums', req.quantityIssued > 0 ? 'text-green-400' : '')}>
+                                {req.quantityIssued}
+                              </div>
+                            </div>
+                            <div className="industrial-card rounded px-2 py-1 text-center">
+                              <div className="text-muted-foreground">In Stock</div>
+                              <div className={cn('font-bold tabular-nums', req.sparePart.stockQty <= 0 ? 'text-red-400' : 'text-green-400')}>
+                                {req.sparePart.stockQty}
+                              </div>
+                            </div>
+                          </div>
+
+                          {req.issuedBy && (
+                            <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                              <User size={9} />Issued by {req.issuedBy.name}
+                              {req.issuedAt && ` · ${formatDate(req.issuedAt)}`}
+                            </div>
+                          )}
+                          {req.notes && (
+                            <div className="text-[10px] text-muted-foreground italic">{req.notes}</div>
+                          )}
+
+                          {/* Actions */}
+                          {req.status === 'PENDING' && (
+                            <div className="flex gap-2 pt-1">
+                              <Button
+                                size="sm"
+                                className="h-7 text-xs flex-1 gap-1.5"
+                                onClick={() => {
+                                  setIssueDialog({ request: req });
+                                  setIssueQty(remaining.toString());
+                                  setIssueNotes('');
+                                }}
+                              >
+                                <PackageCheck size={11} />Issue Parts
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => cancelPartMutation.mutate({ woId: viewWO.id, requestId: req.id })}
+                                disabled={cancelPartMutation.isPending}
+                              >
+                                <X size={11} />Cancel
+                              </Button>
+                            </div>
+                          )}
+                          {req.status === 'PARTIAL' && (
+                            <Button
+                              size="sm"
+                              className="h-7 text-xs w-full gap-1.5"
+                              onClick={() => {
+                                setIssueDialog({ request: req });
+                                setIssueQty(remaining.toString());
+                                setIssueNotes('');
+                              }}
+                            >
+                              <PackageMinus size={11} />Issue Remaining ({remaining})
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           )}
-          <div className={editWO ? '' : ''}>
-            <Label>Priority *</Label>
-            <Select value={form.priority} onValueChange={v => setForm(f => ({ ...f, priority: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(p => <SelectItem key={p} value={p}>{p.charAt(0) + p.slice(1).toLowerCase()}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="col-span-2">
-            <Label>Title *</Label>
-            <Input value={form.title} onChange={e => setForm(v => ({ ...v, title: e.target.value }))} className="mt-1" placeholder="Brief description of the maintenance task" />
-          </div>
-          <div>
-            <Label>Type *</Label>
-            <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="CORRECTIVE">Corrective</SelectItem>
-                <SelectItem value="PREVENTIVE">Preventive</SelectItem>
-                <SelectItem value="PREDICTIVE">Predictive</SelectItem>
-                <SelectItem value="EMERGENCY">Emergency</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Machine</Label>
-            <Select value={form.machineId} onValueChange={v => setForm(f => ({ ...f, machineId: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select machine..." /></SelectTrigger>
-              <SelectContent className="max-h-52">
-                <SelectItem value="__none__">None</SelectItem>
-                {machines.map((m: any) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-medium">{m.name} <span className="font-mono text-muted-foreground">({m.code})</span></span>
-                      <span className="text-[10px] text-muted-foreground">{m.line?.name ?? m.area?.name ?? 'Unassigned'}</span>
-                    </div>
-                  </SelectItem>
+
+          {viewWO && (
+            <div className="px-6 py-3 border-t border-border/50 shrink-0 space-y-2">
+              {/* AWAITING_PARTS banner */}
+              {viewWO.status === 'AWAITING_PARTS' && (
+                <div className="flex items-center gap-2 rounded-lg px-3 py-2 bg-amber-400/10 border border-amber-400/30 text-amber-400 text-xs">
+                  <Package size={12} className="shrink-0" />
+                  <span>Work cannot start until all spare parts are approved and issued by Inventory.</span>
+                </div>
+              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Edit — not for COMPLETED/CANCELLED */}
+                {!['COMPLETED', 'CANCELLED'].includes(viewWO.status) && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
+                    onClick={() => { setViewWO(null); handleOpenEdit(viewWO); }}>
+                    Edit Order
+                  </Button>
+                )}
+                {/* Assign — for OPEN or AWAITING_PARTS */}
+                {['OPEN', 'AWAITING_PARTS'].includes(viewWO.status) && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 text-blue-400 border-blue-400/30 hover:bg-blue-400/10"
+                    onClick={() => { setAssignDialog({ wo: viewWO }); setAssignUserId(''); setAssignNotes(''); }}>
+                    <User size={11} />Assign Technician
+                  </Button>
+                )}
+                {/* Start — for ASSIGNED */}
+                {viewWO.status === 'ASSIGNED' && (
+                  <Button size="sm" className="h-7 text-xs gap-1.5"
+                    onClick={() => { startMutation.mutate(viewWO.id); }}>
+                    <Play size={11} />Start Work
+                  </Button>
+                )}
+                {/* Complete — for IN_PROGRESS */}
+                {viewWO.status === 'IN_PROGRESS' && (
+                  <Button size="sm" className="h-7 text-xs gap-1.5 bg-green-500 hover:bg-green-600 text-white"
+                    onClick={() => { setCompleteDialog({ wo: viewWO }); setCompleteForm({ actualHours: '', laborCost: '', partsCost: '', notes: '' }); }}>
+                    <CheckCircle size={11} />Complete Order
+                  </Button>
+                )}
+                {/* Hold — for IN_PROGRESS */}
+                {viewWO.status === 'IN_PROGRESS' && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 text-amber-400 border-amber-400/30 hover:bg-amber-400/10"
+                    onClick={() => { setHoldDialog({ wo: viewWO }); setHoldReason(''); }}>
+                    <Clock size={11} />Put On Hold
+                  </Button>
+                )}
+                {/* Resume — for ON_HOLD */}
+                {viewWO.status === 'ON_HOLD' && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
+                    onClick={() => { resumeMutation.mutate(viewWO.id); }}>
+                    <Play size={11} />Resume
+                  </Button>
+                )}
+                {/* Cancel — not for COMPLETED/CANCELLED */}
+                {!['COMPLETED', 'CANCELLED'].includes(viewWO.status) && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10 ml-auto"
+                    onClick={() => { setCancelDialog({ wo: viewWO }); setCancelReason(''); }}>
+                    <Ban size={11} />Cancel Order
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Issue Parts Dialog ───────────────────────────────── */}
+      {issueDialog && (
+        <Dialog open onOpenChange={o => !o && setIssueDialog(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-sm flex items-center gap-2">
+                <PackageCheck size={14} className="text-green-400" />
+                Issue Parts from Inventory
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                Confirm delivery of <span className="font-medium text-foreground">{issueDialog.request.sparePart.name}</span> to the maintenance team.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-1">
+              {/* Summary */}
+              <div className="industrial-card rounded-lg px-3 py-2 space-y-1.5">
+                {[
+                  { label: 'Part #',     value: issueDialog.request.sparePart.partNumber },
+                  { label: 'Requested',  value: `${issueDialog.request.quantityRequested} units` },
+                  { label: 'Previously Issued', value: `${issueDialog.request.quantityIssued} units` },
+                  { label: 'Available Stock', value: `${issueDialog.request.sparePart.stockQty} units` },
+                ].map(r => (
+                  <div key={r.label} className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">{r.label}</span>
+                    <span className="font-medium">{r.value}</span>
+                  </div>
                 ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Due Date</Label>
-            <Input type="date" value={form.dueDate} onChange={e => setForm(v => ({ ...v, dueDate: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
-            <Label>Estimated Hours</Label>
-            <Input type="number" min="0" step="0.5" value={form.estimatedHours} onChange={e => setForm(v => ({ ...v, estimatedHours: e.target.value }))} className="mt-1" placeholder="0.0" />
-          </div>
-          <div className="col-span-2">
-            <Label>Description</Label>
-            <Input value={form.description} onChange={e => setForm(v => ({ ...v, description: e.target.value }))} className="mt-1" placeholder="Additional details..." />
-          </div>
-        </div>
-      </FormDialog>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Quantity to Issue <span className="text-destructive">*</span></Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={issueDialog.request.sparePart.stockQty}
+                  value={issueQty}
+                  onChange={e => setIssueQty(e.target.value)}
+                  className={cn('h-9', parseInt(issueQty) > issueDialog.request.sparePart.stockQty && 'border-red-500/60')}
+                  autoFocus
+                />
+                {parseInt(issueQty) > issueDialog.request.sparePart.stockQty && (
+                  <p className="text-[11px] text-red-400">Exceeds available stock ({issueDialog.request.sparePart.stockQty})</p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Notes (optional)</Label>
+                <Input
+                  value={issueNotes}
+                  onChange={e => setIssueNotes(e.target.value)}
+                  placeholder="e.g. Issued from Bin A-12…"
+                  className="h-9"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2">
+              <Button variant="outline" size="sm" onClick={() => setIssueDialog(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                disabled={
+                  !issueQty ||
+                  parseInt(issueQty) <= 0 ||
+                  parseInt(issueQty) > issueDialog.request.sparePart.stockQty ||
+                  issueMutation.isPending
+                }
+                onClick={() => {
+                  if (!viewWO) return;
+                  issueMutation.mutate({
+                    woId: viewWO.id,
+                    requestId: issueDialog.request.id,
+                    dto: {
+                      quantityIssued: parseInt(issueQty),
+                      notes: issueNotes || undefined,
+                    },
+                  });
+                }}
+              >
+                <PackageCheck size={12} />
+                {issueMutation.isPending ? 'Issuing…' : 'Confirm Issue'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Assign Technician Dialog ─────────────────────────── */}
+      {assignDialog && (
+        <Dialog open onOpenChange={o => !o && setAssignDialog(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-sm flex items-center gap-2">
+                <User size={14} className="text-blue-400" />Assign Technician
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                Assigning <span className="font-mono font-medium text-foreground">{assignDialog.wo.woNumber}</span>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-1">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Technician <span className="text-destructive">*</span></Label>
+                <Select value={assignUserId || '__none__'} onValueChange={v => setAssignUserId(v === '__none__' ? '' : v)}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select technician…" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select technician…</SelectItem>
+                    {technicianOptions.map(u => (
+                      <SelectItem key={u.id} value={u.id}>{u.name} — {u.role}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Notes (optional)</Label>
+                <Input value={assignNotes} onChange={e => setAssignNotes(e.target.value)} placeholder="Instructions for technician…" className="h-9" />
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" size="sm" onClick={() => setAssignDialog(null)}>Cancel</Button>
+              <Button size="sm" disabled={!assignUserId || assignMutation.isPending}
+                onClick={() => assignMutation.mutate({ woId: assignDialog.wo.id, dto: { assignedToId: assignUserId, notes: assignNotes || undefined } })}>
+                {assignMutation.isPending ? 'Assigning…' : 'Assign'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Complete Order Dialog ────────────────────────────── */}
+      {completeDialog && (
+        <Dialog open onOpenChange={o => !o && setCompleteDialog(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-sm flex items-center gap-2">
+                <CheckCircle size={14} className="text-green-400" />Complete Maintenance Order
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                Completing <span className="font-mono font-medium text-foreground">{completeDialog.wo.woNumber}</span>. Machine will return to IDLE.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-1">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Actual Hours Worked <span className="text-destructive">*</span></Label>
+                <Input type="number" min="0" step="0.5" value={completeForm.actualHours}
+                  onChange={e => setCompleteForm(f => ({ ...f, actualHours: e.target.value }))} placeholder="0.0" className="h-9" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Labor Cost (SAR)</Label>
+                  <Input type="number" min="0" step="0.01" value={completeForm.laborCost}
+                    onChange={e => setCompleteForm(f => ({ ...f, laborCost: e.target.value }))} placeholder="0.00" className="h-9" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Parts Cost (SAR)</Label>
+                  <Input type="number" min="0" step="0.01" value={completeForm.partsCost}
+                    onChange={e => setCompleteForm(f => ({ ...f, partsCost: e.target.value }))} placeholder="0.00" className="h-9" />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Completion Notes</Label>
+                <Input value={completeForm.notes} onChange={e => setCompleteForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="What was done, root cause, etc." className="h-9" />
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" size="sm" onClick={() => setCompleteDialog(null)}>Cancel</Button>
+              <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white gap-1.5"
+                disabled={!completeForm.actualHours || completeMutation.isPending}
+                onClick={() => completeMutation.mutate({
+                  woId: completeDialog.wo.id,
+                  dto: {
+                    actualHours: parseFloat(completeForm.actualHours),
+                    laborCost: completeForm.laborCost ? parseFloat(completeForm.laborCost) : undefined,
+                    partsCost: completeForm.partsCost ? parseFloat(completeForm.partsCost) : undefined,
+                    notes: completeForm.notes || undefined,
+                  },
+                })}>
+                <CheckCircle size={12} />{completeMutation.isPending ? 'Completing…' : 'Mark Complete'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Hold Dialog ──────────────────────────────────────── */}
+      {holdDialog && (
+        <Dialog open onOpenChange={o => !o && setHoldDialog(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-sm flex items-center gap-2">
+                <Clock size={14} className="text-amber-400" />Put On Hold
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                Pausing <span className="font-mono font-medium text-foreground">{holdDialog.wo.woNumber}</span>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-1">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Reason (optional)</Label>
+                <Input value={holdReason} onChange={e => setHoldReason(e.target.value)}
+                  placeholder="e.g. Waiting for parts, shift end…" className="h-9" />
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" size="sm" onClick={() => setHoldDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="outline" className="gap-1.5 text-amber-400 border-amber-400/30 hover:bg-amber-400/10"
+                disabled={holdMutation.isPending}
+                onClick={() => holdMutation.mutate({ woId: holdDialog.wo.id, dto: { reason: holdReason || undefined } })}>
+                <Clock size={12} />{holdMutation.isPending ? 'Holding…' : 'Confirm Hold'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Cancel Dialog ────────────────────────────────────── */}
+      {cancelDialog && (
+        <Dialog open onOpenChange={o => !o && setCancelDialog(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-sm flex items-center gap-2 text-destructive">
+                <Ban size={14} />Cancel Maintenance Order
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                Cancelling <span className="font-mono font-medium text-foreground">{cancelDialog.wo.woNumber}</span>. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-1">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Reason <span className="text-destructive">*</span></Label>
+                <Input value={cancelReason} onChange={e => setCancelReason(e.target.value)}
+                  placeholder="Reason for cancellation (min 5 chars)" className="h-9" />
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" size="sm" onClick={() => setCancelDialog(null)}>Back</Button>
+              <Button size="sm" variant="destructive" className="gap-1.5"
+                disabled={cancelReason.trim().length < 5 || cancelMutation.isPending}
+                onClick={() => cancelMutation.mutate({ woId: cancelDialog.wo.id, reason: cancelReason.trim() })}>
+                <Ban size={12} />{cancelMutation.isPending ? 'Cancelling…' : 'Confirm Cancel'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <DeleteDialog
         open={!!deleteDialog}
         onClose={() => setDeleteDialog(null)}
         onConfirm={() => deleteDialog && deleteMutation.mutate(deleteDialog.id)}
-        title={`Delete work order ${deleteDialog?.woNumber}?`}
-        description="This will permanently delete this maintenance work order."
+        title={`Delete maintenance order ${deleteDialog?.woNumber}?`}
+        description="This will permanently delete this maintenance order."
         isDeleting={deleteMutation.isPending}
       />
     </div>
-  )
+  );
 }
