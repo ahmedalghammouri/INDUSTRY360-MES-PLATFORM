@@ -1,4 +1,4 @@
-# INDUSTRY360 MES — Features Documentation
+# STAR-MES — Features Documentation
 
 All features implemented in the platform as of May 2026.
 
@@ -122,7 +122,7 @@ The entry point of the platform — a full-screen, dark-themed industrial landin
 - Fixed left sidebar, always visible inside the platform
 - **Collapsible** — toggle button collapses to icon-only mode (64px) or expands to full (260px)
 - Smooth Framer Motion width animation
-- Logo section: INDUSTRY360 brand mark + "MES Platform" subtitle
+- Logo section: STAR-MES brand mark + "MES Platform" subtitle
 - **Navigation groups** with expand/collapse sub-menus (chevron animation):
   - Dashboard
   - Production (6 sub-items)
@@ -424,8 +424,8 @@ The entry point of the platform — a full-screen, dark-themed industrial landin
 | `mes-influxdb` | influxdb:2.7 | 8086 | Time-series IoT data |
 | `mes-mqtt-broker` | eclipse-mosquitto:2 | 1883, 9002 | MQTT broker |
 | `mes-minio` | minio/minio | 9000, 9001 | Object storage |
-| `mes-api` | industry360-mes-api | 3001 | NestJS backend |
-| `mes-web` | industry360-mes-web | 3000→4000 | Next.js frontend |
+| `mes-api` | star-mes-api | 3001 | NestJS backend |
+| `mes-web` | star-mes-web | 3000→4000 | Next.js frontend |
 | `mes-nginx` | nginx:alpine | 8080, 8443 | Reverse proxy |
 | `mes-prometheus` | prom/prometheus | 9090 | Metrics collection |
 | `mes-grafana` | grafana/grafana | 3003 | Metrics dashboards |

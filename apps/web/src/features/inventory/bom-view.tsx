@@ -5,8 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Search, ChevronDown, ChevronRight, CheckCircle2,
-  Package, Layers, Edit2, Trash2, X, AlertCircle,
-  GitBranch, FlaskConical, FileCheck2, Info,
+  Trash2, X, GitBranch, FlaskConical, FileCheck2, Info,
+  Edit2, AlertTriangle, Package, Layers,
 } from 'lucide-react';
 import { api } from '@/services/api.client';
 import { Button } from '@/components/ui/button';
@@ -47,6 +47,13 @@ interface RawMaterial {
   unitCost?: number;
 }
 
+interface MaterialLotSummary {
+  rawMaterialId: string;
+  activeLots: number;
+  totalRemaining: number;
+  unit: string;
+}
+
 const UNITS = ['KG', 'G', 'L', 'ML', 'PCS', 'BOX', 'ROLL', 'M', 'CM', 'BAG', 'DRUM', 'PALLET'];
 
 export function BOMView() {
@@ -56,6 +63,7 @@ export function BOMView() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editBOM, setEditBOM] = useState<BOM | null>(null);
+  const [deleteBOMTarget, setDeleteBOMTarget] = useState<BOM | null>(null);
   const [addItemBOM, setAddItemBOM] = useState<BOM | null>(null);
 
   const [newBOM, setNewBOM] = useState({ skuId: '', version: '1.0', notes: '' });
@@ -64,6 +72,7 @@ export function BOMView() {
   }>>([{ rawMaterialId: '', quantityPer: '', unit: 'KG', scrapFactor: '0', isOptional: false, notes: '' }]);
 
   const [addItem, setAddItem] = useState({ rawMaterialId: '', quantityPer: '', unit: 'KG', scrapFactor: '0', notes: '' });
+  const [editForm, setEditForm] = useState({ version: '', notes: '' });
 
   const { data: bomData, isLoading } = useQuery({
     queryKey: ['bom', page],
@@ -82,10 +91,26 @@ export function BOMView() {
     staleTime: 60_000,
   });
 
+  const { data: materialLotsData } = useQuery({
+    queryKey: ['material-lots-summary'],
+    queryFn: () => api.get('/inventory/materials?limit=500&status=ACTIVE'),
+    staleTime: 30_000,
+  });
+
   const boms: BOM[] = (bomData as any)?.data ?? [];
   const total: number = (bomData as any)?.total ?? 0;
   const skus: any[] = (skusData as any)?.data ?? [];
   const rawMaterials: RawMaterial[] = (rawMatsData as any)?.data ?? [];
+
+  const rawLots: any[] = (materialLotsData as any)?.data ?? [];
+  const lotsByMaterial: Record<string, MaterialLotSummary> = rawLots.reduce((acc, lot) => {
+    const key = lot.rawMaterialId;
+    if (!key) return acc;
+    if (!acc[key]) acc[key] = { rawMaterialId: key, activeLots: 0, totalRemaining: 0, unit: lot.unit };
+    acc[key].activeLots += 1;
+    acc[key].totalRemaining += lot.remainingQty ?? 0;
+    return acc;
+  }, {} as Record<string, MaterialLotSummary>);
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/inventory/bom', dto),
@@ -94,6 +119,22 @@ export function BOMView() {
       setCreateOpen(false);
       setNewBOM({ skuId: '', version: '1.0', notes: '' });
       setNewItems([{ rawMaterialId: '', quantityPer: '', unit: 'KG', scrapFactor: '0', isOptional: false, notes: '' }]);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: any }) => api.patch(`/inventory/bom/${id}`, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bom'] });
+      setEditBOM(null);
+    },
+  });
+
+  const deleteBOMMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/inventory/bom/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bom'] });
+      setDeleteBOMTarget(null);
     },
   });
 
@@ -148,6 +189,11 @@ export function BOMView() {
     });
   };
 
+  const handleOpenEdit = (bom: BOM) => {
+    setEditForm({ version: bom.version, notes: bom.notes ?? '' });
+    setEditBOM(bom);
+  };
+
   const calcBOMCost = (bom: BOM) =>
     bom.items.reduce((sum, item) => {
       const cost = item.rawMaterial.unitCost ?? 0;
@@ -177,6 +223,7 @@ export function BOMView() {
         <span>
           A <strong className="text-foreground">BOM</strong> links a finished product (SKU) to the raw materials, packaging and consumables needed to make one unit.
           The <strong className="text-foreground">scrap factor</strong> adds a buffer (e.g. 0.05 = 5% extra). Approved BOMs are used by production to auto-calculate material requirements.
+          Material <strong className="text-foreground">lots</strong> (ISA-95 MaterialLot) show available stock per raw material.
         </span>
       </div>
 
@@ -209,7 +256,10 @@ export function BOMView() {
             onApprove={() => approveMutation.mutate(bom.id)}
             onAddItem={() => setAddItemBOM(bom)}
             onDeleteItem={(itemId) => deleteItemMutation.mutate({ bomId: bom.id, itemId })}
+            onEdit={() => handleOpenEdit(bom)}
+            onDelete={() => setDeleteBOMTarget(bom)}
             bomCost={calcBOMCost(bom)}
+            lotsByMaterial={lotsByMaterial}
           />
         ))}
       </div>
@@ -233,7 +283,6 @@ export function BOMView() {
                 </Button>
               </div>
               <div className="p-5 flex flex-col gap-5">
-                {/* BOM header fields */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
                     <Label>Product (SKU) *</Label>
@@ -259,7 +308,6 @@ export function BOMView() {
                   </div>
                 </div>
 
-                {/* BOM items */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <Label>Raw Material Components *</Label>
@@ -299,13 +347,10 @@ export function BOMView() {
                             </td>
                             <td className="p-1.5">
                               <Input
-                                type="number"
-                                min="0"
-                                step="0.001"
+                                type="number" min="0" step="0.001"
                                 value={item.quantityPer}
                                 onChange={e => setNewItems(prev => prev.map((it, idx) => idx === i ? { ...it, quantityPer: e.target.value } : it))}
-                                className="h-7 text-xs"
-                                placeholder="0.000"
+                                className="h-7 text-xs" placeholder="0.000"
                               />
                             </td>
                             <td className="p-1.5">
@@ -313,9 +358,7 @@ export function BOMView() {
                                 value={item.unit}
                                 onValueChange={v => setNewItems(prev => prev.map((it, idx) => idx === i ? { ...it, unit: v } : it))}
                               >
-                                <SelectTrigger className="h-7 text-xs">
-                                  <SelectValue />
-                                </SelectTrigger>
+                                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                   {UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
                                 </SelectContent>
@@ -323,24 +366,15 @@ export function BOMView() {
                             </td>
                             <td className="p-1.5">
                               <Input
-                                type="number"
-                                min="0"
-                                max="1"
-                                step="0.01"
+                                type="number" min="0" max="1" step="0.01"
                                 value={item.scrapFactor}
                                 onChange={e => setNewItems(prev => prev.map((it, idx) => idx === i ? { ...it, scrapFactor: e.target.value } : it))}
-                                className="h-7 text-xs"
-                                placeholder="0.05"
+                                className="h-7 text-xs" placeholder="0.05"
                               />
                             </td>
                             <td className="p-1.5">
                               {newItems.length > 1 && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 text-destructive"
-                                  onClick={() => removeItemRow(i)}
-                                >
+                                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => removeItemRow(i)}>
                                   <Trash2 size={11} />
                                 </Button>
                               )}
@@ -364,12 +398,108 @@ export function BOMView() {
               </div>
               <div className="p-5 border-t flex items-center justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
+                <Button size="sm" onClick={handleCreate} disabled={createMutation.isPending || !newBOM.skuId}>
+                  {createMutation.isPending ? 'Creating...' : 'Create BOM'}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit BOM Dialog */}
+      <AnimatePresence>
+        {editBOM && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-background border rounded-xl shadow-2xl w-full max-w-md"
+            >
+              <div className="p-5 border-b flex items-center justify-between">
+                <div>
+                  <h2 className="font-semibold text-sm">Edit BOM</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">{editBOM.sku.name}</p>
+                </div>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditBOM(null)}>
+                  <X size={14} />
+                </Button>
+              </div>
+              <div className="p-5 flex flex-col gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label>Version</Label>
+                  <Input
+                    value={editForm.version}
+                    onChange={e => setEditForm(p => ({ ...p, version: e.target.value }))}
+                    placeholder="1.0"
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Notes</Label>
+                  <Input
+                    value={editForm.notes}
+                    onChange={e => setEditForm(p => ({ ...p, notes: e.target.value }))}
+                    placeholder="Engineering change notes..."
+                    className="h-8 text-sm"
+                  />
+                </div>
+                {editBOM.approvedAt && (
+                  <p className="text-xs text-amber-500 flex items-center gap-1.5">
+                    <AlertTriangle size={12} />
+                    This BOM is approved. Only notes can be changed without creating a new version.
+                  </p>
+                )}
+              </div>
+              <div className="p-5 border-t flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setEditBOM(null)}>Cancel</Button>
                 <Button
                   size="sm"
-                  onClick={handleCreate}
-                  disabled={createMutation.isPending || !newBOM.skuId}
+                  disabled={updateMutation.isPending || !editForm.version}
+                  onClick={() => updateMutation.mutate({ id: editBOM.id, dto: { version: editForm.version, notes: editForm.notes || undefined } })}
                 >
-                  {createMutation.isPending ? 'Creating...' : 'Create BOM'}
+                  {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete BOM Confirmation */}
+      <AnimatePresence>
+        {deleteBOMTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-background border rounded-xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                  <AlertTriangle size={18} className="text-destructive" />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-sm">Delete BOM?</h2>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    This will permanently delete the BOM for <strong>{deleteBOMTarget.sku.name}</strong> (v{deleteBOMTarget.version}) and all its {deleteBOMTarget.items.length} material lines.
+                  </p>
+                  {deleteBOMTarget.approvedAt && (
+                    <p className="text-xs text-destructive mt-2 font-medium">Approved BOMs cannot be deleted.</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setDeleteBOMTarget(null)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={deleteBOMMutation.isPending || !!deleteBOMTarget.approvedAt}
+                  onClick={() => deleteBOMMutation.mutate(deleteBOMTarget.id)}
+                >
+                  {deleteBOMMutation.isPending ? 'Deleting...' : 'Delete BOM'}
                 </Button>
               </div>
             </motion.div>
@@ -403,9 +533,15 @@ export function BOMView() {
                     <SelectContent>
                       {rawMaterials
                         .filter(m => !addItemBOM.items.some(i => i.rawMaterialId === m.id))
-                        .map(m => (
-                          <SelectItem key={m.id} value={m.id}>{m.code} — {m.name}</SelectItem>
-                        ))}
+                        .map(m => {
+                          const lots = lotsByMaterial[m.id];
+                          return (
+                            <SelectItem key={m.id} value={m.id}>
+                              <span>{m.code} — {m.name}</span>
+                              {lots && <span className="ml-2 text-[10px] text-green-400">({lots.activeLots} lots, {lots.totalRemaining.toFixed(0)} {lots.unit})</span>}
+                            </SelectItem>
+                          );
+                        })}
                     </SelectContent>
                   </Select>
                 </div>
@@ -459,7 +595,7 @@ export function BOMView() {
 }
 
 function BOMCard({
-  bom, isExpanded, onToggle, onApprove, onAddItem, onDeleteItem, bomCost,
+  bom, isExpanded, onToggle, onApprove, onAddItem, onDeleteItem, onEdit, onDelete, bomCost, lotsByMaterial,
 }: {
   bom: BOM;
   isExpanded: boolean;
@@ -467,11 +603,13 @@ function BOMCard({
   onApprove: () => void;
   onAddItem: () => void;
   onDeleteItem: (itemId: string) => void;
+  onEdit: () => void;
+  onDelete: () => void;
   bomCost: number;
+  lotsByMaterial: Record<string, MaterialLotSummary>;
 }) {
   return (
     <div className="border rounded-xl overflow-hidden bg-card">
-      {/* Header row */}
       <div
         className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
         onClick={onToggle}
@@ -498,32 +636,31 @@ function BOMCard({
             {bom.items.length} component{bom.items.length !== 1 ? 's' : ''} · Est. cost: {bomCost > 0 ? `SAR ${bomCost.toFixed(3)} / unit` : 'N/A'}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           {!bom.approvedAt && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={e => { e.stopPropagation(); onApprove(); }}
-            >
-              <FileCheck2 size={12} className="mr-1" />
-              Approve
+            <Button size="sm" variant="outline" className="h-7 text-xs"
+              onClick={e => { e.stopPropagation(); onApprove(); }}>
+              <FileCheck2 size={12} className="mr-1" />Approve
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            onClick={e => { e.stopPropagation(); onAddItem(); }}
-          >
-            <Plus size={12} className="mr-1" />
-            Add Item
+          <Button size="sm" variant="ghost" className="h-7 text-xs"
+            onClick={e => { e.stopPropagation(); onAddItem(); }}>
+            <Plus size={12} className="mr-1" />Add Item
           </Button>
-          {isExpanded ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+            onClick={e => { e.stopPropagation(); onEdit(); }}>
+            <Edit2 size={13} className="text-muted-foreground" />
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+            onClick={e => { e.stopPropagation(); onDelete(); }}>
+            <Trash2 size={13} className="text-destructive/70 hover:text-destructive" />
+          </Button>
+          {isExpanded
+            ? <ChevronDown size={14} className="text-muted-foreground ml-1" />
+            : <ChevronRight size={14} className="text-muted-foreground ml-1" />}
         </div>
       </div>
 
-      {/* Expanded items */}
       <AnimatePresence>
         {isExpanded && (
           <motion.div
@@ -548,6 +685,7 @@ function BOMCard({
                       <th className="text-right p-2.5 font-medium text-muted-foreground">Total Qty</th>
                       <th className="text-right p-2.5 font-medium text-muted-foreground">Unit Cost</th>
                       <th className="text-right p-2.5 font-medium text-muted-foreground">Line Cost</th>
+                      <th className="text-center p-2.5 font-medium text-muted-foreground">Lots (ISA-95)</th>
                       <th className="w-8 p-2.5" />
                     </tr>
                   </thead>
@@ -555,6 +693,8 @@ function BOMCard({
                     {bom.items.map(item => {
                       const totalQty = item.quantityPer * (1 + item.scrapFactor);
                       const lineCost = totalQty * (item.rawMaterial.unitCost ?? 0);
+                      const lots = lotsByMaterial[item.rawMaterialId];
+                      const hasEnough = lots && lots.totalRemaining >= totalQty;
                       return (
                         <tr key={item.id} className="border-t hover:bg-muted/20">
                           <td className="p-2.5 font-medium">{item.rawMaterial.name}</td>
@@ -574,10 +714,24 @@ function BOMCard({
                           <td className="p-2.5 text-right tabular-nums">
                             {lineCost > 0 ? `SAR ${lineCost.toFixed(3)}` : '—'}
                           </td>
+                          <td className="p-2.5 text-center">
+                            {lots ? (
+                              <span className={cn(
+                                'inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full',
+                                hasEnough
+                                  ? 'bg-green-500/10 text-green-400'
+                                  : 'bg-amber-500/10 text-amber-400',
+                              )}>
+                                <Package size={9} />
+                                {lots.activeLots} lot{lots.activeLots !== 1 ? 's' : ''} · {lots.totalRemaining.toFixed(0)} {lots.unit}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground/50">No lots</span>
+                            )}
+                          </td>
                           <td className="p-2.5">
                             <Button
-                              variant="ghost"
-                              size="icon"
+                              variant="ghost" size="icon"
                               className="h-6 w-6 text-destructive opacity-50 hover:opacity-100"
                               onClick={() => onDeleteItem(item.id)}
                             >
@@ -597,7 +751,7 @@ function BOMCard({
                         <td className="p-2.5 text-right font-bold text-sm">
                           SAR {bomCost.toFixed(3)}
                         </td>
-                        <td />
+                        <td colSpan={2} />
                       </tr>
                     </tfoot>
                   )}
@@ -609,4 +763,11 @@ function BOMCard({
       </AnimatePresence>
     </div>
   );
+}
+
+interface MaterialLotSummary {
+  rawMaterialId: string;
+  activeLots: number;
+  totalRemaining: number;
+  unit: string;
 }

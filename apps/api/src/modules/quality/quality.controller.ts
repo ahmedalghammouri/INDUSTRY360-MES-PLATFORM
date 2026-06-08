@@ -18,6 +18,10 @@ import {
   UpdateCAPADto,
   AddCAPAActionDto,
   VerifyCAPADto,
+  CreateQualityPlanDto,
+  UpdateQualityPlanDto,
+  CreateQualityParameterDto,
+  UpdateQualityParameterDto,
 } from './dto/quality.dto';
 
 interface RequestUser {
@@ -339,6 +343,129 @@ export class QualityController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.qualityService.deleteInspection(user.factoryId, id);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // QUALITY PLANS (ISA-95 QualityTest definitions)
+  // ────────────────────────────────────────────────────────────
+
+  @Get('plans')
+  @ApiOperation({ summary: 'List quality plans with parameters (ISA-95 QualityTestSpecification)' })
+  @ApiQuery({ name: 'skuId', required: false })
+  @ApiQuery({ name: 'type', required: false })
+  @ApiQuery({ name: 'isActive', required: false })
+  async findQualityPlans(
+    @CurrentUser() user: RequestUser,
+    @Query('skuId') skuId?: string,
+    @Query('type') type?: string,
+    @Query('isActive') isActive?: string,
+  ) {
+    const activeFilter = isActive === 'false' ? false : isActive === 'true' ? true : undefined;
+    return this.qualityService.findQualityPlans(user.factoryId, { skuId, type, isActive: activeFilter });
+  }
+
+  @Get('plans/:id')
+  @ApiOperation({ summary: 'Get quality plan by ID with parameters' })
+  async getQualityPlanById(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.getQualityPlanById(user.factoryId, id);
+  }
+
+  @Post('plans')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_PLAN_CREATE')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a quality plan (ISA-95 QualityTestSpecification)' })
+  async createQualityPlan(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateQualityPlanDto,
+  ) {
+    if (!user.factoryId) throw new Error('Factory context required');
+    return this.qualityService.createQualityPlan(user.factoryId, dto);
+  }
+
+  @Patch('plans/:id')
+  @RequirePermissions('quality:write')
+  @AuditLog('QUALITY_PLAN_UPDATE')
+  @ApiOperation({ summary: 'Update a quality plan' })
+  async updateQualityPlan(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateQualityPlanDto,
+  ) {
+    return this.qualityService.updateQualityPlan(user.factoryId, id, dto);
+  }
+
+  @Delete('plans/:id')
+  @RequirePermissions('quality:write')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a quality plan (only if no inspection records)' })
+  async deleteQualityPlan(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.deleteQualityPlan(user.factoryId, id);
+  }
+
+  @Patch('plans/:id/approve')
+  @RequirePermissions('quality:approve')
+  @AuditLog('QUALITY_PLAN_APPROVE')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Approve a quality plan' })
+  async approveQualityPlan(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.qualityService.approveQualityPlan(user.factoryId, id, user.id);
+  }
+
+  // ── Parameters ──────────────────────────────────────────────
+
+  @Post('plans/:planId/parameters')
+  @RequirePermissions('quality:write')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Add a check-point parameter to a quality plan' })
+  async addParameter(
+    @CurrentUser() user: RequestUser,
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Body() dto: CreateQualityParameterDto,
+  ) {
+    return this.qualityService.addParameter(user.factoryId, planId, dto);
+  }
+
+  @Patch('plans/:planId/parameters/:paramId')
+  @RequirePermissions('quality:write')
+  @ApiOperation({ summary: 'Update a quality plan parameter' })
+  async updateParameter(
+    @CurrentUser() user: RequestUser,
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Param('paramId', ParseUUIDPipe) paramId: string,
+    @Body() dto: UpdateQualityParameterDto,
+  ) {
+    return this.qualityService.updateParameter(user.factoryId, planId, paramId, dto);
+  }
+
+  @Delete('plans/:planId/parameters/:paramId')
+  @RequirePermissions('quality:write')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a quality plan parameter' })
+  async deleteParameter(
+    @CurrentUser() user: RequestUser,
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Param('paramId', ParseUUIDPipe) paramId: string,
+  ) {
+    return this.qualityService.deleteParameter(user.factoryId, planId, paramId);
+  }
+
+  @Get('work-orders/:workOrderId/inspections')
+  @ApiOperation({ summary: 'Get all inspections linked to a work order (ISA-95 data flow)' })
+  async getInspectionsByWorkOrder(
+    @CurrentUser() user: RequestUser,
+    @Param('workOrderId', ParseUUIDPipe) workOrderId: string,
+  ) {
+    return this.qualityService.getInspectionsByWorkOrder(user.factoryId, workOrderId);
   }
 
   // ────────────────────────────────────────────────────────────

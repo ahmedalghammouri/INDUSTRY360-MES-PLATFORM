@@ -35,10 +35,13 @@ export function getMachineStateStyle(state: string): { color: string; bg: string
 }
 
 // Format numbers
-export function formatNumber(value: number, decimals = 1): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return value.toFixed(decimals);
+export function formatNumber(value: number | string | null | undefined, decimals = 1): string {
+  if (value == null) return '—';
+  const n = Number(value);
+  if (!isFinite(n)) return '—';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toFixed(decimals);
 }
 
 export function formatPercent(value: number | null | undefined, decimals = 1): string {

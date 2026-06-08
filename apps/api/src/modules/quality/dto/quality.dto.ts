@@ -404,3 +404,204 @@ export class VerifyCAPADto {
   @MaxLength(2000)
   effectiveness!: string;
 }
+
+// ─── QUALITY PLANS (ISA-95 QualityTestSpecification) ─────────
+
+export class CreateQualityPlanDto {
+  @ApiProperty({ example: 'QP-INSP-001' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(50)
+  code!: string;
+
+  @ApiProperty({ example: 'Incoming Raw Material Inspection' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(255)
+  name!: string;
+
+  @ApiProperty({ example: 'INCOMING', enum: ['INCOMING', 'IN_PROCESS', 'FINAL'] })
+  @IsString()
+  type!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  skuId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  machineId?: string;
+
+  @ApiPropertyOptional({ example: 'EVERY_BATCH', enum: ['EVERY_BATCH', 'HOURLY', 'SHIFT', 'DAILY', 'WEEKLY'] })
+  @IsOptional()
+  @IsString()
+  samplingFrequency?: string;
+
+  @ApiPropertyOptional({ example: 5 })
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  samplingQty?: number;
+
+  @ApiPropertyOptional({ example: '1.0' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  version?: string;
+}
+
+export class UpdateQualityPlanDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  name?: string;
+
+  @ApiPropertyOptional({ enum: ['INCOMING', 'IN_PROCESS', 'FINAL'] })
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  skuId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  machineId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  samplingFrequency?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  samplingQty?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  version?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  isActive?: boolean;
+}
+
+// ─── QUALITY PARAMETERS (ISA-95 QualityTestSpecificationProperty) ─
+
+export class CreateQualityParameterDto {
+  @ApiProperty({ example: 'Fill Weight' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  name!: string;
+
+  @ApiPropertyOptional({ example: 'g' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  unit?: string;
+
+  @ApiPropertyOptional({ example: 500 })
+  @IsOptional()
+  @IsNumber()
+  nominalValue?: number;
+
+  @ApiPropertyOptional({ example: 510, description: 'Upper Control Limit (SPC)' })
+  @IsOptional()
+  @IsNumber()
+  ucl?: number;
+
+  @ApiPropertyOptional({ example: 490, description: 'Lower Control Limit (SPC)' })
+  @IsOptional()
+  @IsNumber()
+  lcl?: number;
+
+  @ApiPropertyOptional({ example: 515, description: 'Upper Specification Limit (product spec)' })
+  @IsOptional()
+  @IsNumber()
+  usl?: number;
+
+  @ApiPropertyOptional({ example: 485, description: 'Lower Specification Limit (product spec)' })
+  @IsOptional()
+  @IsNumber()
+  lsl?: number;
+
+  @ApiPropertyOptional({ example: 'Weigh on calibrated scale' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  checkMethod?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  isKPI?: boolean;
+
+  @ApiPropertyOptional({ example: 0 })
+  @IsOptional()
+  @IsInt()
+  sortOrder?: number;
+}
+
+export class UpdateQualityParameterDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  unit?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  nominalValue?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  ucl?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  lcl?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  usl?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  lsl?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  checkMethod?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  isKPI?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  sortOrder?: number;
+}

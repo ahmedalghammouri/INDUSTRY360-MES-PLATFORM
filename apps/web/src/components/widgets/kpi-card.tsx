@@ -7,7 +7,7 @@ import { cn, getOEEColor, formatNumber, formatPercent } from '@/lib/utils';
 
 interface KPICardProps {
   title: string;
-  value: number;
+  value: number | string | null | undefined;
   unit?: string;
   trend?: number;
   target?: number;
@@ -30,15 +30,16 @@ export function KPICard({
   subtitle,
   className,
 }: KPICardProps) {
+  const numValue = Number(value ?? 0);
   const valueColor =
     colorMode === 'oee'
-      ? getOEEColor(value)
-      : colorMode === 'alarm' && value > 0
+      ? getOEEColor(numValue)
+      : colorMode === 'alarm' && numValue > 0
         ? 'text-danger-400'
         : 'text-foreground';
 
-  const atTarget = target !== undefined && value >= target;
-  const progressPct = target ? Math.min((value / target) * 100, 100) : null;
+  const atTarget = target !== undefined && numValue >= target;
+  const progressPct = target ? Math.min((numValue / target) * 100, 100) : null;
 
   const trendIcon =
     trend === undefined || trend === 0 ? (

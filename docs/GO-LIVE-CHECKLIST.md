@@ -1,4 +1,4 @@
-# INDUSTRY360 MES Platform — Go-Live Checklist & Step-by-Step Guide
+# STAR-MES Platform — Go-Live Checklist & Step-by-Step Guide
 **Client:** NCC (National Care Company) — SIDCO PoC Factory (Dammam)  
 **Platform Version:** 1.0.0  
 **Prepared:** 2026-06-06  
@@ -128,7 +128,7 @@ SMTP_HOST=
 SMTP_PORT=587
 SMTP_USER=
 SMTP_PASSWORD=
-SMTP_FROM=noreply@industry360.sa
+SMTP_FROM=noreply@star-mes.sa
 ```
 
 ---
@@ -186,11 +186,11 @@ Verify the following values are correctly seeded in `MachineCycleTime` table:
 
 🔴 **Default/weak secrets in docker-compose.yml must be replaced before production**
 
-- [ ] Replace `JWT_SECRET: industry360-mes-jwt-secret-key-change-in-production-32chars` with a 64-char random secret
-- [ ] Replace `JWT_REFRESH_SECRET: industry360-mes-refresh-secret-key-change-in-prod-32ch` with a 64-char random secret
+- [ ] Replace `JWT_SECRET: star-mes-jwt-secret-key-change-in-production-32chars` with a 64-char random secret
+- [ ] Replace `JWT_REFRESH_SECRET: star-mes-refresh-secret-key-change-in-prod-32ch` with a 64-char random secret
 - [ ] Replace `POSTGRES_PASSWORD: mes_password` with a strong password
 - [ ] Replace `MINIO_ROOT_PASSWORD: minioadmin` with a strong password
-- [ ] Replace `GF_SECURITY_ADMIN_PASSWORD: industry360` (Grafana) with strong password
+- [ ] Replace `GF_SECURITY_ADMIN_PASSWORD: star-mes` (Grafana) with strong password
 - [ ] Replace `INFLUX_TOKEN: mes-influx-super-secret-token` with a strong random token
 - [ ] Generate secrets command:
   ```bash
@@ -226,7 +226,7 @@ Verify the following values are correctly seeded in `MachineCycleTime` table:
   - `DELETE /api/v1/files/:id` — remove file from MinIO
   - `GET /api/v1/files/:id/presigned` — generate short-lived presigned URL for download
 - [ ] Install `@nestjs/platform-express` multipart support + `multer`
-- [ ] Create MinIO bucket `industry360-mes` on first deploy (seed script or startup hook)
+- [ ] Create MinIO bucket `star-mes` on first deploy (seed script or startup hook)
 - [ ] Wire `fileId` fields to:
   - `InspectionResult.attachments` (inspection photos)
   - `NCR.attachments` (non-conformance evidence)
@@ -403,7 +403,7 @@ TWILIO_PHONE_NUMBER=
       PGPASSWORD: ${POSTGRES_PASSWORD}
     command: >
       sh -c "while true; do
-        pg_dump -h postgres -U mes_user industry360_mes | gzip > /backups/backup_$(date +%Y%m%d_%H%M%S).sql.gz
+        pg_dump -h postgres -U mes_user star_mes | gzip > /backups/backup_$(date +%Y%m%d_%H%M%S).sql.gz
         find /backups -mtime +7 -delete
         sleep 86400
       done"
@@ -412,7 +412,7 @@ TWILIO_PHONE_NUMBER=
   ```
 - [ ] Test backup restore:
   ```bash
-  gunzip < backup_YYYYMMDD.sql.gz | psql -h localhost -p 5433 -U mes_user industry360_mes
+  gunzip < backup_YYYYMMDD.sql.gz | psql -h localhost -p 5433 -U mes_user star_mes
   ```
 - [ ] Configure off-site backup: copy daily backup to S3/MinIO external bucket
 - [ ] Document RTO (Recovery Time Objective) and RPO (Recovery Point Objective) targets
@@ -447,7 +447,7 @@ TWILIO_PHONE_NUMBER=
   - Redis (cache hit rate, memory usage)
   - System (CPU, memory, disk)
 - [ ] Configure Grafana alerts:
-  - API error rate > 5% → alert email to `soliman@industry360.sa`
+  - API error rate > 5% → alert email to `soliman@star-mes.sa`
   - Disk > 80% full → alert
   - Database connections > 80 → alert
   - Container restart detected → alert
@@ -467,8 +467,8 @@ API_PORT=3001
 CORS_ORIGINS=https://your-production-domain.com
 
 # Database
-DATABASE_URL=postgresql://mes_user:STRONG_PASSWORD@postgres:5432/industry360_mes
-POSTGRES_DB=industry360_mes
+DATABASE_URL=postgresql://mes_user:STRONG_PASSWORD@postgres:5432/star_mes
+POSTGRES_DB=star_mes
 POSTGRES_USER=mes_user
 POSTGRES_PASSWORD=STRONG_PASSWORD
 
@@ -484,7 +484,7 @@ JWT_REFRESH_EXPIRES_IN=7d
 # InfluxDB
 INFLUX_URL=http://influxdb:8086
 INFLUX_TOKEN=GENERATE_STRONG_TOKEN
-INFLUX_ORG=industry360
+INFLUX_ORG=star-mes
 INFLUX_BUCKET=mes_timeseries
 
 # MQTT (verify SIDCO IT has opened port 1883 or 8883)
@@ -496,14 +496,14 @@ MINIO_PORT=9000
 MINIO_USE_SSL=false
 MINIO_ACCESS_KEY=STRONG_ACCESS_KEY
 MINIO_SECRET_KEY=STRONG_SECRET_KEY
-MINIO_BUCKET=industry360-mes
+MINIO_BUCKET=star-mes
 
 # Email (SMTP — fill with real credentials)
 SMTP_HOST=smtp.yourdomain.com
 SMTP_PORT=587
-SMTP_USER=noreply@industry360.sa
+SMTP_USER=noreply@star-mes.sa
 SMTP_PASSWORD=SMTP_PASSWORD
-SMTP_FROM=noreply@industry360.sa
+SMTP_FROM=noreply@star-mes.sa
 
 # SMS / WhatsApp (Twilio)
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -538,7 +538,7 @@ GRAFANA_ADMIN_PASSWORD=STRONG_GRAFANA_PASSWORD
   - `PRODUCTION_USER` — SSH username
   - `PRODUCTION_SSH_KEY` — private SSH key for production
   - `REGISTRY` — `ghcr.io`
-  - `IMAGE_NAME` — `your-org/industry360-mes`
+  - `IMAGE_NAME` — `your-org/star-mes`
   - `CODECOV_TOKEN` — from codecov.io
   - `NEXT_PUBLIC_API_URL` — production API URL
   - `NEXT_PUBLIC_WS_URL` — production WebSocket URL
@@ -569,16 +569,16 @@ GRAFANA_ADMIN_PASSWORD=STRONG_GRAFANA_PASSWORD
 
 - [ ] Run `pnpm db:seed` on staging and verify:
   ```bash
-  docker exec mes-postgres psql -U mes_user -d industry360_mes -c "SELECT COUNT(*) FROM \"MachineCycleTime\";"
-  docker exec mes-postgres psql -U mes_user -d industry360_mes -c "SELECT COUNT(*) FROM \"SKU\";"
-  docker exec mes-postgres psql -U mes_user -d industry360_mes -c "SELECT COUNT(*) FROM \"DowntimeCause\";"
-  docker exec mes-postgres psql -U mes_user -d industry360_mes -c "SELECT COUNT(*) FROM \"User\";"
+  docker exec mes-postgres psql -U mes_user -d star_mes -c "SELECT COUNT(*) FROM \"MachineCycleTime\";"
+  docker exec mes-postgres psql -U mes_user -d star_mes -c "SELECT COUNT(*) FROM \"SKU\";"
+  docker exec mes-postgres psql -U mes_user -d star_mes -c "SELECT COUNT(*) FROM \"DowntimeCause\";"
+  docker exec mes-postgres psql -U mes_user -d star_mes -c "SELECT COUNT(*) FROM \"User\";"
   ```
 - [ ] Expected counts: MachineCycleTime ≥ 12, SKU = 32, DowntimeCause = 45, User ≥ 9
 
 ### 4.2 — Create SIDCO User Accounts
 
-- [ ] Login as `admin@industry360.sa` (seed default password: `Admin@123456`)
+- [ ] Login as `admin@star-mes.sa` (seed default password: `Admin@123456`)
 - [ ] Change admin password to something secure
 - [ ] Verify these users exist (seeded):
   - `issa.masadeh@sidco.com.sa` — FACTORY_ADMIN
@@ -709,7 +709,7 @@ GRAFANA_ADMIN_PASSWORD=STRONG_GRAFANA_PASSWORD
   curl -fsSL https://get.docker.com | sh
   sudo usermod -aG docker $USER
   ```
-- [ ] Clone repo: `git clone https://github.com/your-org/industry360-mes.git`
+- [ ] Clone repo: `git clone https://github.com/your-org/star-mes.git`
 - [ ] Copy `.env.staging` to server as `.env`
 - [ ] Run: `docker compose -f docker-compose.prod.yml up -d`
 - [ ] Verify all containers healthy: `docker ps`
@@ -763,8 +763,8 @@ GRAFANA_ADMIN_PASSWORD=STRONG_GRAFANA_PASSWORD
 ssh user@your-production-server-ip
 
 # Step 2: Clone repository
-git clone https://github.com/your-org/industry360-mes.git /app/industry360-mes
-cd /app/industry360-mes
+git clone https://github.com/your-org/star-mes.git /app/star-mes
+cd /app/star-mes
 
 # Step 3: Set production environment
 cp .env.production .env
@@ -789,7 +789,7 @@ curl -f https://your-production-domain.com/health
 # Step 9: Smoke test login
 curl -X POST https://your-production-domain.com/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@industry360.sa","password":"ADMIN_PASSWORD"}'
+  -d '{"email":"admin@star-mes.sa","password":"ADMIN_PASSWORD"}'
 ```
 
 ### 7.3 — Go-Live Day Checklist
@@ -820,7 +820,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 # Option B: Restore database backup
 gunzip < backups/backup_YYYYMMDD.sql.gz | \
-  docker exec -i mes-postgres psql -U mes_user industry360_mes
+  docker exec -i mes-postgres psql -U mes_user star_mes
 
 # Notify NCC team immediately if rollback executed
 # Contact: Issa Masadeh / 0539429752
@@ -893,7 +893,7 @@ These items do not block go-live but should be delivered within 4–6 weeks of l
 | Issa Masadeh | SIDCO SPOC / Factory Admin | 0539429752 / Issa.Masadeh@sidco.com.sa |
 | Mohammed Brakat | Plant Manager | mohammed.brakat@sidco.com.sa |
 | Mohammed Yousef | Production Supervisor | mohammed.yousef@sidco.com.sa |
-| soliman@industry360.sa | Platform Manager (Industry360) | soliman@industry360.sa |
+| soliman@star-mes.sa | Platform Manager (STAR-MES) | soliman@star-mes.sa |
 
 ---
 

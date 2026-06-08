@@ -1,4 +1,4 @@
-# INDUSTRY360 MES Platform
+# STAR-MES Platform
 
 > Enterprise Manufacturing Execution System for the Kingdom of Saudi Arabia industrial sector
 
@@ -8,7 +8,7 @@
 
 ## Overview
 
-INDUSTRY360 MES is a full-stack, real-time Manufacturing Execution System designed for multi-factory industrial environments. It integrates production monitoring, quality management, predictive maintenance, IIoT connectivity, and AI-driven insights into a single enterprise-grade platform.
+STAR-MES is a full-stack, real-time Manufacturing Execution System designed for multi-factory industrial environments. It integrates production monitoring, quality management, predictive maintenance, IIoT connectivity, and AI-driven insights into a single enterprise-grade platform.
 
 The system is currently deployed to serve the **National Care Company (NCC)** manufacturing network across **Dammam** and **Jeddah**, Saudi Arabia — covering 5 industrial facilities.
 
@@ -26,7 +26,7 @@ The system is currently deployed to serve the **National Care Company (NCC)** ma
 
 ```bash
 git clone <repo>
-cd "INDUSTRY360 MES PLATFORM"
+cd "STAR-MES PLATFORM"
 
 # Copy environment file
 cp .env.example .env
@@ -50,7 +50,7 @@ docker compose up -d
 ### Default Credentials
 
 ```
-Email:    admin@industry360.sa
+Email:    admin@star-mes.sa
 Password: Admin@123
 Role:     SUPER_ADMIN
 ```
@@ -125,7 +125,7 @@ Grafana    :3003 ──query────► Prometheus
 ## Monorepo Structure
 
 ```
-INDUSTRY360 MES PLATFORM/
+STAR-MES PLATFORM/
 ├── apps/
 │   ├── api/                        # NestJS backend
 │   │   ├── src/
@@ -185,20 +185,4 @@ INDUSTRY360 MES PLATFORM/
 
 ---
 
-*© 2026 INDUSTRY360 — Enterprise Manufacturing Intelligence for Saudi Arabia*
-
-mes-api  |     mohammed.yousef@sidco.com.sa  → PRODUCTION_SUPERVISOR
-mes-api  |     operator@sidco.com.sa          → OPERATOR
-mes-api  |     maintenance@sidco.com.sa       → MAINTENANCE_TECHNICIAN
-mes-api  |     quality@sidco.com.sa           → QUALITY_ENGINEER
-mes-api  | 
-mes-api  |   Platform: http://localhost:3000
-mes-api  |   API Docs: http://localhost:3001/api/docs
-mes-api  | 
-mes-api  | 🌱  The seed command has been executed.
-mes-api  | 
-mes-api  | > @industry360/api@1.0.0 start:dev /app
-mes-api  | > nest start --watch
-mes-api  | 
-mes-api  | [2J[3J[H[[90m9:11:58 PM[0m] Starting compilation in watch mode...
-mes-api  |
+*© 2026 STAR-MES — Enterprise Manufacturing Intelligence for Saudi Arabia*

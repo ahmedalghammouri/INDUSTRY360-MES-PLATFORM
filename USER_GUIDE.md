@@ -1,4 +1,4 @@
-# INDUSTRY360 MES Platform — User Guide
+# STAR-MES Platform — User Guide
 
 > Complete guide for running and building the platform in **Development** and **Production** environments.
 
@@ -52,7 +52,7 @@ Run these steps **once** when setting up the project for the first time.
 ### Step 1 — Clone / Navigate to the project
 
 ```powershell
-cd "d:\NEW WORKS\New folder\INDUSTRY360 MES PLATFORM"
+cd "d:\NEW WORKS\New folder\STAR-MES PLATFORM"
 ```
 
 ### Step 2 — Install all dependencies
@@ -76,7 +76,7 @@ The `.env` file is already pre-configured for local development — no changes a
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `DATABASE_URL` | `postgresql://mes_user:mes_password@localhost:5432/industry360_mes` | Keep as-is for local dev |
+| `DATABASE_URL` | `postgresql://mes_user:mes_password@localhost:5432/star_mes` | Keep as-is for local dev |
 | `REDIS_URL` | `redis://localhost:6379` | Keep as-is for local dev |
 | `INFLUX_TOKEN` | `your-influx-token` | Set to `mes-influx-super-secret-token` for local dev |
 | `JWT_SECRET` | placeholder | **Change in production** — must be ≥32 chars |
@@ -136,7 +136,7 @@ Turbo will start the NestJS API and Next.js frontend in parallel with hot reload
 | InfluxDB UI | http://localhost:8086 |
 | MinIO Console | http://localhost:9001 |
 
-> Log in with `admin@industry360.sa` / `Password@123`
+> Log in with `admin@star-mes.sa` / `Password@123`
 
 To stop the dev servers press `Ctrl+C` in the terminal. To stop infrastructure containers:
 
@@ -248,7 +248,7 @@ ENCRYPTION_KEY=<random-32-char-string>
 # PostgreSQL credentials
 POSTGRES_USER=mes_user
 POSTGRES_PASSWORD=<strong-password>
-POSTGRES_DB=industry360_mes
+POSTGRES_DB=star_mes
 
 # Redis credentials
 REDIS_PASSWORD=<strong-password>
@@ -257,7 +257,7 @@ REDIS_PASSWORD=<strong-password>
 INFLUXDB_USERNAME=admin
 INFLUXDB_PASSWORD=<strong-password>
 INFLUXDB_TOKEN=<random-token>
-INFLUXDB_ORG=industry360
+INFLUXDB_ORG=star-mes
 INFLUXDB_BUCKET=mes_timeseries
 
 # Docker image registry
@@ -326,7 +326,7 @@ docker compose -f docker-compose.prod.yml down
 | Web App | http://localhost:4000 | Next.js with HMR |
 | API | http://localhost:4001/api/v1 | NestJS |
 | Swagger | http://localhost:4001/api/v1/docs | API documentation |
-| PostgreSQL | localhost:5432 | DB: `industry360_mes` |
+| PostgreSQL | localhost:5432 | DB: `star_mes` |
 | Redis | localhost:6379 | No password in dev |
 | InfluxDB | http://localhost:8086 | Time-series DB UI |
 | MQTT Broker | localhost:1883 | Eclipse Mosquitto |
@@ -358,10 +358,10 @@ docker compose -f docker-compose.prod.yml down
 
 | Service | Username | Password |
 |---------|----------|----------|
-| MES Platform | `admin@industry360.sa` | `Password@123` |
-| InfluxDB (dev) | `admin` | `industry360admin` |
+| MES Platform | `admin@star-mes.sa` | `Password@123` |
+| InfluxDB (dev) | `admin` | `star-mes-admin` |
 | MinIO (dev) | `minioadmin` | `minioadmin` |
-| Grafana (dev) | `admin` | `industry360` |
+| Grafana (dev) | `admin` | `star-mes` |
 | PostgreSQL (dev) | `mes_user` | `mes_password` |
 
 > **Important:** Change all default passwords before any production deployment.
@@ -546,12 +546,12 @@ If you have PostgreSQL installed locally it occupies port 5432 and blocks the Do
 
 ```env
 # .env  and  apps/api/.env
-DATABASE_URL="postgresql://mes_user:mes_password@localhost:5433/industry360_mes"
+DATABASE_URL="postgresql://mes_user:mes_password@localhost:5433/star_mes"
 ```
 
 This is already configured correctly in the project files — no manual action needed.
 
 ---
 
-*INDUSTRY360 MES Platform — ISA-95 compliant Manufacturing Execution System*
-*For support contact: soliman@industry360.sa*
+*STAR-MES Platform — ISA-95 compliant Manufacturing Execution System*
+*For support contact: soliman@star-mes.sa*

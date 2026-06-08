@@ -15,6 +15,10 @@ import {
   type UpdateCAPADto,
   type AddCAPAActionDto,
   type VerifyCAPADto,
+  type CreateQualityPlanDto,
+  type UpdateQualityPlanDto,
+  type CreateQualityParameterDto,
+  type UpdateQualityParameterDto,
 } from './dto/quality.dto';
 
 @Injectable()
@@ -663,6 +667,195 @@ export class QualityService {
     const record = await this.prisma.inspectionResult.findFirst({ where: { id, ...factoryFilter } });
     if (!record) throw new NotFoundException('Inspection result not found');
     await this.prisma.inspectionResult.delete({ where: { id } });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // QUALITY PLANS (ISA-95 QualityTest definitions)
+  // ────────────────────────────────────────────────────────────
+
+  async findQualityPlans(factoryId: string | null, filters: { skuId?: string; type?: string; isActive?: boolean }) {
+    const where: any = {
+      ...(factoryId ? { factoryId } : {}),
+      ...(filters.skuId && { skuId: filters.skuId }),
+      ...(filters.type && { type: filters.type }),
+      ...(filters.isActive !== undefined ? { isActive: filters.isActive } : { isActive: true }),
+    };
+    const plans = await this.prisma.qualityPlan.findMany({
+      where,
+      include: {
+        parameters: { orderBy: { sortOrder: 'asc' } },
+      },
+      orderBy: { name: 'asc' },
+    });
+    return plans;
+  }
+
+  async getInspectionsByWorkOrder(factoryId: string | null, workOrderId: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    return this.prisma.inspectionResult.findMany({
+      where: { workOrderId, ...factoryFilter },
+      include: {
+        inspector: { select: { name: true } },
+        plan: { select: { name: true, code: true, type: true } },
+      },
+      orderBy: { inspectedAt: 'desc' },
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // QUALITY PLAN CRUD (ISA-95 QualityTestSpecification)
+  // ────────────────────────────────────────────────────────────
+
+  async getQualityPlanById(factoryId: string | null, id: string) {
+    const where = factoryId ? { id, factoryId } : { id };
+    const plan = await this.prisma.qualityPlan.findFirst({
+      where,
+      include: {
+        parameters: { orderBy: { sortOrder: 'asc' } },
+        _count: { select: { results: true } },
+      },
+    });
+    if (!plan) throw new NotFoundException('Quality plan not found');
+    return plan;
+  }
+
+  async createQualityPlan(factoryId: string, dto: CreateQualityPlanDto) {
+    const existing = await this.prisma.qualityPlan.findFirst({
+      where: { factoryId, code: dto.code.toUpperCase() },
+    });
+    if (existing) throw new BadRequestException(`Plan code '${dto.code}' already exists`);
+
+    return this.prisma.qualityPlan.create({
+      data: {
+        factoryId,
+        code: dto.code.toUpperCase(),
+        name: dto.name,
+        type: dto.type,
+        skuId: dto.skuId,
+        machineId: dto.machineId,
+        samplingFrequency: dto.samplingFrequency,
+        samplingQty: dto.samplingQty ?? 1,
+        version: dto.version ?? '1',
+      },
+      include: { parameters: true, _count: { select: { results: true } } },
+    });
+  }
+
+  async updateQualityPlan(factoryId: string | null, id: string, dto: UpdateQualityPlanDto) {
+    const where = factoryId ? { id, factoryId } : { id };
+    const plan = await this.prisma.qualityPlan.findFirst({ where });
+    if (!plan) throw new NotFoundException('Quality plan not found');
+
+    return this.prisma.qualityPlan.update({
+      where: { id },
+      data: {
+        ...(dto.name && { name: dto.name }),
+        ...(dto.type && { type: dto.type }),
+        ...(dto.skuId !== undefined && { skuId: dto.skuId || null }),
+        ...(dto.machineId !== undefined && { machineId: dto.machineId || null }),
+        ...(dto.samplingFrequency !== undefined && { samplingFrequency: dto.samplingFrequency || null }),
+        ...(dto.samplingQty !== undefined && { samplingQty: dto.samplingQty }),
+        ...(dto.version !== undefined && { version: dto.version }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      },
+      include: { parameters: { orderBy: { sortOrder: 'asc' } }, _count: { select: { results: true } } },
+    });
+  }
+
+  async deleteQualityPlan(factoryId: string | null, id: string) {
+    const where = factoryId ? { id, factoryId } : { id };
+    const plan = await this.prisma.qualityPlan.findFirst({
+      where,
+      include: { _count: { select: { results: true } } },
+    });
+    if (!plan) throw new NotFoundException('Quality plan not found');
+    const resultCount = (plan as any)._count?.results ?? 0;
+    if (resultCount > 0) {
+      throw new BadRequestException(
+        `Cannot delete a plan that has ${resultCount} inspection record(s). Deactivate it instead.`,
+      );
+    }
+    await this.prisma.qualityPlan.delete({ where: { id } });
+  }
+
+  async approveQualityPlan(factoryId: string | null, id: string, userId: string) {
+    const where = factoryId ? { id, factoryId } : { id };
+    const plan = await this.prisma.qualityPlan.findFirst({ where });
+    if (!plan) throw new NotFoundException('Quality plan not found');
+    if (plan.approvedAt) throw new BadRequestException('Plan is already approved');
+
+    return this.prisma.qualityPlan.update({
+      where: { id },
+      data: { approvedAt: new Date(), approvedById: userId },
+      include: { parameters: { orderBy: { sortOrder: 'asc' } }, _count: { select: { results: true } } },
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // QUALITY PARAMETERS (ISA-95 QualityTestSpecificationProperty)
+  // ────────────────────────────────────────────────────────────
+
+  async addParameter(factoryId: string | null, planId: string, dto: CreateQualityParameterDto) {
+    const where = factoryId ? { id: planId, factoryId } : { id: planId };
+    const plan = await this.prisma.qualityPlan.findFirst({ where });
+    if (!plan) throw new NotFoundException('Quality plan not found');
+
+    const last = await this.prisma.qualityParameter.findFirst({
+      where: { planId },
+      orderBy: { sortOrder: 'desc' },
+    });
+
+    return this.prisma.qualityParameter.create({
+      data: {
+        planId,
+        name: dto.name,
+        unit: dto.unit,
+        nominalValue: dto.nominalValue,
+        ucl: dto.ucl,
+        lcl: dto.lcl,
+        usl: dto.usl,
+        lsl: dto.lsl,
+        checkMethod: dto.checkMethod,
+        isKPI: dto.isKPI ?? false,
+        sortOrder: dto.sortOrder ?? (last ? last.sortOrder + 1 : 0),
+      },
+    });
+  }
+
+  async updateParameter(factoryId: string | null, planId: string, paramId: string, dto: UpdateQualityParameterDto) {
+    const where = factoryId ? { id: planId, factoryId } : { id: planId };
+    const plan = await this.prisma.qualityPlan.findFirst({ where });
+    if (!plan) throw new NotFoundException('Quality plan not found');
+
+    const param = await this.prisma.qualityParameter.findFirst({ where: { id: paramId, planId } });
+    if (!param) throw new NotFoundException('Parameter not found');
+
+    return this.prisma.qualityParameter.update({
+      where: { id: paramId },
+      data: {
+        ...(dto.name && { name: dto.name }),
+        ...(dto.unit !== undefined && { unit: dto.unit || null }),
+        ...(dto.nominalValue !== undefined && { nominalValue: dto.nominalValue }),
+        ...(dto.ucl !== undefined && { ucl: dto.ucl }),
+        ...(dto.lcl !== undefined && { lcl: dto.lcl }),
+        ...(dto.usl !== undefined && { usl: dto.usl }),
+        ...(dto.lsl !== undefined && { lsl: dto.lsl }),
+        ...(dto.checkMethod !== undefined && { checkMethod: dto.checkMethod || null }),
+        ...(dto.isKPI !== undefined && { isKPI: dto.isKPI }),
+        ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
+      },
+    });
+  }
+
+  async deleteParameter(factoryId: string | null, planId: string, paramId: string) {
+    const where = factoryId ? { id: planId, factoryId } : { id: planId };
+    const plan = await this.prisma.qualityPlan.findFirst({ where });
+    if (!plan) throw new NotFoundException('Quality plan not found');
+
+    const param = await this.prisma.qualityParameter.findFirst({ where: { id: paramId, planId } });
+    if (!param) throw new NotFoundException('Parameter not found');
+
+    await this.prisma.qualityParameter.delete({ where: { id: paramId } });
   }
 
   // ────────────────────────────────────────────────────────────

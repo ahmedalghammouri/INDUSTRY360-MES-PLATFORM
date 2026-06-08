@@ -1,5 +1,5 @@
 # ============================================================
-# INDUSTRY360 MES Web - Multi-Stage Dockerfile
+# STAR-MES Web - Multi-Stage Dockerfile
 # ============================================================
 
 FROM node:20-alpine AS base

@@ -390,6 +390,10 @@ model SKU {
   category        String?
   weight          Float?
   weightUnit      String   @default("kg")
+  length          Float?
+  width           Float?
+  height          Float?
+  dimensionUnit   String   @default("cm")
   packagingType   String?  // HF (High Foam), LF (Low Foam)
   unitsPerInner   Int      @default(1)
   innersPerCarton Int      @default(1)

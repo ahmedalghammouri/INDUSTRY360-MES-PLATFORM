@@ -1,4 +1,4 @@
-# Phase 1 Audit — INDUSTRY360 MES Platform
+# Phase 1 Audit — STAR-MES Platform
 **Date:** 2026-06-06  
 **Auditor:** Lead Solution Architect  
 **Target:** 100% Go-Live Readiness  

@@ -37,12 +37,12 @@ async function main() {
   // SUPER ADMIN USER
   // ============================================================
   const superAdmin = await prisma.user.upsert({
-    where: { email: 'admin@industry360.sa' },
+    where: { email: 'admin@star-mes.sa' },
     update: {},
     create: {
       enterpriseId: enterprise.id,
       factoryId: null,
-      email: 'admin@industry360.sa',
+      email: 'admin@star-mes.sa',
       name: 'System Administrator',
       passwordHash,
       role: UserRole.SUPER_ADMIN,
@@ -55,12 +55,12 @@ async function main() {
   console.log(`✅ Super Admin: ${superAdmin.email}`);
 
   const platformUser = await prisma.user.upsert({
-    where: { email: 'soliman@industry360.sa' },
+    where: { email: 'soliman@star-mes.sa' },
     update: {},
     create: {
       enterpriseId: enterprise.id,
       factoryId: null,
-      email: 'soliman@industry360.sa',
+      email: 'soliman@star-mes.sa',
       name: 'Soliman Al-Rashid',
       passwordHash,
       role: UserRole.SUPER_ADMIN,
@@ -1298,8 +1298,8 @@ async function main() {
   console.log('\n📋 LOGIN CREDENTIALS (all use Password@123):');
   console.log('');
   console.log('  SUPER ADMIN (all factories):');
-  console.log('    admin@industry360.sa      → SUPER_ADMIN');
-  console.log('    soliman@industry360.sa    → SUPER_ADMIN');
+  console.log('    admin@star-mes.sa      → SUPER_ADMIN');
+  console.log('    soliman@star-mes.sa    → SUPER_ADMIN');
   console.log('');
   console.log('  SIDCO (PoC Factory):');
   console.log('    issa.masadeh@sidco.com.sa    → FACTORY_ADMIN');

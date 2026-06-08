@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Search, BoxesIcon, ChevronDown, ChevronRight, Plus, Edit3, Trash2, MoreHorizontal } from 'lucide-react';
+import { Search, BoxesIcon, ChevronDown, ChevronRight, Plus, Edit3, Trash2, MoreHorizontal, Ruler, Weight } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +42,12 @@ interface SKU {
   innersPerCarton: number;
   cartonsPerPallet: number;
   baseUnit: string;
+  weight: number | null;
+  weightUnit: string;
+  length: number | null;
+  width: number | null;
+  height: number | null;
+  dimensionUnit: string;
   storageLocationId: string | null;
   storageLocationRef: { id: string; code: string; name: string } | null;
   family: { name: string; brand: string | null } | null;
@@ -53,6 +59,15 @@ const BOM_COLORS: Record<string, string> = {
   PACKAGING: 'text-blue-400',
   CONSUMABLE: 'text-purple-400',
 };
+
+const WEIGHT_UNITS = ['kg', 'g', 'lb', 'oz'];
+const DIM_UNITS = ['cm', 'mm', 'm', 'in'];
+
+function formatDimensions(sku: SKU): string {
+  if (!sku.length && !sku.width && !sku.height) return '—';
+  const parts = [sku.length, sku.width, sku.height].map(v => v != null ? v.toString() : '?');
+  return `${parts.join(' × ')} ${sku.dimensionUnit}`;
+}
 
 function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onDelete: (id: string) => void; onEdit: (sku: SKU) => void }) {
   const [expanded, setExpanded] = useState(false);
@@ -89,6 +104,22 @@ function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onD
         <td className="p-3 text-xs text-right text-muted-foreground">
           {sku.unitsPerInner} / {sku.innersPerCarton} / {sku.cartonsPerPallet}
         </td>
+        <td className="p-3 text-xs text-muted-foreground tabular-nums">
+          {sku.weight != null ? (
+            <span className="flex items-center gap-1">
+              <Weight size={10} className="text-muted-foreground/60" />
+              {sku.weight} {sku.weightUnit}
+            </span>
+          ) : '—'}
+        </td>
+        <td className="p-3 text-xs text-muted-foreground tabular-nums">
+          {formatDimensions(sku) !== '—' ? (
+            <span className="flex items-center gap-1">
+              <Ruler size={10} className="text-muted-foreground/60" />
+              {formatDimensions(sku)}
+            </span>
+          ) : '—'}
+        </td>
         <td className="p-3 text-xs text-center">
           {hasBOM ? (
             <Badge variant="secondary" className="text-[10px]">{sku.bomComponents.length} items</Badge>
@@ -122,7 +153,7 @@ function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onD
       </motion.tr>
       {expanded && hasBOM && (
         <tr className="bg-white/2 border-b border-border/20">
-          <td colSpan={11} className="px-6 py-3">
+          <td colSpan={13} className="px-6 py-3">
             <div className="text-xs font-semibold text-muted-foreground mb-2">Bill of Materials</div>
             <table className="w-full text-xs">
               <thead>
@@ -155,14 +186,26 @@ function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onD
   );
 }
 
+const EMPTY_CREATE = {
+  code: '', name: '', itemNumber: '', brand: '', category: '', packagingType: '',
+  unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '', baseUnit: 'PCS',
+  storageLocationId: '',
+  weight: '', weightUnit: 'kg',
+  length: '', width: '', height: '', dimensionUnit: 'cm',
+};
+
 export function ProductsView() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [brand, setBrand] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<SKU | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', brand: '', category: '', baseUnit: '', storageLocationId: '' });
-  const [formData, setFormData] = useState({ code: '', name: '', itemNumber: '', brand: '', category: '', packagingType: '', unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '', baseUnit: 'PCS', storageLocationId: '' });
+  const [editForm, setEditForm] = useState({
+    name: '', brand: '', category: '', baseUnit: '', storageLocationId: '',
+    weight: '', weightUnit: 'kg',
+    length: '', width: '', height: '', dimensionUnit: 'cm',
+  });
+  const [formData, setFormData] = useState(EMPTY_CREATE);
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -196,7 +239,7 @@ export function ProductsView() {
       queryClient.invalidateQueries({ queryKey: ['inventory', 'products'] });
       toast({ title: 'Product created successfully' });
       setFormOpen(false);
-      setFormData({ code: '', name: '', itemNumber: '', brand: '', category: '', packagingType: '', unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '', baseUnit: 'PCS', storageLocationId: '' });
+      setFormData(EMPTY_CREATE);
     },
     onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to create product', variant: 'destructive' }),
   });
@@ -228,6 +271,12 @@ export function ProductsView() {
       category: sku.category ?? '',
       baseUnit: sku.baseUnit,
       storageLocationId: sku.storageLocationId ?? '',
+      weight: sku.weight != null ? String(sku.weight) : '',
+      weightUnit: sku.weightUnit ?? 'kg',
+      length: sku.length != null ? String(sku.length) : '',
+      width: sku.width != null ? String(sku.width) : '',
+      height: sku.height != null ? String(sku.height) : '',
+      dimensionUnit: sku.dimensionUnit ?? 'cm',
     });
   };
 
@@ -245,6 +294,12 @@ export function ProductsView() {
       cartonsPerPallet: formData.cartonsPerPallet ? parseInt(formData.cartonsPerPallet) : 1,
       baseUnit: formData.baseUnit,
       storageLocationId: formData.storageLocationId || null,
+      weight: formData.weight ? parseFloat(formData.weight) : null,
+      weightUnit: formData.weightUnit,
+      length: formData.length ? parseFloat(formData.length) : null,
+      width: formData.width ? parseFloat(formData.width) : null,
+      height: formData.height ? parseFloat(formData.height) : null,
+      dimensionUnit: formData.dimensionUnit,
     });
   };
 
@@ -287,6 +342,8 @@ export function ProductsView() {
                 <th className="text-left p-3 text-muted-foreground font-medium text-xs">Category</th>
                 <th className="text-left p-3 text-muted-foreground font-medium text-xs">Packaging</th>
                 <th className="text-right p-3 text-muted-foreground font-medium text-xs">Units/Inner/Carton/Pallet</th>
+                <th className="text-left p-3 text-muted-foreground font-medium text-xs">Weight</th>
+                <th className="text-left p-3 text-muted-foreground font-medium text-xs">Dimensions (L×W×H)</th>
                 <th className="text-center p-3 text-muted-foreground font-medium text-xs">BOM</th>
                 <th className="text-left p-3 text-muted-foreground font-medium text-xs">Storage</th>
                 <th className="text-center p-3 text-muted-foreground font-medium text-xs w-16">Actions</th>
@@ -295,11 +352,11 @@ export function ProductsView() {
             <tbody>
               {isLoading ? (
                 Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}><td colSpan={11} className="p-3"><div className="shimmer h-5 rounded" /></td></tr>
+                  <tr key={i}><td colSpan={13} className="p-3"><div className="shimmer h-5 rounded" /></td></tr>
                 ))
               ) : skus.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="p-12 text-center text-muted-foreground">
+                  <td colSpan={13} className="p-12 text-center text-muted-foreground">
                     <BoxesIcon className="w-12 h-12 mx-auto mb-3 opacity-30" />
                     No products found
                   </td>
@@ -314,19 +371,19 @@ export function ProductsView() {
 
       {/* Create Product Dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader><DialogTitle className="text-sm">Create New Product</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2 max-h-[400px] overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3 py-2 max-h-[70vh] overflow-y-auto pr-1">
             <div>
-              <Label className="text-xs">Product Code*</Label>
+              <Label className="text-xs">Product Code *</Label>
               <Input value={formData.code} onChange={e => setFormData(v => ({ ...v, code: e.target.value }))} className="h-9 mt-1" />
             </div>
             <div>
-              <Label className="text-xs">Item Number*</Label>
+              <Label className="text-xs">Item Number *</Label>
               <Input value={formData.itemNumber} onChange={e => setFormData(v => ({ ...v, itemNumber: e.target.value }))} className="h-9 mt-1" />
             </div>
             <div className="col-span-2">
-              <Label className="text-xs">Product Name*</Label>
+              <Label className="text-xs">Product Name *</Label>
               <Input value={formData.name} onChange={e => setFormData(v => ({ ...v, name: e.target.value }))} className="h-9 mt-1" />
             </div>
             <div>
@@ -357,6 +414,62 @@ export function ProductsView() {
               <Label className="text-xs">Cartons per Pallet</Label>
               <Input type="number" value={formData.cartonsPerPallet} onChange={e => setFormData(v => ({ ...v, cartonsPerPallet: e.target.value }))} className="h-9 mt-1" />
             </div>
+
+            {/* Weight */}
+            <div className="col-span-2 border-t pt-3 mt-1">
+              <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                <Weight size={12} /> Weight &amp; Dimensions
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Label className="text-xs">Net Weight</Label>
+                    <Input type="number" step="0.001" min="0" value={formData.weight}
+                      onChange={e => setFormData(v => ({ ...v, weight: e.target.value }))}
+                      className="h-9 mt-1" placeholder="0.000" />
+                  </div>
+                  <div className="w-20">
+                    <Label className="text-xs">Unit</Label>
+                    <Select value={formData.weightUnit} onValueChange={v => setFormData(p => ({ ...p, weightUnit: v }))}>
+                      <SelectTrigger className="h-9 mt-1 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {WEIGHT_UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <Label className="text-xs">Dim. Unit</Label>
+                    <Select value={formData.dimensionUnit} onValueChange={v => setFormData(p => ({ ...p, dimensionUnit: v }))}>
+                      <SelectTrigger className="h-9 mt-1 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {DIM_UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Length</Label>
+                  <Input type="number" step="0.1" min="0" value={formData.length}
+                    onChange={e => setFormData(v => ({ ...v, length: e.target.value }))}
+                    className="h-9 mt-1" placeholder="0.0" />
+                </div>
+                <div>
+                  <Label className="text-xs">Width</Label>
+                  <Input type="number" step="0.1" min="0" value={formData.width}
+                    onChange={e => setFormData(v => ({ ...v, width: e.target.value }))}
+                    className="h-9 mt-1" placeholder="0.0" />
+                </div>
+                <div>
+                  <Label className="text-xs">Height</Label>
+                  <Input type="number" step="0.1" min="0" value={formData.height}
+                    onChange={e => setFormData(v => ({ ...v, height: e.target.value }))}
+                    className="h-9 mt-1" placeholder="0.0" />
+                </div>
+              </div>
+            </div>
+
             <div className="col-span-2">
               <Label className="text-xs">Storage Location (Finished Goods)</Label>
               <Select
@@ -384,11 +497,11 @@ export function ProductsView() {
 
       {/* Edit Product Dialog */}
       <Dialog open={!!editTarget} onOpenChange={open => { if (!open) setEditTarget(null); }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle className="text-sm">Edit Product</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
+          <div className="grid grid-cols-2 gap-3 py-2 max-h-[70vh] overflow-y-auto pr-1">
             <div className="col-span-2">
-              <Label className="text-xs">Product Name*</Label>
+              <Label className="text-xs">Product Name *</Label>
               <Input value={editForm.name} onChange={e => setEditForm(v => ({ ...v, name: e.target.value }))} className="h-9 mt-1" />
             </div>
             <div>
@@ -403,6 +516,62 @@ export function ProductsView() {
               <Label className="text-xs">Base Unit</Label>
               <Input value={editForm.baseUnit} onChange={e => setEditForm(v => ({ ...v, baseUnit: e.target.value }))} className="h-9 mt-1" />
             </div>
+
+            {/* Weight & Dimensions */}
+            <div className="col-span-2 border-t pt-3 mt-1">
+              <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                <Weight size={12} /> Weight &amp; Dimensions
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Label className="text-xs">Net Weight</Label>
+                    <Input type="number" step="0.001" min="0" value={editForm.weight}
+                      onChange={e => setEditForm(v => ({ ...v, weight: e.target.value }))}
+                      className="h-9 mt-1" placeholder="0.000" />
+                  </div>
+                  <div className="w-20">
+                    <Label className="text-xs">Unit</Label>
+                    <Select value={editForm.weightUnit} onValueChange={v => setEditForm(p => ({ ...p, weightUnit: v }))}>
+                      <SelectTrigger className="h-9 mt-1 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {WEIGHT_UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <Label className="text-xs">Dim. Unit</Label>
+                    <Select value={editForm.dimensionUnit} onValueChange={v => setEditForm(p => ({ ...p, dimensionUnit: v }))}>
+                      <SelectTrigger className="h-9 mt-1 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {DIM_UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Length</Label>
+                  <Input type="number" step="0.1" min="0" value={editForm.length}
+                    onChange={e => setEditForm(v => ({ ...v, length: e.target.value }))}
+                    className="h-9 mt-1" placeholder="0.0" />
+                </div>
+                <div>
+                  <Label className="text-xs">Width</Label>
+                  <Input type="number" step="0.1" min="0" value={editForm.width}
+                    onChange={e => setEditForm(v => ({ ...v, width: e.target.value }))}
+                    className="h-9 mt-1" placeholder="0.0" />
+                </div>
+                <div>
+                  <Label className="text-xs">Height</Label>
+                  <Input type="number" step="0.1" min="0" value={editForm.height}
+                    onChange={e => setEditForm(v => ({ ...v, height: e.target.value }))}
+                    className="h-9 mt-1" placeholder="0.0" />
+                </div>
+              </div>
+            </div>
+
             <div className="col-span-2">
               <Label className="text-xs">Storage Location (Finished Goods)</Label>
               <Select
@@ -432,6 +601,12 @@ export function ProductsView() {
                   category: editForm.category || null,
                   unit: editForm.baseUnit || undefined,
                   storageLocationId: editForm.storageLocationId || null,
+                  weight: editForm.weight ? parseFloat(editForm.weight) : null,
+                  weightUnit: editForm.weightUnit,
+                  length: editForm.length ? parseFloat(editForm.length) : null,
+                  width: editForm.width ? parseFloat(editForm.width) : null,
+                  height: editForm.height ? parseFloat(editForm.height) : null,
+                  dimensionUnit: editForm.dimensionUnit,
                 },
               })}
             >

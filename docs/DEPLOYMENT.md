@@ -1,4 +1,4 @@
-# INDUSTRY360 MES — Deployment & Operations
+# STAR-MES — Deployment & Operations
 
 Docker operations, environment configuration, and troubleshooting guide.
 
@@ -44,7 +44,7 @@ Docker operations, environment configuration, and troubleshooting guide.
 ```bash
 # 1. Clone the repository
 git clone <repo-url>
-cd "INDUSTRY360 MES PLATFORM"
+cd "STAR-MES PLATFORM"
 
 # 2. Create environment file
 cp .env.example .env
@@ -124,7 +124,7 @@ docker compose exec postgres psql -U mes_user -d mes_db
 
 | Service | URL | Default Credentials |
 |---|---|---|
-| **MES Web App** | http://localhost:3000 | admin@industry360.sa / Admin@123 |
+| **MES Web App** | http://localhost:3000 | admin@star-mes.sa / Admin@123 |
 | **REST API** | http://localhost:3001/api/v1 | — |
 | **API Docs (Swagger)** | http://localhost:3001/api/docs | — |
 | **Grafana** | http://localhost:3003 | admin / admin |
@@ -135,7 +135,7 @@ docker compose exec postgres psql -U mes_user -d mes_db
 **MES Demo Login:**
 
 ```
-Email:    admin@industry360.sa
+Email:    admin@star-mes.sa
 Password: Admin@123
 Role:     SUPER_ADMIN
 ```
@@ -159,7 +159,7 @@ REDIS_URL=redis://redis:6379
 # ── InfluxDB ─────────────────────────────────────
 INFLUXDB_URL=http://influxdb:8086
 INFLUXDB_TOKEN=my-super-secret-admin-token
-INFLUXDB_ORG=industry360
+INFLUXDB_ORG=star-mes
 INFLUXDB_BUCKET=mes_iot
 
 # ── JWT ──────────────────────────────────────────
@@ -548,4 +548,4 @@ docker compose ps
 
 ---
 
-*© 2026 INDUSTRY360 — Operations Reference*
+*© 2026 STAR-MES — Operations Reference*

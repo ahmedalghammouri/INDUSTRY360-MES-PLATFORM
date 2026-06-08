@@ -64,9 +64,9 @@ interface NotifItem {
 // ── Component ───────────────────────────────────────────────────
 
 export function NotificationsView() {
-  const { notifications: wsNotifications, markAllRead: wsMarkAllRead, setUnreadCount } = useNotificationStore(
-    (s) => ({ notifications: s.notifications, markAllRead: s.markAllRead, setUnreadCount: s.setUnreadCount }),
-  );
+  const wsNotifications = useNotificationStore(s => s.notifications);
+  const wsMarkAllRead   = useNotificationStore(s => s.markAllRead);
+  const setUnreadCount  = useNotificationStore(s => s.setUnreadCount);
   const [severityFilter, setSeverityFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);

@@ -1,7 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, Search, Download, Filter, ChevronDown, CheckCircle2, XCircle, AlertCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import {
+  Plus, Search, Download, Filter, ChevronDown, CheckCircle2,
+  XCircle, AlertCircle, MoreHorizontal, Pencil, Trash2,
+  ClipboardList, Link2, FlaskConical, ChevronRight,
+} from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Button } from '@/components/ui/button';
@@ -28,6 +32,34 @@ const TYPE_LABELS: Record<string, string> = {
   INCOMING: 'Incoming', IN_PROCESS: 'In-Process', FINAL: 'Final', PATROL: 'Patrol',
 };
 
+interface QualityParameter {
+  id: string;
+  name: string;
+  unit?: string;
+  nominalValue?: number;
+  ucl?: number;
+  lcl?: number;
+  usl?: number;
+  lsl?: number;
+  checkMethod?: string;
+}
+
+interface QualityPlan {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  parameters: QualityParameter[];
+}
+
+interface ChecklistItem {
+  parameterId: string;
+  parameterName: string;
+  measuredValue: string;
+  pass: boolean | null;
+  notes: string;
+}
+
 interface Inspection {
   id: string;
   inspectionNumber: string;
@@ -38,6 +70,7 @@ interface Inspection {
   failQty: number;
   inspector?: { name: string };
   workOrder?: { orderNumber: string };
+  plan?: { name: string; code: string };
   inspectedAt: string;
   notes?: string;
 }
@@ -52,9 +85,12 @@ export function QualityInspectionsView() {
   const [formOpen, setFormOpen] = useState(false)
   const [editInspection, setEditInspection] = useState<Inspection | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; number: string } | null>(null)
+  const [expandedWorkOrder, setExpandedWorkOrder] = useState<string | null>(null)
   const [form, setForm] = useState({
-    inspectionNumber: '', type: 'INCOMING', totalQty: '', passQty: '', failQty: '', workOrderId: '', notes: '',
+    inspectionNumber: '', type: 'INCOMING', totalQty: '', passQty: '', failQty: '',
+    workOrderId: '', planId: '', notes: '',
   })
+  const [checklist, setChecklist] = useState<ChecklistItem[]>([])
 
   const { data, isLoading } = useQuery({
     queryKey: ['quality', 'inspections', { search, type: typeFilter, result: resultFilter, page }],
@@ -70,10 +106,20 @@ export function QualityInspectionsView() {
     staleTime: 60_000,
     enabled: formOpen,
   })
-  const workOrders: Array<{ id: string; orderNumber: string; sku?: { name: string } }> = (workOrdersData as any)?.data ?? []
 
+  const { data: plansData } = useQuery({
+    queryKey: ['quality', 'plans'],
+    queryFn: () => api.get('/quality/plans'),
+    staleTime: 120_000,
+    enabled: formOpen,
+  })
+
+  const workOrders: Array<{ id: string; orderNumber: string; sku?: { name: string } }> = (workOrdersData as any)?.data ?? []
+  const plans: QualityPlan[] = (plansData as any) ?? []
   const inspections: Inspection[] = (data as any)?.data ?? (data as any) ?? [];
   const total: number = (data as any)?.total ?? 0;
+
+  const selectedPlan = plans.find(p => p.id === form.planId)
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/quality/inspections', dto),
@@ -107,7 +153,8 @@ export function QualityInspectionsView() {
 
   const handleOpenCreate = () => {
     setEditInspection(null)
-    setForm({ inspectionNumber: '', type: 'INCOMING', totalQty: '', passQty: '', failQty: '', workOrderId: '', notes: '' })
+    setForm({ inspectionNumber: '', type: 'INCOMING', totalQty: '', passQty: '', failQty: '', workOrderId: '', planId: '', notes: '' })
+    setChecklist([])
     setFormOpen(true)
   };
 
@@ -120,23 +167,63 @@ export function QualityInspectionsView() {
       passQty: String(inspection.passQty),
       failQty: String(inspection.failQty),
       workOrderId: '',
+      planId: '',
       notes: inspection.notes || '',
     })
+    setChecklist([])
     setFormOpen(true)
   };
 
   const handleCloseForm = () => {
     setFormOpen(false)
     setEditInspection(null)
+    setChecklist([])
   };
 
+  const handlePlanSelect = (planId: string) => {
+    setForm(f => ({ ...f, planId }))
+    if (planId && planId !== '__none__') {
+      const plan = plans.find(p => p.id === planId)
+      if (plan) {
+        setChecklist(plan.parameters.map(p => ({
+          parameterId: p.id,
+          parameterName: p.name,
+          measuredValue: '',
+          pass: null,
+          notes: '',
+        })))
+      }
+    } else {
+      setChecklist([])
+    }
+  }
+
+  const updateChecklistItem = (idx: number, field: keyof ChecklistItem, value: any) => {
+    setChecklist(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item))
+  }
+
   const handleSubmit = () => {
-    const dto = {
-      ...form,
+    const measurements = checklist.length > 0
+      ? checklist.map(c => ({
+          parameterId: c.parameterId,
+          parameterName: c.parameterName,
+          value: c.measuredValue,
+          pass: c.pass,
+          notes: c.notes,
+        }))
+      : undefined;
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { inspectionNumber: _strip, ...formRest } = form;
+    const dto: any = {
+      ...formRest,
+      type: form.type,
       totalQty: parseInt(form.totalQty),
       passQty: parseInt(form.passQty),
-      failQty: parseInt(form.failQty),
+      failQty: form.failQty ? parseInt(form.failQty) : undefined,
       workOrderId: (form.workOrderId && form.workOrderId !== '__none__') ? form.workOrderId : undefined,
+      planId: (form.planId && form.planId !== '__none__') ? form.planId : undefined,
+      measurements,
     };
     if (editInspection) {
       updateMutation.mutate({ id: editInspection.id, dto })
@@ -145,7 +232,7 @@ export function QualityInspectionsView() {
     }
   };
 
-  const isValid = !!(form.inspectionNumber && form.type && form.totalQty && form.passQty)
+  const isValid = !!(form.type && form.totalQty && form.passQty)
 
   const summary = {
     total: inspections.length,
@@ -159,7 +246,7 @@ export function QualityInspectionsView() {
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
         <div>
           <h1 className="text-lg font-bold">Quality Inspections</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Incoming, in-process, and final inspection results</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Incoming, in-process, and final inspection results · linked to Work Orders (ISA-95)</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
@@ -245,6 +332,7 @@ export function QualityInspectionsView() {
                   <TableHead className="text-[11px] font-semibold">Pass</TableHead>
                   <TableHead className="text-[11px] font-semibold">Fail</TableHead>
                   <TableHead className="text-[11px] font-semibold">Work Order</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Quality Plan</TableHead>
                   <TableHead className="text-[11px] font-semibold">Inspector</TableHead>
                   <TableHead className="text-[11px] font-semibold">Date</TableHead>
                   <TableHead />
@@ -254,14 +342,14 @@ export function QualityInspectionsView() {
                 {isLoading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <TableRow key={i} className="border-border/20">
-                      {Array.from({ length: 10 }).map((_, j) => (
+                      {Array.from({ length: 11 }).map((_, j) => (
                         <TableCell key={j}><div className="shimmer h-3.5 rounded w-16" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : inspections.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-sm">
                       No inspections found
                     </TableCell>
                   </TableRow>
@@ -284,8 +372,21 @@ export function QualityInspectionsView() {
                         <TableCell className="text-xs">{ins.totalQty}</TableCell>
                         <TableCell className="text-xs text-green-400">{ins.passQty}</TableCell>
                         <TableCell className="text-xs text-red-400">{ins.failQty > 0 ? ins.failQty : '—'}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground font-mono">
-                          {ins.workOrder?.orderNumber ?? '—'}
+                        <TableCell className="text-xs">
+                          {ins.workOrder ? (
+                            <span className="flex items-center gap-1 font-mono text-primary/80">
+                              <Link2 size={10} />
+                              {ins.workOrder.orderNumber}
+                            </span>
+                          ) : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {ins.plan ? (
+                            <span className="flex items-center gap-1">
+                              <ClipboardList size={10} className="text-primary/60" />
+                              {ins.plan.name}
+                            </span>
+                          ) : '—'}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{ins.inspector?.name ?? '—'}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{formatDate(ins.inspectedAt)}</TableCell>
@@ -321,53 +422,168 @@ export function QualityInspectionsView() {
       <FormDialog
         open={formOpen}
         onClose={handleCloseForm}
-        title={editInspection ? 'Edit Inspection' : 'Create Inspection'}
+        title={editInspection ? 'Edit Inspection' : 'New Inspection'}
         onSubmit={handleSubmit}
         isSubmitting={createMutation.isPending || updateMutation.isPending}
         isValid={isValid}
       >
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>Inspection Number *</Label>
-            <Input value={form.inspectionNumber} onChange={e => setForm(v => ({ ...v, inspectionNumber: e.target.value }))} className="mt-1" />
+        <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+          {/* Base fields */}
+          <div className="grid grid-cols-2 gap-4">
+            {editInspection && (
+              <div>
+                <Label>Inspection Number</Label>
+                <Input value={form.inspectionNumber} disabled className="mt-1 font-mono text-xs bg-muted/50" />
+              </div>
+            )}
+            <div className={editInspection ? '' : 'col-span-2'}>
+              <Label>Type *</Label>
+              <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Total Quantity *</Label>
+              <Input type="number" value={form.totalQty} onChange={e => setForm(v => ({ ...v, totalQty: e.target.value }))} className="mt-1" />
+            </div>
+            <div>
+              <Label>Pass Quantity *</Label>
+              <Input type="number" value={form.passQty} onChange={e => setForm(v => ({ ...v, passQty: e.target.value }))} className="mt-1" />
+            </div>
+            <div>
+              <Label>Fail Quantity</Label>
+              <Input type="number" value={form.failQty} onChange={e => setForm(v => ({ ...v, failQty: e.target.value }))} className="mt-1" />
+            </div>
+            <div>
+              <Label>Work Order (ISA-95 link)</Label>
+              <Select value={form.workOrderId} onValueChange={v => setForm(f => ({ ...f, workOrderId: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Link to work order..." /></SelectTrigger>
+                <SelectContent className="max-h-52">
+                  <SelectItem value="__none__">None</SelectItem>
+                  {workOrders.map(wo => (
+                    <SelectItem key={wo.id} value={wo.id}>
+                      <span className="font-mono text-xs">{wo.orderNumber}</span>
+                      {wo.sku?.name && <span className="text-muted-foreground ml-2 text-[10px]">{wo.sku.name}</span>}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+
+          {/* Quality Plan */}
           <div>
-            <Label>Type *</Label>
-            <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {Object.entries(TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Total Quantity *</Label>
-            <Input type="number" value={form.totalQty} onChange={e => setForm(v => ({ ...v, totalQty: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
-            <Label>Pass Quantity *</Label>
-            <Input type="number" value={form.passQty} onChange={e => setForm(v => ({ ...v, passQty: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
-            <Label>Fail Quantity</Label>
-            <Input type="number" value={form.failQty} onChange={e => setForm(v => ({ ...v, failQty: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
-            <Label>Work Order</Label>
-            <Select value={form.workOrderId} onValueChange={v => setForm(f => ({ ...f, workOrderId: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Link to work order..." /></SelectTrigger>
+            <Label className="flex items-center gap-1.5">
+              <ClipboardList size={12} className="text-primary" />
+              Quality Plan (ISA-95 QualityTest)
+            </Label>
+            <Select value={form.planId || '__none__'} onValueChange={handlePlanSelect}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select plan..." /></SelectTrigger>
               <SelectContent className="max-h-52">
-                <SelectItem value="__none__">None</SelectItem>
-                {workOrders.map(wo => (
-                  <SelectItem key={wo.id} value={wo.id}>
-                    <span className="font-mono text-xs">{wo.orderNumber}</span>
-                    {wo.sku?.name && <span className="text-muted-foreground ml-2 text-[10px]">{wo.sku.name}</span>}
+                <SelectItem value="__none__">No plan</SelectItem>
+                {plans.map(p => (
+                  <SelectItem key={p.id} value={p.id}>
+                    <span className="font-mono text-xs">{p.code}</span>
+                    <span className="ml-2">{p.name}</span>
+                    <span className="ml-2 text-muted-foreground text-[10px]">{p.type}</span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="col-span-2">
+
+          {/* Quality Checklist (quality parameters from plan) */}
+          {checklist.length > 0 && (
+            <div>
+              <Label className="flex items-center gap-1.5 mb-2">
+                <FlaskConical size={12} className="text-primary" />
+                Quality Check Points ({checklist.length} parameters)
+              </Label>
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40">
+                    <tr>
+                      <th className="text-left p-2 font-medium text-muted-foreground">Parameter</th>
+                      <th className="text-left p-2 font-medium text-muted-foreground w-28">Measured Value</th>
+                      <th className="text-center p-2 font-medium text-muted-foreground w-24">Result</th>
+                      <th className="text-left p-2 font-medium text-muted-foreground">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {checklist.map((item, idx) => {
+                      const param = selectedPlan?.parameters.find(p => p.id === item.parameterId)
+                      return (
+                        <tr key={item.parameterId} className="border-t">
+                          <td className="p-1.5">
+                            <div className="font-medium">{item.parameterName}</div>
+                            {param && (
+                              <div className="text-[10px] text-muted-foreground">
+                                {param.nominalValue != null && `Nominal: ${param.nominalValue}`}
+                                {param.unit && ` ${param.unit}`}
+                                {(param.lsl != null || param.usl != null) && ` | Spec: [${param.lsl ?? '—'}, ${param.usl ?? '—'}]`}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-1.5">
+                            <Input
+                              value={item.measuredValue}
+                              onChange={e => updateChecklistItem(idx, 'measuredValue', e.target.value)}
+                              className="h-7 text-xs w-full"
+                              placeholder="Enter value"
+                            />
+                          </td>
+                          <td className="p-1.5">
+                            <div className="flex gap-1 justify-center">
+                              <button
+                                type="button"
+                                onClick={() => updateChecklistItem(idx, 'pass', true)}
+                                className={cn(
+                                  'flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors',
+                                  item.pass === true
+                                    ? 'bg-green-500/20 text-green-400 border border-green-500/40'
+                                    : 'bg-muted/30 text-muted-foreground hover:bg-green-500/10',
+                                )}
+                              >
+                                <CheckCircle2 size={10} /> Pass
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateChecklistItem(idx, 'pass', false)}
+                                className={cn(
+                                  'flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors',
+                                  item.pass === false
+                                    ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                                    : 'bg-muted/30 text-muted-foreground hover:bg-red-500/10',
+                                )}
+                              >
+                                <XCircle size={10} /> Fail
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-1.5">
+                            <Input
+                              value={item.notes}
+                              onChange={e => updateChecklistItem(idx, 'notes', e.target.value)}
+                              className="h-7 text-xs w-full"
+                              placeholder="Optional..."
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                {checklist.filter(c => c.pass === true).length}/{checklist.length} parameters passing
+              </p>
+            </div>
+          )}
+
+          <div>
             <Label>Notes</Label>
             <Input value={form.notes} onChange={e => setForm(v => ({ ...v, notes: e.target.value }))} className="mt-1" />
           </div>

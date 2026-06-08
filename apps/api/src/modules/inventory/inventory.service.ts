@@ -337,7 +337,9 @@ export class InventoryService {
 
   async createProduct(factoryId: string | null, dto: {
     code: string; name: string; itemNumber?: string; category?: string; brand?: string;
-    unit?: string; weight?: number; packagingType?: string;
+    unit?: string; weight?: number; weightUnit?: string;
+    length?: number; width?: number; height?: number; dimensionUnit?: string;
+    packagingType?: string;
     unitsPerInner?: number; innersPerCarton?: number; cartonsPerPallet?: number;
     storageLocationId?: string;
   }) {
@@ -351,7 +353,12 @@ export class InventoryService {
         category: dto.category,
         brand: dto.brand,
         baseUnit: dto.unit ?? 'PCS',
-        weight: dto.weight,
+        weight: dto.weight ?? null,
+        weightUnit: dto.weightUnit ?? 'kg',
+        length: dto.length ?? null,
+        width: dto.width ?? null,
+        height: dto.height ?? null,
+        dimensionUnit: dto.dimensionUnit ?? 'cm',
         packagingType: dto.packagingType,
         unitsPerInner: dto.unitsPerInner ?? 1,
         innersPerCarton: dto.innersPerCarton ?? 1,
@@ -363,8 +370,10 @@ export class InventoryService {
   }
 
   async updateProduct(factoryId: string | null, id: string, dto: {
-    name?: string; category?: string; brand?: string; unit?: string; weight?: number;
-    storageLocationId?: string;
+    name?: string; category?: string; brand?: string; unit?: string;
+    weight?: number | null; weightUnit?: string;
+    length?: number | null; width?: number | null; height?: number | null; dimensionUnit?: string;
+    storageLocationId?: string | null;
   }) {
     const factoryFilter = factoryId ? { factoryId } : {};
     const sku = await this.prisma.sKU.findFirst({ where: { id, ...factoryFilter } });
@@ -377,6 +386,11 @@ export class InventoryService {
         ...(dto.brand !== undefined && { brand: dto.brand }),
         ...(dto.unit && { baseUnit: dto.unit }),
         ...(dto.weight !== undefined && { weight: dto.weight }),
+        ...(dto.weightUnit && { weightUnit: dto.weightUnit }),
+        ...(dto.length !== undefined && { length: dto.length }),
+        ...(dto.width !== undefined && { width: dto.width }),
+        ...(dto.height !== undefined && { height: dto.height }),
+        ...(dto.dimensionUnit && { dimensionUnit: dto.dimensionUnit }),
         ...(dto.storageLocationId !== undefined && { storageLocationId: dto.storageLocationId }),
       },
     });
@@ -493,6 +507,80 @@ export class InventoryService {
     const loc = await this.prisma.storageLocation.findFirst({ where: { id, ...factoryFilter } });
     if (!loc) throw new NotFoundException('Storage location not found');
     await this.prisma.storageLocation.update({ where: { id }, data: { isActive: false } });
+  }
+
+  async getLocationContents(factoryId: string | null, id: string) {
+    const where = factoryId ? { id, factoryId } : { id };
+    const loc = await this.prisma.storageLocation.findFirst({
+      where,
+      include: {
+        rawMaterials: {
+          where: { isActive: true },
+          select: { id: true, code: true, name: true, category: true, unit: true, currentStock: true, minStock: true, unitCost: true },
+          orderBy: { name: 'asc' },
+        },
+        materialLots: {
+          select: {
+            id: true, lotNumber: true, materialCode: true, materialName: true,
+            quantity: true, remainingQty: true, unit: true, status: true,
+            receivedAt: true, expiryDate: true, binNumber: true,
+            rawMaterial: { select: { code: true, name: true, category: true } },
+          },
+          orderBy: { receivedAt: 'desc' },
+        },
+        spareParts: {
+          where: { isActive: true },
+          select: { id: true, partNumber: true, name: true, category: true, stockQty: true, minStockQty: true, unitCost: true, binNumber: true },
+          orderBy: { name: 'asc' },
+        },
+        skus: {
+          where: { isActive: true },
+          select: { id: true, code: true, name: true, itemNumber: true, category: true },
+          orderBy: { name: 'asc' },
+        },
+      },
+    });
+    if (!loc) throw new NotFoundException('Storage location not found');
+
+    const rawMaterials = (loc as any).rawMaterials as { id: string; code: string; name: string; category: string | null; unit: string; currentStock: number; minStock: number; unitCost: number | null }[];
+    const materialLots = (loc as any).materialLots as { id: string; lotNumber: string; materialCode: string; materialName: string; quantity: number; remainingQty: number | null; unit: string; status: string; receivedAt: Date; expiryDate: Date | null; binNumber: string | null; rawMaterial: { code: string; name: string; category: string | null } | null }[];
+    const spareParts = (loc as any).spareParts as { id: string; partNumber: string; name: string; category: string | null; stockQty: number; minStockQty: number; unitCost: number | null; binNumber: string | null }[];
+    const skus = (loc as any).skus as { id: string; code: string; name: string; itemNumber: string | null; category: string | null }[];
+
+    const stockValue =
+      rawMaterials.reduce((s, r) => s + r.currentStock * (r.unitCost ?? 0), 0) +
+      materialLots.reduce((s, m) => s + (m.remainingQty ?? 0), 0) +
+      spareParts.reduce((s, p) => s + p.stockQty * (p.unitCost ?? 0), 0);
+
+    return {
+      id: loc.id,
+      code: loc.code,
+      name: loc.name,
+      zone: loc.zone,
+      description: loc.description,
+      capacity: loc.capacity,
+      isActive: loc.isActive,
+      stockValue: parseFloat(stockValue.toFixed(2)),
+      rawMaterials: rawMaterials.map(r => ({
+        id: r.id,
+        code: r.code,
+        name: r.name,
+        category: r.category,
+        unit: r.unit,
+        stockQty: r.currentStock,
+        minStockQty: r.minStock,
+        unitCost: r.unitCost,
+        isLowStock: r.currentStock <= r.minStock,
+        stockValue: parseFloat((r.currentStock * (r.unitCost ?? 0)).toFixed(2)),
+      })),
+      materialLots,
+      spareParts: spareParts.map(p => ({
+        ...p,
+        isLowStock: p.stockQty <= p.minStockQty,
+        stockValue: parseFloat((p.stockQty * (p.unitCost ?? 0)).toFixed(2)),
+      })),
+      skus,
+    };
   }
 
   // ────────────────────────────────────────────────────────────
@@ -626,6 +714,15 @@ export class InventoryService {
       where: { id },
       data: { approvedAt: new Date(), approvedById: userId, isActive: true },
     });
+  }
+
+  async deleteBOM(id: string, factoryId: string | null) {
+    const where = factoryId ? { id, factoryId } : { id };
+    const bom = await this.prisma.bOMHeader.findFirst({ where });
+    if (!bom) throw new NotFoundException('BOM not found');
+    if (bom.approvedAt) throw new BadRequestException('Approved BOMs cannot be deleted. Revert to draft first or create a new version.');
+    await this.prisma.bOMItem.deleteMany({ where: { bomId: id } });
+    await this.prisma.bOMHeader.delete({ where: { id } });
   }
 
   async deleteBOMItem(bomId: string, itemId: string) {

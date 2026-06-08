@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   description:
     'Enterprise Manufacturing Execution System — Real-time production monitoring, quality management, maintenance, and industrial IoT integration.',
   keywords: ['MES', 'Manufacturing', 'OEE', 'Production', 'Quality', 'Maintenance', 'IIoT', 'SCADA'],
-  authors: [{ name: 'STAR-MES', url: 'https://industry360.sa' }],
+  authors: [{ name: 'STAR-MES', url: 'https://star-mes.sa' }],
   creator: 'STAR-MES',
   publisher: 'STAR-MES',
   manifest: '/manifest.json',
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://mes.industry360.sa',
+    url: 'https://mes.star-mes.sa',
     title: 'STAR-MES Platform',
     description: 'Enterprise Manufacturing Execution System',
     siteName: 'STAR-MES',

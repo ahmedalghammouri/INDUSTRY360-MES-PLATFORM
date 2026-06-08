@@ -60,7 +60,9 @@ interface NCR {
 }
 
 const EMPTY_NCR_FORM = {
-  title: '', severity: 'MINOR', defectCategory: '', affectedQty: '', machineId: '__none__', workOrderId: '__none__', description: '', detectedAt: new Date().toISOString().slice(0, 10),
+  title: '', severity: 'MINOR', defectCategory: '', quantity: '', machineId: '__none__',
+  description: '', detectedAt: new Date().toISOString().slice(0, 10),
+  dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
 };
 
 export function QualityNcrView() {
@@ -157,11 +159,11 @@ export function QualityNcrView() {
       title: ncr.title,
       severity: ncr.severity,
       defectCategory: ncr.defectCategory ?? '',
-      affectedQty: ncr.affectedQty?.toString() ?? '',
+      quantity: (ncr as any).quantity?.toString() ?? '',
       machineId: (ncr as any).machineId ?? '__none__',
-      workOrderId: (ncr as any).workOrderId ?? '__none__',
       description: (ncr as any).description ?? '',
       detectedAt: ncr.reportedAt?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+      dueDate: ncr.dueDate?.slice(0, 10) ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
     })
     setFormOpen(true)
   };
@@ -174,12 +176,12 @@ export function QualityNcrView() {
   const buildDto = () => ({
     title: form.title,
     severity: form.severity,
-    defectCategory: form.defectCategory || undefined,
-    affectedQty: form.affectedQty ? parseInt(form.affectedQty) : undefined,
+    defectCategory: form.defectCategory,
+    quantity: parseInt(form.quantity) || 1,
     machineId: (form.machineId && form.machineId !== '__none__') ? form.machineId : undefined,
-    workOrderId: (form.workOrderId && form.workOrderId !== '__none__') ? form.workOrderId : undefined,
-    description: form.description || undefined,
-    detectedAt: form.detectedAt,
+    description: form.description,
+    detectedAt: new Date(form.detectedAt).toISOString(),
+    dueDate: new Date(form.dueDate).toISOString(),
   });
 
   const handleSubmit = () => {
@@ -190,7 +192,10 @@ export function QualityNcrView() {
     }
   };
 
-  const isValid = !!(form.title && form.severity && form.detectedAt)
+  const isValid = !!(
+    form.title && form.severity && form.detectedAt && form.dueDate &&
+    form.defectCategory && form.description && form.description.length >= 10 && form.quantity
+  )
 
   return (
     <div className="flex flex-col h-full">
@@ -383,15 +388,15 @@ export function QualityNcrView() {
             <Input value={form.title} onChange={e => setForm(v => ({ ...v, title: e.target.value }))} className="mt-1" />
           </div>
           <div>
-            <Label>Defect Category</Label>
-            <Input value={form.defectCategory} onChange={e => setForm(v => ({ ...v, defectCategory: e.target.value }))} className="mt-1" />
+            <Label>Defect Category *</Label>
+            <Input value={form.defectCategory} onChange={e => setForm(v => ({ ...v, defectCategory: e.target.value }))} placeholder="e.g. LABELING, FILL_WEIGHT, SEAL" className="mt-1" />
           </div>
           <div>
-            <Label>Affected Quantity</Label>
-            <Input type="number" value={form.affectedQty} onChange={e => setForm(v => ({ ...v, affectedQty: e.target.value }))} className="mt-1" />
+            <Label>Non-Conforming Quantity *</Label>
+            <Input type="number" min="1" value={form.quantity} onChange={e => setForm(v => ({ ...v, quantity: e.target.value }))} placeholder="Number of defective units" className="mt-1" />
           </div>
           <div>
-            <Label>Machine</Label>
+            <Label>Machine (optional)</Label>
             <Select value={form.machineId} onValueChange={v => setForm(f => ({ ...f, machineId: v }))}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="Select machine..." /></SelectTrigger>
               <SelectContent className="max-h-52">
@@ -408,22 +413,19 @@ export function QualityNcrView() {
             </Select>
           </div>
           <div>
-            <Label>Work Order</Label>
-            <Select value={form.workOrderId} onValueChange={v => setForm(f => ({ ...f, workOrderId: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Link work order..." /></SelectTrigger>
-              <SelectContent className="max-h-52">
-                <SelectItem value="__none__">None</SelectItem>
-                {workOrders.map(wo => (
-                  <SelectItem key={wo.id} value={wo.id}>
-                    <span className="font-mono text-xs">{wo.orderNumber}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label>Resolution Due Date *</Label>
+            <Input type="date" value={form.dueDate} onChange={e => setForm(v => ({ ...v, dueDate: e.target.value }))} className="mt-1" />
           </div>
           <div className="col-span-2">
-            <Label>Description</Label>
-            <Input value={form.description} onChange={e => setForm(v => ({ ...v, description: e.target.value }))} className="mt-1" />
+            <Label>Description * <span className="text-muted-foreground text-xs">(min 10 characters)</span></Label>
+            <textarea
+              value={form.description}
+              onChange={e => setForm(v => ({ ...v, description: e.target.value }))}
+              placeholder="Describe the non-conformance in detail — what was found, where, how many affected..."
+              rows={3}
+              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <p className="text-[10px] text-muted-foreground mt-0.5">{form.description.length} / 5000 chars</p>
           </div>
         </div>
       </FormDialog>

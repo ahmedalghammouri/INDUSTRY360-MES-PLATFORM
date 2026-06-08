@@ -1,5 +1,5 @@
 # ============================================================
-# INDUSTRY360 MES API - Multi-Stage Dockerfile
+# STAR-MES API - Multi-Stage Dockerfile
 # ============================================================
 
 # Base

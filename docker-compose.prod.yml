@@ -6,7 +6,7 @@ services:
     container_name: mes-postgres-prod
     restart: always
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-industry360_mes}
+      POSTGRES_DB: ${POSTGRES_DB:-star_mes}
       POSTGRES_USER: ${POSTGRES_USER:-mes_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
@@ -15,7 +15,7 @@ services:
     networks:
       - mes-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mes_user} -d ${POSTGRES_DB:-industry360_mes}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mes_user} -d ${POSTGRES_DB:-star_mes}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -43,7 +43,7 @@ services:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:-admin}
       DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD}
-      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-industry360}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-star-mes}
       DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-mes_timeseries}
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN}
     volumes:
@@ -71,11 +71,11 @@ services:
     restart: always
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-mes_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-industry360_mes}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mes_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-star_mes}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       INFLUXDB_URL: http://influxdb:8086
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
-      INFLUXDB_ORG: ${INFLUXDB_ORG:-industry360}
+      INFLUXDB_ORG: ${INFLUXDB_ORG:-star-mes}
       INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-mes_timeseries}
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}

@@ -89,11 +89,12 @@ export function ProductionReportView() {
     return Object.entries(byMachine).map(([machine, v]) => ({ machine, ...v }));
   }, [records]);
 
+  const safeNum = (v: number | null | undefined) => Number(v ?? 0);
   const kpis = [
-    { label: 'Avg OEE',          value: `${summary.avgOEE.toFixed(1)}%`, icon: Activity,     color: 'text-brand-400',  bg: 'bg-brand-500/20',  up: true },
-    { label: 'Total Output',     value: summary.totalActual.toLocaleString(), icon: BarChart3, color: 'text-green-400',  bg: 'bg-green-500/20',  up: true },
-    { label: 'Downtime (min)',   value: summary.totalDowntime.toLocaleString(), icon: Clock,   color: 'text-amber-400',  bg: 'bg-amber-500/20',  up: false },
-    { label: 'First-Pass Yield', value: `${summary.quality.toFixed(1)}%`, icon: CheckCircle2, color: 'text-cyan-400',   bg: 'bg-cyan-500/20',   up: true },
+    { label: 'Avg OEE',          value: `${safeNum(summary.avgOEE).toFixed(1)}%`, icon: Activity,     color: 'text-brand-400',  bg: 'bg-brand-500/20',  up: true },
+    { label: 'Total Output',     value: safeNum(summary.totalActual).toLocaleString(), icon: BarChart3, color: 'text-green-400',  bg: 'bg-green-500/20',  up: true },
+    { label: 'Downtime (min)',   value: safeNum(summary.totalDowntime).toLocaleString(), icon: Clock,   color: 'text-amber-400',  bg: 'bg-amber-500/20',  up: false },
+    { label: 'First-Pass Yield', value: `${safeNum(summary.quality).toFixed(1)}%`, icon: CheckCircle2, color: 'text-cyan-400',   bg: 'bg-cyan-500/20',   up: true },
   ];
 
   return (
@@ -226,9 +227,9 @@ export function ProductionReportView() {
                   <tr key={i} className="border-b border-border/30 hover:bg-white/5">
                     <td className="p-3 text-xs text-muted-foreground">{r.date.slice(0, 10)}</td>
                     <td className="p-3 text-xs font-medium">{r.machine}</td>
-                    <td className="p-3 text-xs text-right">{r.plannedQty.toLocaleString()}</td>
-                    <td className="p-3 text-xs text-right">{r.actualQty.toLocaleString()}</td>
-                    <td className="p-3 text-xs text-right text-green-400">{r.goodQty.toLocaleString()}</td>
+                    <td className="p-3 text-xs text-right">{Number(r.plannedQty ?? 0).toLocaleString()}</td>
+                    <td className="p-3 text-xs text-right">{Number(r.actualQty ?? 0).toLocaleString()}</td>
+                    <td className="p-3 text-xs text-right text-green-400">{Number(r.goodQty ?? 0).toLocaleString()}</td>
                     <td className="p-3 text-xs text-right font-semibold text-primary">{r.oee != null ? `${r.oee.toFixed(1)}%` : '—'}</td>
                     <td className="p-3 text-xs text-right text-muted-foreground">{r.downtime}</td>
                   </tr>

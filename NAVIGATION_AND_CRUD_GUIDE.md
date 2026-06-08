@@ -1,4 +1,4 @@
-# INDUSTRY360 MES Platform - Navigation & CRUD Operations Guide
+# STAR-MES Platform - Navigation & CRUD Operations Guide
 
 ## How to Access All Views with CRUD Operations
 
@@ -15,7 +15,7 @@ This guide shows you how to navigate to each view in the platform and what CRUD 
 
 2. **Login Page**: `http://localhost:3000/login?factory=SIDCO`
    - Default credentials:
-     - Email: `admin@industry360.sa`
+     - Email: `admin@star-mes.sa`
      - Password: `Admin@123`
      - Role: `SUPER_ADMIN`
 
@@ -598,7 +598,7 @@ Toast Notification Shows Success
 ## 🎨 Sidebar Navigation Map
 
 ```
-INDUSTRY360
+STAR-MES
 ├── 📊 Dashboard
 ├── 🏭 Production
 │   ├── Overview
@@ -658,4 +658,4 @@ All views are accessible through the left sidebar after logging in at `http://lo
 
 ---
 
-*© 2026 INDUSTRY360 — Complete CRUD Operations Across All Modules*
+*© 2026 STAR-MES — Complete CRUD Operations Across All Modules*

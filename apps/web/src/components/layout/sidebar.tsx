@@ -45,6 +45,7 @@ import {
   MapPin,
   Workflow,
   GitMerge,
+  Star,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
@@ -97,6 +98,7 @@ const navItems: NavItem[] = [
     icon: ShieldCheck,
     children: [
       { label: 'Overview',          href: '/quality',             icon: Activity       },
+      { label: 'Quality Plans',     href: '/quality/plans',       icon: ClipboardList  },
       { label: 'Inspections',       href: '/quality/inspections', icon: ClipboardCheck },
       { label: 'Non-Conformance',   href: '/quality/ncr',         icon: AlertTriangle,  dynamicKey: 'openNcr',       badgeVariant: 'destructive'  },
       { label: 'CAPA',              href: '/quality/capa',        icon: ShieldCheck    },
@@ -487,9 +489,11 @@ export function Sidebar() {
     >
       {/* Logo */}
       <div className="flex items-center h-16 px-3 border-b border-sidebar-border shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="shrink-0 w-8 h-8 rounded-lg bg-primary flex items-center justify-center shadow-glow-brand">
-            <Factory className="w-4.5 h-4.5 text-white" size={18} />
+        <div className="flex items-center gap-2.5 min-w-0">
+          {/* Brand mark — star with gradient glow */}
+          <div className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center shadow-glow-brand"
+            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #7c3aed 100%)' }}>
+            <Star size={19} className="text-white" fill="rgba(255,255,255,0.85)" />
           </div>
           <AnimatePresence>
             {!isCollapsed && (
@@ -499,11 +503,17 @@ export function Sidebar() {
                 exit={{ opacity: 0, width: 0 }}
                 className="overflow-hidden"
               >
-                <div className="text-sidebar-foreground font-bold text-sm whitespace-nowrap">
-                  STAR-MES
+                <div className="whitespace-nowrap leading-none">
+                  <span
+                    className="font-black text-[15px] tracking-tight"
+                    style={{ background: 'linear-gradient(90deg, #818cf8, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
+                  >
+                    STAR
+                  </span>
+                  <span className="font-bold text-[15px] tracking-tight text-sidebar-foreground/75">-MES</span>
                 </div>
-                <div className="text-sidebar-foreground/40 text-[10px] font-medium tracking-widest uppercase whitespace-nowrap">
-                  MES Platform
+                <div className="text-sidebar-foreground/35 text-[9px] font-semibold tracking-[0.12em] uppercase whitespace-nowrap mt-0.5">
+                  Manufacturing Execution
                 </div>
               </motion.div>
             )}

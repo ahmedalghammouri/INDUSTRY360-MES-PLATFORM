@@ -5,6 +5,7 @@ import {
   Plus, Download, Filter, Search, Play, Pause,
   CheckCircle, Pencil, Trash2, XCircle, ChevronDown,
   Factory, Cpu, User, Clock, BarChart3, Package,
+  ClipboardCheck, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -76,6 +77,75 @@ function DetailRow({ label, value }: { label: string; value?: React.ReactNode })
     <div className="flex items-start gap-2 py-2 border-b border-border/20 last:border-0">
       <span className="text-[11px] text-muted-foreground w-28 shrink-0 pt-0.5">{label}</span>
       <span className="text-xs font-medium flex-1">{value ?? <span className="text-muted-foreground">—</span>}</span>
+    </div>
+  );
+}
+
+const INSP_RESULT: Record<string, { label: string; cls: string; Icon: any }> = {
+  PASS:        { label: 'Pass',        cls: 'text-green-400', Icon: CheckCircle2 },
+  FAIL:        { label: 'Fail',        cls: 'text-red-400',   Icon: XCircle      },
+  CONDITIONAL: { label: 'Conditional', cls: 'text-amber-400', Icon: AlertCircle  },
+};
+
+function WorkOrderQualityPanel({ workOrderId }: { workOrderId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['quality', 'wo-inspections', workOrderId],
+    queryFn: () => api.get(`/quality/work-orders/${workOrderId}/inspections`),
+    staleTime: 30_000,
+  });
+
+  const inspections: any[] = (data as any) ?? [];
+  const passCount = inspections.filter(i => i.result === 'PASS').length;
+  const failCount = inspections.filter(i => i.result === 'FAIL').length;
+  const overallPass = inspections.length > 0 && failCount === 0;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+          <ClipboardCheck size={12} className="text-primary" />
+          Quality Inspections (ISA-95)
+        </p>
+        {inspections.length > 0 && (
+          <Badge
+            variant="outline"
+            className={cn('text-[10px] h-4', overallPass ? 'text-green-400 border-green-500/30' : failCount > 0 ? 'text-red-400 border-red-500/30' : 'text-amber-400 border-amber-500/30')}
+          >
+            {passCount}/{inspections.length} Pass
+          </Badge>
+        )}
+      </div>
+      {isLoading ? (
+        <div className="shimmer h-10 rounded-lg" />
+      ) : inspections.length === 0 ? (
+        <div className="industrial-card rounded-lg px-3 py-2 text-xs text-muted-foreground text-center">
+          No quality inspections linked to this work order
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {inspections.map((ins: any) => {
+            const r = INSP_RESULT[ins.result] ?? INSP_RESULT.CONDITIONAL;
+            const RIcon = r.Icon;
+            return (
+              <div key={ins.id} className="industrial-card rounded-lg px-3 py-2 flex items-center gap-3">
+                <RIcon size={13} className={r.cls} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-primary">{ins.inspectionNumber}</span>
+                    <Badge variant="outline" className="text-[9px] h-4">{ins.type}</Badge>
+                    {ins.plan && <span className="text-[10px] text-muted-foreground truncate">{ins.plan.name}</span>}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    Pass: {ins.passQty} · Fail: {ins.failQty} · Total: {ins.totalQty}
+                    {ins.inspector && ` · ${ins.inspector.name}`}
+                  </div>
+                </div>
+                <span className={cn('text-[10px] font-semibold', r.cls)}>{r.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -502,6 +572,9 @@ export function ProductionWorkOrdersView() {
                     </div>
                   </div>
                 )}
+
+                {/* Quality Inspections (ISA-95 integration) */}
+                <WorkOrderQualityPanel workOrderId={(detail as any).id} />
 
                 {/* Notes */}
                 {(detail as any).notes && (

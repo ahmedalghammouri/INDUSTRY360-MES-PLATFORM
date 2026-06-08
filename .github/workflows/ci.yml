@@ -1,4 +1,4 @@
-name: INDUSTRY360 MES Platform CI/CD
+name: STAR-MES Platform CI/CD
 
 on:
   push:
@@ -54,7 +54,7 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: industry360_mes_test
+          POSTGRES_DB: star_mes_test
           POSTGRES_USER: mes_user
           POSTGRES_PASSWORD: mes_password
         ports:
@@ -93,17 +93,17 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
         env:
-          DATABASE_URL: postgresql://mes_user:mes_password@localhost:5432/industry360_mes_test
+          DATABASE_URL: postgresql://mes_user:mes_password@localhost:5432/star_mes_test
 
       - name: Run database migrations
         run: cd apps/api && npx prisma migrate deploy
         env:
-          DATABASE_URL: postgresql://mes_user:mes_password@localhost:5432/industry360_mes_test
+          DATABASE_URL: postgresql://mes_user:mes_password@localhost:5432/star_mes_test
 
       - name: Run API tests
         run: cd apps/api && pnpm test --coverage
         env:
-          DATABASE_URL: postgresql://mes_user:mes_password@localhost:5432/industry360_mes_test
+          DATABASE_URL: postgresql://mes_user:mes_password@localhost:5432/star_mes_test
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: test-jwt-secret-key-min-32-characters!
           JWT_REFRESH_SECRET: test-refresh-secret-key-min-32-chars!
@@ -187,7 +187,7 @@ jobs:
     if: github.ref == 'refs/heads/develop'
     environment:
       name: staging
-      url: https://staging.mes.industry360.sa
+      url: https://staging.mes.star-mes.sa
 
     steps:
       - name: Deploy to staging server
@@ -197,7 +197,7 @@ jobs:
           username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
-            cd /opt/industry360-mes
+            cd /opt/star-mes
             docker-compose -f docker-compose.prod.yml pull
             docker-compose -f docker-compose.prod.yml up -d --no-deps api web
             docker system prune -f
@@ -209,7 +209,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     environment:
       name: production
-      url: https://mes.industry360.sa
+      url: https://mes.star-mes.sa
 
     steps:
       - name: Deploy to production
@@ -219,7 +219,7 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
-            cd /opt/industry360-mes
+            cd /opt/star-mes
             docker-compose -f docker-compose.prod.yml pull
             docker-compose -f docker-compose.prod.yml up -d --no-deps --scale api=2 api web
             docker system prune -f

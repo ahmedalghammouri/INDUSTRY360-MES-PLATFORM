@@ -342,6 +342,15 @@ export class InventoryController {
     return this.inventoryService.deleteStorageLocation(user.factoryId, id);
   }
 
+  @Get('storage-locations/:id/contents')
+  @ApiOperation({ summary: 'Get all items stored at a location (ISA-95 MaterialLot, RawMaterial, SparePart, SKU)' })
+  async getLocationContents(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.getLocationContents(user.factoryId, id);
+  }
+
   // ────────────────────────────────────────────────────────────
   // BOM MANAGEMENT
   // ────────────────────────────────────────────────────────────
@@ -407,6 +416,16 @@ export class InventoryController {
     @Body() dto: any,
   ) {
     return this.inventoryService.upsertBOMItem(bomId, dto);
+  }
+
+  @Delete('bom/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a BOM (draft only)' })
+  async deleteBOM(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.deleteBOM(id, user.factoryId);
   }
 
   @Delete('bom/:bomId/items/:itemId')

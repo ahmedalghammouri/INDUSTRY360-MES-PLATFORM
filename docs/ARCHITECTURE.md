@@ -1,4 +1,4 @@
-# INDUSTRY360 MES — Architecture
+# STAR-MES — Architecture
 
 System design, module relationships, data flows, and integration patterns.
 
@@ -21,7 +21,7 @@ System design, module relationships, data flows, and integration patterns.
 
 ## 1. System Overview
 
-INDUSTRY360 MES is a **multi-tier, real-time enterprise application** composed of:
+STAR-MES is a **multi-tier, real-time enterprise application** composed of:
 
 | Tier | Technology | Responsibility |
 |---|---|---|
@@ -541,7 +541,7 @@ All server state (API data) flows through TanStack Query:
 
 ## 10. Multi-Tenancy Model
 
-INDUSTRY360 uses **factory-level isolation** (tenant = factory).
+STAR-MES uses **factory-level isolation** (tenant = factory).
 
 ### Isolation Mechanism
 
@@ -579,4 +579,4 @@ Sidebar "Back to Map" button
 
 ---
 
-*© 2026 INDUSTRY360 — Architecture Reference*
+*© 2026 STAR-MES — Architecture Reference*
