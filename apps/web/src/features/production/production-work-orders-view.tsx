@@ -87,17 +87,64 @@ const INSP_RESULT: Record<string, { label: string; cls: string; Icon: any }> = {
   CONDITIONAL: { label: 'Conditional', cls: 'text-amber-400', Icon: AlertCircle  },
 };
 
-function WorkOrderQualityPanel({ workOrderId }: { workOrderId: string }) {
+function WorkOrderQualityPanel({ workOrderId, machineId }: { workOrderId: string; machineId?: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState({ type: 'IN_PROCESS', planId: '__none__', totalQty: '', passQty: '', notes: '' });
+
   const { data, isLoading } = useQuery({
     queryKey: ['quality', 'wo-inspections', workOrderId],
     queryFn: () => api.get(`/quality/work-orders/${workOrderId}/inspections`),
     staleTime: 30_000,
   });
 
+  const { data: plansData } = useQuery({
+    queryKey: ['quality', 'plans', 'selector'],
+    queryFn: () => api.get('/quality/plans', { params: { isActive: 'true', limit: 100 } }),
+    staleTime: 300_000,
+    enabled: addOpen,
+  });
+
+  const createInspMutation = useMutation({
+    mutationFn: (dto: any) => api.post('/quality/inspections', dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quality', 'wo-inspections', workOrderId] });
+      toast({ title: 'Inspection recorded' });
+      setAddOpen(false);
+      setAddForm({ type: 'IN_PROCESS', planId: '__none__', totalQty: '', passQty: '', notes: '' });
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e?.response?.data?.message ?? 'Failed to save inspection', variant: 'destructive' }),
+  });
+
+  const plans: any[] = (plansData as any) ?? [];
   const inspections: any[] = (data as any) ?? [];
   const passCount = inspections.filter(i => i.result === 'PASS').length;
   const failCount = inspections.filter(i => i.result === 'FAIL').length;
   const overallPass = inspections.length > 0 && failCount === 0;
+
+  const totalNum = parseInt(addForm.totalQty || '0', 10);
+  const passNum = parseInt(addForm.passQty || '0', 10);
+  const failNum = Math.max(0, totalNum - passNum);
+  const passRate = totalNum > 0 ? Math.round((passNum / totalNum) * 100) : 0;
+  const predictedResult = passRate >= 95 ? 'PASS' : passRate >= 80 ? 'CONDITIONAL' : 'FAIL';
+  const resultCls = predictedResult === 'PASS' ? 'text-green-400' : predictedResult === 'CONDITIONAL' ? 'text-amber-400' : 'text-red-400';
+  const isAddValid = totalNum > 0 && passNum >= 0 && passNum <= totalNum;
+
+  const handleAddInsp = () => {
+    if (!isAddValid) return;
+    const dto: any = {
+      type: addForm.type,
+      workOrderId,
+      totalQty: totalNum,
+      passQty: passNum,
+      failQty: failNum,
+      notes: addForm.notes || undefined,
+    };
+    if (machineId) dto.machineId = machineId;
+    if (addForm.planId !== '__none__') dto.planId = addForm.planId;
+    createInspMutation.mutate(dto);
+  };
 
   return (
     <div>
@@ -106,20 +153,26 @@ function WorkOrderQualityPanel({ workOrderId }: { workOrderId: string }) {
           <ClipboardCheck size={12} className="text-primary" />
           Quality Inspections (ISA-95)
         </p>
-        {inspections.length > 0 && (
-          <Badge
-            variant="outline"
-            className={cn('text-[10px] h-4', overallPass ? 'text-green-400 border-green-500/30' : failCount > 0 ? 'text-red-400 border-red-500/30' : 'text-amber-400 border-amber-500/30')}
-          >
-            {passCount}/{inspections.length} Pass
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {inspections.length > 0 && (
+            <Badge
+              variant="outline"
+              className={cn('text-[10px] h-4', overallPass ? 'text-green-400 border-green-500/30' : failCount > 0 ? 'text-red-400 border-red-500/30' : 'text-amber-400 border-amber-500/30')}
+            >
+              {passCount}/{inspections.length} Pass
+            </Badge>
+          )}
+          <Button size="sm" variant="outline" className="h-5 text-[10px] px-2 gap-1" onClick={() => setAddOpen(true)}>
+            <Plus size={10} />Add
+          </Button>
+        </div>
       </div>
       {isLoading ? (
         <div className="shimmer h-10 rounded-lg" />
       ) : inspections.length === 0 ? (
         <div className="industrial-card rounded-lg px-3 py-2 text-xs text-muted-foreground text-center">
-          No quality inspections linked to this work order
+          No inspections yet —{' '}
+          <button className="text-primary underline underline-offset-2" onClick={() => setAddOpen(true)}>add one</button>
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -146,6 +199,89 @@ function WorkOrderQualityPanel({ workOrderId }: { workOrderId: string }) {
           })}
         </div>
       )}
+
+      {/* ── Add Inspection Dialog ── */}
+      <Dialog open={addOpen} onOpenChange={o => !o && setAddOpen(false)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <ClipboardCheck size={14} className="text-primary" />
+              Add Quality Inspection
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div>
+              <Label className="text-xs">Inspection Type *</Label>
+              <Select value={addForm.type} onValueChange={v => setAddForm(f => ({ ...f, type: v }))}>
+                <SelectTrigger className="mt-1 h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {['INCOMING', 'IN_PROCESS', 'FINAL', 'PATROL', 'AUDIT'].map(t => (
+                    <SelectItem key={t} value={t}>{t.replace('_', ' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Quality Plan <span className="text-muted-foreground">(optional)</span></Label>
+              <Select value={addForm.planId} onValueChange={v => setAddForm(f => ({ ...f, planId: v }))}>
+                <SelectTrigger className="mt-1 h-8 text-xs">
+                  <SelectValue placeholder="— Select plan —" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— No plan —</SelectItem>
+                  {plans.map((p: any) => (
+                    <SelectItem key={p.id} value={p.id}>{p.name} <span className="text-muted-foreground">({p.code})</span></SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Total Qty Inspected *</Label>
+                <Input
+                  type="number" min={1}
+                  value={addForm.totalQty}
+                  onChange={e => setAddForm(f => ({ ...f, totalQty: e.target.value }))}
+                  className="mt-1 h-8 text-xs"
+                  placeholder="e.g. 10"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Passed Qty *</Label>
+                <Input
+                  type="number" min={0}
+                  value={addForm.passQty}
+                  onChange={e => setAddForm(f => ({ ...f, passQty: e.target.value }))}
+                  className="mt-1 h-8 text-xs"
+                  placeholder="e.g. 9"
+                />
+              </div>
+            </div>
+            {addForm.totalQty && addForm.passQty && (
+              <div className="industrial-card rounded-md px-3 py-2 text-[10px] flex items-center gap-3">
+                <span className="text-muted-foreground">Failed: <span className="font-semibold text-foreground">{failNum}</span></span>
+                <span className="text-muted-foreground">Pass rate: <span className="font-semibold text-foreground">{passRate}%</span></span>
+                <span className="text-muted-foreground">→ Result: <span className={cn('font-bold', resultCls)}>{predictedResult}</span></span>
+              </div>
+            )}
+            <div>
+              <Label className="text-xs">Notes</Label>
+              <Input
+                value={addForm.notes}
+                onChange={e => setAddForm(f => ({ ...f, notes: e.target.value }))}
+                placeholder="Optional notes…"
+                className="mt-1 h-8 text-xs"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button size="sm" disabled={!isAddValid || createInspMutation.isPending} onClick={handleAddInsp}>
+              {createInspMutation.isPending ? 'Saving…' : 'Record Inspection'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -574,7 +710,7 @@ export function ProductionWorkOrdersView() {
                 )}
 
                 {/* Quality Inspections (ISA-95 integration) */}
-                <WorkOrderQualityPanel workOrderId={(detail as any).id} />
+                <WorkOrderQualityPanel workOrderId={(detail as any).id} machineId={(detail as any).machineId ?? (detail as any).machine?.id} />
 
                 {/* Notes */}
                 {(detail as any).notes && (

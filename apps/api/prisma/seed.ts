@@ -1290,6 +1290,559 @@ async function main() {
   }
 
   // ============================================================
+  // SIDCO — QUALITY PLANS (ISA-95 QualityTestSpecification)
+  // 3 approved plans: INCOMING / IN_PROCESS / FINAL
+  // ============================================================
+  const qpIncoming = await (prisma as any).qualityPlan.upsert({
+    where: { id: 'qp-sidco-incoming-001' },
+    update: {},
+    create: {
+      id: 'qp-sidco-incoming-001',
+      factoryId: sidco.id,
+      code: 'QP-RM-SIDCO-001',
+      name: 'Incoming Raw Material Inspection',
+      type: 'INCOMING',
+      samplingFrequency: 'EVERY_BATCH',
+      samplingQty: 5,
+      version: '1.0',
+      isActive: true,
+      approvedAt: daysAgo(30),
+      approvedById: issaMasadeh.id,
+    },
+  });
+
+  const qpInProcess = await (prisma as any).qualityPlan.upsert({
+    where: { id: 'qp-sidco-inprocess-001' },
+    update: {},
+    create: {
+      id: 'qp-sidco-inprocess-001',
+      factoryId: sidco.id,
+      skuId: skuMap['10310191'], // GENTO Original HF 2.25kg
+      machineId: bigBetti.id,
+      code: 'QP-IP-LINE1-001',
+      name: 'In-Process Packing Quality Check',
+      type: 'IN_PROCESS',
+      samplingFrequency: 'HOURLY',
+      samplingQty: 10,
+      version: '1.0',
+      isActive: true,
+      approvedAt: daysAgo(25),
+      approvedById: issaMasadeh.id,
+    },
+  });
+
+  const qpFinal = await (prisma as any).qualityPlan.upsert({
+    where: { id: 'qp-sidco-final-001' },
+    update: {},
+    create: {
+      id: 'qp-sidco-final-001',
+      factoryId: sidco.id,
+      skuId: skuMap['10310191'], // GENTO Original HF 2.25kg
+      code: 'QP-FN-GENTO-001',
+      name: 'Final Inspection — GENTO Products',
+      type: 'FINAL',
+      samplingFrequency: 'EVERY_BATCH',
+      samplingQty: 20,
+      version: '1.0',
+      isActive: true,
+      approvedAt: daysAgo(20),
+      approvedById: issaMasadeh.id,
+    },
+  });
+
+  // Quality Parameters (ISA-95 QualityTestSpecificationProperty)
+  const paramSeed = async (id: string, planId: string, data: Record<string, any>) => {
+    const existing = await (prisma as any).qualityParameter.findUnique({ where: { id } });
+    if (!existing) await (prisma as any).qualityParameter.create({ data: { id, planId, ...data } });
+  };
+
+  // INCOMING parameters (raw material checks)
+  await paramSeed('qp-param-inc-01', qpIncoming.id, { name: 'Moisture Content', unit: '%',   nominalValue: 3.5, ucl: 5.0, lcl: 1.0, usl: 6.0, lsl: 0.5, checkMethod: 'Karl Fischer titration',  isKPI: true,  sortOrder: 1 });
+  await paramSeed('qp-param-inc-02', qpIncoming.id, { name: 'Bulk Density',     unit: 'g/L', nominalValue: 650, ucl: 700, lcl: 600, usl: 720, lsl: 580, checkMethod: 'Bulk density apparatus',    isKPI: false, sortOrder: 2 });
+  await paramSeed('qp-param-inc-03', qpIncoming.id, { name: 'pH (1% solution)', unit: 'pH',  nominalValue: 10.5,ucl: 11.0,lcl: 10.0,usl: 11.5,lsl: 9.5, checkMethod: 'Digital pH meter',          isKPI: true,  sortOrder: 3 });
+
+  // IN_PROCESS parameters (packing line checks)
+  await paramSeed('qp-param-ip-01', qpInProcess.id, { name: 'Fill Weight',    unit: 'g',    nominalValue: 2250, ucl: 2280, lcl: 2220, usl: 2300, lsl: 2200, checkMethod: 'Calibrated weighing scale', isKPI: true,  sortOrder: 1 });
+  await paramSeed('qp-param-ip-02', qpInProcess.id, { name: 'Seal Strength',  unit: 'N',    nominalValue: 12.0, ucl: 14.0, lcl: 10.0, usl: 15.0, lsl: 8.0,  checkMethod: 'Seal strength tester',      isKPI: true,  sortOrder: 2 });
+  await paramSeed('qp-param-ip-03', qpInProcess.id, { name: 'Cap Torque',     unit: 'N·cm', nominalValue: 8.0,  ucl: 10.0, lcl: 6.0,  usl: 12.0, lsl: 5.0,  checkMethod: 'Digital torque meter',       isKPI: false, sortOrder: 3 });
+  await paramSeed('qp-param-ip-04', qpInProcess.id, { name: 'Label Position', unit: 'mm',   nominalValue: 0,    ucl: 2.0,  lcl: -2.0, usl: 3.0,  lsl: -3.0, checkMethod: 'Visual + ruler',              isKPI: false, sortOrder: 4 });
+
+  // FINAL parameters (pre-shipment checks)
+  await paramSeed('qp-param-fn-01', qpFinal.id, { name: 'Net Weight',        unit: 'g',          nominalValue: 2250, ucl: 2275, lcl: 2225, usl: 2290, lsl: 2210, checkMethod: 'Certified scale',             isKPI: true,  sortOrder: 1 });
+  await paramSeed('qp-param-fn-02', qpFinal.id, { name: 'Appearance Score',  unit: 'score (1-5)', nominalValue: 5,    usl: 5,    lsl: 3,                         checkMethod: 'Visual per QC standard',       isKPI: false, sortOrder: 2 });
+  await paramSeed('qp-param-fn-03', qpFinal.id, { name: 'Barcode Read Rate', unit: '%',          nominalValue: 100,  ucl: 100,  lcl: 99,   usl: 100,  lsl: 98,   checkMethod: 'Barcode scanner',              isKPI: true,  sortOrder: 3 });
+  await paramSeed('qp-param-fn-04', qpFinal.id, { name: 'Carton Integrity',  unit: 'pass/fail',  nominalValue: 1,    usl: 1,    lsl: 1,                         checkMethod: 'Physical inspection',          isKPI: false, sortOrder: 4 });
+
+  console.log(`✅ SIDCO quality plans: 3 approved plans (INCOMING × 3 params, IN_PROCESS × 4 params, FINAL × 4 params)`);
+
+  // ============================================================
+  // SIDCO — WORK ORDERS (realistic production schedule)
+  // Linked to GENTO, Safe, Alwatani SKUs on Big Betti / PL-01
+  // ============================================================
+  const wo1 = await (prisma as any).workOrder.upsert({
+    where: { orderNumber: 'WO-2026-0001' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'WO-2026-0001',
+      skuId: skuMap['10310191'],    // GENTO Original HF 2.25kg
+      machineId: bigBetti.id,
+      lineId: sidcoPackingLine1.id,
+      status: 'COMPLETED',
+      priority: 'HIGH',
+      plannedQty: 890,
+      actualQty: 885,
+      goodQty: 875,
+      scrapQty: 10,
+      oee: 86.5,
+      availability: 92.0,
+      performance: 94.0,
+      quality: 98.9,
+      plannedStart: daysAgo(7),
+      plannedEnd: new Date(daysAgo(7).getTime() + 8 * 3600000),
+      actualStart: daysAgo(7),
+      actualEnd: new Date(daysAgo(7).getTime() + 8.5 * 3600000),
+      operatorId: mohammedYousef.id,
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  const wo2 = await (prisma as any).workOrder.upsert({
+    where: { orderNumber: 'WO-2026-0002' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'WO-2026-0002',
+      skuId: skuMap['10310189'],    // GENTO Flower HF 2.25kg
+      machineId: bigBetti.id,
+      lineId: sidcoPackingLine1.id,
+      status: 'COMPLETED',
+      priority: 'MEDIUM',
+      plannedQty: 750,
+      actualQty: 748,
+      goodQty: 720,
+      scrapQty: 28,
+      oee: 78.2,
+      availability: 88.0,
+      performance: 91.0,
+      quality: 96.3,
+      plannedStart: daysAgo(5),
+      plannedEnd: new Date(daysAgo(5).getTime() + 7 * 3600000),
+      actualStart: daysAgo(5),
+      actualEnd: new Date(daysAgo(5).getTime() + 7.5 * 3600000),
+      operatorId: mohammedYousef.id,
+      createdById: issaMasadeh.id,
+      notes: 'Higher than expected scrap — fill weight issues detected mid-run. Batch held for QA review.',
+    },
+  });
+
+  const wo3 = await (prisma as any).workOrder.upsert({
+    where: { orderNumber: 'WO-2026-0003' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'WO-2026-0003',
+      skuId: skuMap['10310190'],    // GENTO Oud HF 2.25kg
+      machineId: bigBetti.id,
+      lineId: sidcoPackingLine1.id,
+      status: 'IN_PROGRESS',
+      priority: 'HIGH',
+      plannedQty: 1200,
+      actualQty: 640,
+      goodQty: 632,
+      scrapQty: 8,
+      oee: 82.1,
+      availability: 90.0,
+      performance: 91.5,
+      quality: 98.8,
+      plannedStart: daysAgo(1),
+      plannedEnd: daysAhead(1),
+      actualStart: daysAgo(1),
+      operatorId: mohammedYousef.id,
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  await (prisma as any).workOrder.upsert({
+    where: { orderNumber: 'WO-2026-0004' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'WO-2026-0004',
+      skuId: skuMap['10310214'],    // Safe Original HF 2.25kg
+      machineId: bigBetti.id,
+      lineId: sidcoPackingLine1.id,
+      status: 'PLANNED',
+      priority: 'MEDIUM',
+      plannedQty: 500,
+      actualQty: 0,
+      goodQty: 0,
+      scrapQty: 0,
+      plannedStart: daysAhead(1),
+      plannedEnd: daysAhead(2),
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  await (prisma as any).workOrder.upsert({
+    where: { orderNumber: 'WO-2026-0005' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'WO-2026-0005',
+      skuId: skuMap['10310067'],    // Alwatani Blue HF 2.0kg
+      machineId: bigBetti.id,
+      lineId: sidcoPackingLine1.id,
+      status: 'ON_HOLD',
+      priority: 'MEDIUM',
+      plannedQty: 600,
+      actualQty: 200,
+      goodQty: 198,
+      scrapQty: 2,
+      plannedStart: daysAgo(2),
+      plannedEnd: daysAhead(1),
+      actualStart: daysAgo(2),
+      notes: 'On hold — waiting for packaging film delivery from supplier',
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  await (prisma as any).workOrder.upsert({
+    where: { orderNumber: 'WO-2026-0006' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'WO-2026-0006',
+      skuId: skuMap['10310113'],    // SIDCO Extra White Original LF 1.5kg
+      machineId: bigBetti.id,
+      lineId: sidcoPackingLine1.id,
+      status: 'CANCELLED',
+      priority: 'LOW',
+      plannedQty: 400,
+      actualQty: 0,
+      goodQty: 0,
+      scrapQty: 0,
+      plannedStart: daysAgo(3),
+      plannedEnd: daysAgo(2),
+      notes: 'Cancelled — customer order postponed to next quarter',
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  console.log(`✅ SIDCO work orders: 6 orders — COMPLETED×2, IN_PROGRESS×1, PLANNED×1, ON_HOLD×1, CANCELLED×1`);
+
+  // ============================================================
+  // SIDCO — INSPECTION RESULTS (ISA-95 QualityTestResult)
+  // Linked to work orders above — includes PASS, CONDITIONAL, FAIL
+  // ============================================================
+  const qualityUser = await prisma.user.findFirst({ where: { email: 'quality@sidco.com.sa' } });
+  const inspectorId = qualityUser?.id ?? mohammedYousef.id;
+
+  const inspSeed = async (data: Record<string, any>) => {
+    const existing = await (prisma as any).inspectionResult.findUnique({ where: { inspectionNumber: data.inspectionNumber } });
+    if (!existing) await (prisma as any).inspectionResult.create({ data });
+  };
+
+  // INSP-2026-001 — INCOMING: STPP raw material lot check → PASS
+  await inspSeed({
+    factoryId: sidco.id,
+    planId: qpIncoming.id,
+    inspectionNumber: 'INSP-2026-001',
+    type: 'INCOMING',
+    result: 'PASS',
+    totalQty: 5, passQty: 5, failQty: 0,
+    measurements: [
+      { parameterId: 'qp-param-inc-01', name: 'Moisture Content', value: 3.2, unit: '%',   pass: true },
+      { parameterId: 'qp-param-inc-02', name: 'Bulk Density',     value: 658, unit: 'g/L', pass: true },
+      { parameterId: 'qp-param-inc-03', name: 'pH (1% solution)', value: 10.6,unit: 'pH',  pass: true },
+    ],
+    inspectorId,
+    inspectedAt: daysAgo(8),
+    notes: 'LOT-STPP-2024-02 — all parameters within specification. Batch approved for production.',
+  });
+
+  // INSP-2026-002 — IN_PROCESS on WO-2026-0001 → PASS
+  await inspSeed({
+    factoryId: sidco.id,
+    planId: qpInProcess.id,
+    workOrderId: wo1.id,
+    machineId: bigBetti.id,
+    inspectionNumber: 'INSP-2026-002',
+    type: 'IN_PROCESS',
+    result: 'PASS',
+    totalQty: 10, passQty: 10, failQty: 0,
+    measurements: [
+      { parameterId: 'qp-param-ip-01', name: 'Fill Weight',    value: 2252, unit: 'g',    pass: true },
+      { parameterId: 'qp-param-ip-02', name: 'Seal Strength',  value: 12.5, unit: 'N',    pass: true },
+      { parameterId: 'qp-param-ip-03', name: 'Cap Torque',     value: 8.2,  unit: 'N·cm', pass: true },
+      { parameterId: 'qp-param-ip-04', name: 'Label Position', value: 0.5,  unit: 'mm',   pass: true },
+    ],
+    inspectorId,
+    inspectedAt: daysAgo(7),
+    notes: 'Mid-shift check — all parameters within SPC control limits.',
+  });
+
+  // INSP-2026-003 — FINAL on WO-2026-0001 → PASS (batch cleared for dispatch)
+  await inspSeed({
+    factoryId: sidco.id,
+    planId: qpFinal.id,
+    workOrderId: wo1.id,
+    machineId: bigBetti.id,
+    inspectionNumber: 'INSP-2026-003',
+    type: 'FINAL',
+    result: 'PASS',
+    totalQty: 20, passQty: 20, failQty: 0,
+    measurements: [
+      { parameterId: 'qp-param-fn-01', name: 'Net Weight',        value: 2255, unit: 'g',           pass: true },
+      { parameterId: 'qp-param-fn-02', name: 'Appearance Score',  value: 5,    unit: 'score (1-5)', pass: true },
+      { parameterId: 'qp-param-fn-03', name: 'Barcode Read Rate', value: 100,  unit: '%',            pass: true },
+      { parameterId: 'qp-param-fn-04', name: 'Carton Integrity',  value: 1,    unit: 'pass/fail',   pass: true },
+    ],
+    inspectorId,
+    inspectedAt: new Date(daysAgo(7).getTime() + 9 * 3600000),
+    notes: 'Pre-shipment final check — batch cleared for dispatch.',
+  });
+
+  // INSP-2026-004 — IN_PROCESS on WO-2026-0002 → CONDITIONAL (fill weight drift detected)
+  await inspSeed({
+    factoryId: sidco.id,
+    planId: qpInProcess.id,
+    workOrderId: wo2.id,
+    machineId: bigBetti.id,
+    inspectionNumber: 'INSP-2026-004',
+    type: 'IN_PROCESS',
+    result: 'CONDITIONAL',
+    totalQty: 10, passQty: 9, failQty: 1,
+    measurements: [
+      { parameterId: 'qp-param-ip-01', name: 'Fill Weight',    value: 2195, unit: 'g',    pass: false, note: 'Below LSL 2200g — possible nozzle #3 blockage' },
+      { parameterId: 'qp-param-ip-02', name: 'Seal Strength',  value: 11.8, unit: 'N',    pass: true  },
+      { parameterId: 'qp-param-ip-03', name: 'Cap Torque',     value: 7.9,  unit: 'N·cm', pass: true  },
+      { parameterId: 'qp-param-ip-04', name: 'Label Position', value: 1.2,  unit: 'mm',   pass: true  },
+    ],
+    inspectorId,
+    inspectedAt: daysAgo(5),
+    notes: 'Sample #3 fill weight below LSL (2195g vs 2200g minimum). Nozzle inspection recommended.',
+  });
+
+  // INSP-2026-005 — FINAL on WO-2026-0002 → FAIL (6/20 units below min weight → NCR raised)
+  await inspSeed({
+    factoryId: sidco.id,
+    planId: qpFinal.id,
+    workOrderId: wo2.id,
+    machineId: bigBetti.id,
+    inspectionNumber: 'INSP-2026-005',
+    type: 'FINAL',
+    result: 'FAIL',
+    totalQty: 20, passQty: 14, failQty: 6,
+    measurements: [
+      { parameterId: 'qp-param-fn-01', name: 'Net Weight',        value: 2188, unit: 'g',           pass: false, note: '6 units measured at 2185–2208g, below 2210g LSL' },
+      { parameterId: 'qp-param-fn-02', name: 'Appearance Score',  value: 4,    unit: 'score (1-5)', pass: true  },
+      { parameterId: 'qp-param-fn-03', name: 'Barcode Read Rate', value: 100,  unit: '%',            pass: true  },
+      { parameterId: 'qp-param-fn-04', name: 'Carton Integrity',  value: 1,    unit: 'pass/fail',   pass: true  },
+    ],
+    inspectorId,
+    inspectedAt: new Date(daysAgo(5).getTime() + 8 * 3600000),
+    notes: '6 out of 20 units below minimum fill weight spec. Batch held. NCR-2026-001 raised.',
+  });
+
+  // INSP-2026-006 — IN_PROCESS on WO-2026-0003 → PASS (current run, post nozzle-cleaning)
+  await inspSeed({
+    factoryId: sidco.id,
+    planId: qpInProcess.id,
+    workOrderId: wo3.id,
+    machineId: bigBetti.id,
+    inspectionNumber: 'INSP-2026-006',
+    type: 'IN_PROCESS',
+    result: 'PASS',
+    totalQty: 10, passQty: 10, failQty: 0,
+    measurements: [
+      { parameterId: 'qp-param-ip-01', name: 'Fill Weight',    value: 2248, unit: 'g',    pass: true },
+      { parameterId: 'qp-param-ip-02', name: 'Seal Strength',  value: 12.2, unit: 'N',    pass: true },
+      { parameterId: 'qp-param-ip-03', name: 'Cap Torque',     value: 8.0,  unit: 'N·cm', pass: true },
+      { parameterId: 'qp-param-ip-04', name: 'Label Position', value: 0.8,  unit: 'mm',   pass: true },
+    ],
+    inspectorId,
+    inspectedAt: daysAgo(0),
+    notes: 'Shift start check — all nominal after nozzle cleaning. Process back in SPC control.',
+  });
+
+  console.log(`✅ SIDCO inspections: 6 records — INCOMING×1 PASS, IN_PROCESS×3 (2 PASS, 1 CONDITIONAL), FINAL×2 (1 PASS, 1 FAIL)`);
+
+  // ============================================================
+  // SIDCO — NCR (Non-Conformance Reports)
+  // ============================================================
+  const ncr1 = await (prisma as any).nCR.upsert({
+    where: { ncrNumber: 'NCR-2026-001' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      ncrNumber: 'NCR-2026-001',
+      title: 'Under-Fill Defect — GENTO Flower HF 2.25kg (WO-2026-0002)',
+      description: 'Final inspection INSP-2026-005 found 6 out of 20 sampled units with net weight below the minimum specification of 2210g. Measured values ranged 2185–2208g. Root cause confirmed as partial blockage of filling nozzle #3 on Big Betti — nozzle was operating beyond its 500-hour recommended service interval (at 524 hours at time of failure).',
+      severity: 'MAJOR',
+      status: 'CAPA_PENDING',
+      machineId: bigBetti.id,
+      defectCategory: 'FILL_WEIGHT',
+      quantity: 28,
+      disposition: 'REWORK',
+      detectedById: inspectorId,
+      detectedAt: new Date(daysAgo(5).getTime() + 8 * 3600000),
+      dueDate: daysAhead(2),
+      rootCause: 'Partial blockage of filling nozzle #3 causing inconsistent powder flow. Nozzle was at 524 operating hours vs. 500-hour maximum service interval.',
+    },
+  });
+
+  await (prisma as any).nCR.upsert({
+    where: { ncrNumber: 'NCR-2026-002' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      ncrNumber: 'NCR-2026-002',
+      title: 'Label Misalignment — Alwatani Violet HF 2.0kg',
+      description: 'Operator reported visible label misalignment (>3mm offset) on approximately 15 units during routine patrol check. Labels are outside the USL of ±3mm. Products are cosmetically non-conforming but functionally acceptable. Caused by incorrect label roll tension set after changeover.',
+      severity: 'MINOR',
+      status: 'RESOLVED',
+      machineId: bigBetti.id,
+      defectCategory: 'LABELING',
+      quantity: 15,
+      disposition: 'USE_AS_IS',
+      detectedById: mohammedYousef.id,
+      detectedAt: daysAgo(10),
+      dueDate: daysAgo(3),
+      rootCause: 'Label roll tension not correctly set after label changeover. SOP did not include a tension verification step.',
+      resolvedAt: daysAgo(4),
+      resolvedById: issaMasadeh.id,
+    },
+  });
+
+  console.log(`✅ SIDCO NCRs: NCR-2026-001 (MAJOR, fill weight, CAPA_PENDING) + NCR-2026-002 (MINOR, labeling, RESOLVED)`);
+
+  // ============================================================
+  // SIDCO — CAPA (Corrective & Preventive Actions)
+  // ============================================================
+  const capa1 = await (prisma as any).cAPA.upsert({
+    where: { capaNumber: 'CAPA-2026-001' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      capaNumber: 'CAPA-2026-001',
+      ncrId: ncr1.id,
+      type: 'CORRECTIVE',
+      title: 'Nozzle Cleaning & PM Schedule Interval Reduction',
+      description: 'Corrective action for NCR-2026-001: (1) Immediate cleaning and inspection of all 6 Big Betti filling nozzles. (2) Reduce nozzle inspection interval from 500h to 250h in the preventive maintenance schedule. (3) Rework 28 under-filled units from WO-2026-0002 batch.',
+      status: 'IN_PROGRESS',
+      priority: 'HIGH',
+      assignedToId: mohammedYousef.id,
+      dueDate: daysAhead(2),
+    },
+  });
+
+  const capaActionSeed = async (capaId: string, id: string, data: Record<string, any>) => {
+    const existing = await (prisma as any).cAPAAction.findUnique({ where: { id } });
+    if (!existing) await (prisma as any).cAPAAction.create({ data: { id, capaId, ...data } });
+  };
+
+  await capaActionSeed(capa1.id, 'capa-act-001-01', {
+    description: 'Disassemble, clean, and inspect all 6 filling nozzles on Big Betti (M1-BIG-BETTI)',
+    assignedToId: mohammedYousef.id,
+    dueDate: daysAgo(1),
+    status: 'COMPLETED',
+    completedAt: daysAgo(1),
+    evidence: 'Nozzle #3 cleared — 3mm dry powder buildup found and removed. All nozzles back within tolerance. Photo reference: MAINT-LOG-2026-0612.',
+  });
+
+  await capaActionSeed(capa1.id, 'capa-act-001-02', {
+    description: 'Update PM schedule: reduce nozzle inspection interval from 500h to 250h for Big Betti',
+    assignedToId: issaMasadeh.id,
+    dueDate: daysAhead(2),
+    status: 'OPEN',
+  });
+
+  await capaActionSeed(capa1.id, 'capa-act-001-03', {
+    description: 'Rework 28 under-filled units from WO-2026-0002 batch — re-fill and re-inspect',
+    assignedToId: mohammedYousef.id,
+    dueDate: daysAhead(1),
+    status: 'IN_PROGRESS',
+  });
+
+  // Preventive CAPA for label changeover
+  await (prisma as any).cAPA.upsert({
+    where: { capaNumber: 'CAPA-2026-002' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      capaNumber: 'CAPA-2026-002',
+      type: 'PREVENTIVE',
+      title: 'Label Tension Verification Step Added to Changeover SOP',
+      description: 'Preventive action to eliminate label misalignment on changeovers: add mandatory label tension verification step (target: 3.5 N·m ± 0.5) to the standard changeover checklist. Operator must confirm reading before restart.',
+      status: 'CLOSED',
+      priority: 'MEDIUM',
+      assignedToId: mohammedYousef.id,
+      dueDate: daysAgo(3),
+      completedAt: daysAgo(4),
+      verifiedAt: daysAgo(3),
+      verifiedById: issaMasadeh.id,
+      effectiveness: 'Effective — zero label misalignment reported across 5 subsequent changeovers in 3-day verification period.',
+    },
+  });
+
+  console.log(`✅ SIDCO CAPAs: CAPA-2026-001 (IN_PROGRESS, corrective, 3 actions) + CAPA-2026-002 (CLOSED, preventive)`);
+
+  // ============================================================
+  // SIDCO — SPC MEASUREMENTS (fill weight drift → recovery story)
+  // Big Betti / GENTO Flower 2.25kg — 16 data points showing the NCR pattern
+  // ============================================================
+  const spcPoints = [
+    // Normal operation (WO-2026-0001)
+    { daysBack: 10,  value: 2253, out: false },
+    { daysBack: 9.5, value: 2248, out: false },
+    { daysBack: 9,   value: 2251, out: false },
+    { daysBack: 8.5, value: 2249, out: false },
+    { daysBack: 8,   value: 2255, out: false },
+    // Drift begins (WO-2026-0002 — nozzle blockage building up)
+    { daysBack: 6.5, value: 2240, out: false },
+    { daysBack: 6,   value: 2233, out: false },
+    { daysBack: 5.5, value: 2225, out: false },
+    { daysBack: 5,   value: 2218, out: true  }, // below LCL 2220g
+    { daysBack: 4.5, value: 2195, out: true  }, // below LSL 2200g — NCR raised
+    // Gap (nozzle cleaned, rework in progress)
+    // Recovery (WO-2026-0003 — post cleaning)
+    { daysBack: 1.5, value: 2251, out: false },
+    { daysBack: 1,   value: 2249, out: false },
+    { daysBack: 0.5, value: 2252, out: false },
+    { daysBack: 0,   value: 2248, out: false },
+  ];
+
+  for (let i = 0; i < spcPoints.length; i++) {
+    const pt = spcPoints[i];
+    const existing = await (prisma as any).sPCMeasurement.findFirst({
+      where: { machineId: bigBetti.id, parameterName: 'Fill Weight', subgroupNumber: i + 1 },
+    });
+    if (!existing) {
+      await (prisma as any).sPCMeasurement.create({
+        data: {
+          factoryId: sidco.id,
+          machineId: bigBetti.id,
+          skuId: skuMap['10310189'],
+          parameterName: 'Fill Weight',
+          parameterUnit: 'g',
+          value: pt.value,
+          sampleSize: 5,
+          subgroupNumber: i + 1,
+          workOrderId: pt.daysBack >= 4.5 ? wo2.id : wo3.id,
+          measuredAt: daysAgo(pt.daysBack),
+          measuredById: inspectorId,
+          isOutOfControl: pt.out,
+          controlViolation: pt.out ? 'RULE_1' : null,
+          ucl: 2280, lcl: 2220, cl: 2250, usl: 2300, lsl: 2200,
+        },
+      });
+    }
+  }
+
+  console.log(`✅ SIDCO SPC: 14 fill-weight data points — drift pattern + recovery visible in SPC chart`);
+
+  // ============================================================
   // SUMMARY
   // ============================================================
   console.log('\n' + '═'.repeat(60));
@@ -1308,6 +1861,14 @@ async function main() {
   console.log('    operator@sidco.com.sa          → OPERATOR');
   console.log('    maintenance@sidco.com.sa       → MAINTENANCE_TECHNICIAN');
   console.log('    quality@sidco.com.sa           → QUALITY_ENGINEER');
+  console.log('');
+  console.log('  Demo data summary:');
+  console.log('    Work Orders: WO-2026-0001 → WO-2026-0006 (all statuses)');
+  console.log('    Quality Plans: QP-RM-SIDCO-001 (INCOMING), QP-IP-LINE1-001 (IN_PROCESS), QP-FN-GENTO-001 (FINAL)');
+  console.log('    Inspections: INSP-2026-001 → 006 (PASS, CONDITIONAL, FAIL scenarios)');
+  console.log('    NCR: NCR-2026-001 (fill weight, CAPA_PENDING), NCR-2026-002 (labeling, RESOLVED)');
+  console.log('    CAPA: CAPA-2026-001 (corrective, IN_PROGRESS), CAPA-2026-002 (preventive, CLOSED)');
+  console.log('    SPC: 14 fill-weight data points with visible drift + recovery pattern');
   console.log('');
   console.log('  Platform: http://localhost:3000');
   console.log('  API Docs: http://localhost:3001/api/docs');
