@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Delete, Body, Param, Query,
-  HttpCode, HttpStatus, ParseUUIDPipe,
+  HttpCode, HttpStatus, ParseUUIDPipe, NotFoundException,
 } from '@nestjs/common';
 import {
   ApiTags, ApiOperation, ApiBearerAuth, ApiQuery, ApiResponse,
@@ -19,6 +19,13 @@ import {
   HoldWorkOrderDto,
   CancelWorkOrderDto,
   RecordCountDto,
+  CreateProductionOrderDto,
+  UpdateProductionOrderDto,
+  CreateWOFromPODto,
+  ProductionOrderFiltersDto,
+  HoldProductionOrderDto,
+  CancelProductionOrderDto,
+  AutoGenerateWOsDto,
 } from './dto/work-order.dto';
 
 interface RequestUser {
@@ -309,5 +316,161 @@ export class ProductionController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.productionService.deleteBatch(user.factoryId, id);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // PRODUCTION ORDERS (ISA-95 Level 4 — ERP/Scheduling)
+  // ────────────────────────────────────────────────────────────
+
+  @Get('production-orders')
+  @ApiOperation({ summary: 'List production orders with optional filters' })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async findProductionOrders(
+    @CurrentUser() user: RequestUser,
+    @Query() filters: ProductionOrderFiltersDto,
+  ) {
+    return this.productionService.findProductionOrders(user.factoryId, filters);
+  }
+
+  @Post('production-orders')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_CREATE')
+  @ApiOperation({ summary: 'Create a new production order (ISA-95 Level 4)' })
+  async createProductionOrder(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateProductionOrderDto,
+  ) {
+    return this.productionService.createProductionOrder(user.factoryId, user.id, dto);
+  }
+
+  @Get('production-orders/:id')
+  @ApiOperation({ summary: 'Get production order detail with linked work orders' })
+  async findOneProductionOrder(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.findOneProductionOrder(user.factoryId, id);
+  }
+
+  @Patch('production-orders/:id')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_UPDATE')
+  @ApiOperation({ summary: 'Update a production order (blocked once COMPLETED/CANCELLED)' })
+  async updateProductionOrder(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateProductionOrderDto,
+  ) {
+    return this.productionService.updateProductionOrder(user.factoryId, id, dto);
+  }
+
+  @Patch('production-orders/:id/release')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_RELEASE')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Release a PLANNED production order → RELEASED (authorises WO creation)' })
+  async releaseProductionOrder(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.releaseProductionOrder(user.factoryId, id);
+  }
+
+  @Post('production-orders/:id/work-orders')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_WO_CREATE')
+  @ApiOperation({ summary: 'Convert a released production order into a work order (ISA-95 PO→WO)' })
+  async createWorkOrderFromPO(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateWOFromPODto,
+  ) {
+    return this.productionService.createWorkOrderFromPO(user.factoryId, user.id, id, dto);
+  }
+
+  @Patch('production-orders/:id/cancel')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_CANCEL')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel a production order (blocked if IN_PROGRESS WOs exist)' })
+  async cancelProductionOrder(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelProductionOrderDto,
+  ) {
+    return this.productionService.cancelProductionOrder(user.factoryId, id, dto.reason);
+  }
+
+  @Patch('production-orders/:id/hold')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_HOLD')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Put a RELEASED or IN_PROGRESS production order on hold' })
+  async holdProductionOrder(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: HoldProductionOrderDto,
+  ) {
+    return this.productionService.holdProductionOrder(user.factoryId, id, dto.reason);
+  }
+
+  @Patch('production-orders/:id/resume')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_RESUME')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resume an ON_HOLD production order' })
+  async resumeProductionOrder(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.resumeProductionOrder(user.factoryId, id);
+  }
+
+  @Patch('production-orders/:id/complete')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_COMPLETE')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Complete an IN_PROGRESS production order' })
+  async completeProductionOrder(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.completeProductionOrder(user.factoryId, id);
+  }
+
+  @Delete('production-orders/:id')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_DELETE')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Soft-delete a PLANNED or CANCELLED production order' })
+  async deleteProductionOrder(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.deleteProductionOrder(user.factoryId, id);
+  }
+
+  @Get('production-orders/:id/auto-generate-preview')
+  @ApiOperation({ summary: 'Preview work orders that would be auto-generated from recipe/routing — no changes made' })
+  async previewAutoGenerateWOs(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.previewAutoGenerateWOs(user.factoryId, id);
+  }
+
+  @Post('production-orders/:id/auto-generate-work-orders')
+  @RequirePermissions('production:manage')
+  @AuditLog('PRODUCTION_ORDER_AUTO_GENERATE_WOS')
+  @ApiOperation({ summary: 'Auto-generate work orders from recipe routing steps (ISA-95 Control Recipe instantiation)' })
+  async autoGenerateWorkOrders(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AutoGenerateWOsDto,
+  ) {
+    return this.productionService.autoGenerateWorkOrders(user.factoryId, user.id, id, dto);
   }
 }

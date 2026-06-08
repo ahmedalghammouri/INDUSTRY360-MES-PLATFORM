@@ -413,6 +413,7 @@ model SKU {
   bomComponents          BOMComponent[]
   bomHeaders             BOMHeader[]
   workOrders             WorkOrder[]
+  productionOrders       ProductionOrder[]
   batchRecords           BatchRecord[]
   manufacturingProcesses ManufacturingProcess[]
   recipes                Recipe[]
@@ -468,6 +469,7 @@ model ProductionOrder {
   deletedAt      DateTime?
 
   factory    Factory    @relation(fields: [factoryId], references: [id])
+  sku        SKU?       @relation(fields: [skuId], references: [id])
   workOrders WorkOrder[]
 
   @@map("production_orders")

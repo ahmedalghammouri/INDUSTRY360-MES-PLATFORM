@@ -1376,6 +1376,124 @@ async function main() {
   console.log(`✅ SIDCO quality plans: 3 approved plans (INCOMING × 3 params, IN_PROCESS × 4 params, FINAL × 4 params)`);
 
   // ============================================================
+  // SIDCO — PRODUCTION ORDERS (ISA-95 Level 4 — ERP/Scheduling)
+  // POs are released from the scheduling system and broken into WOs
+  // ============================================================
+
+  const po1 = await (prisma as any).productionOrder.upsert({
+    where: { orderNumber: 'PO-NCC-1050' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'PO-NCC-1050',
+      sapOrderNumber: 'SAP-4500011050',
+      skuId: skuMap['10310191'],       // GENTO Original HF 2.25kg
+      targetQty: 890,
+      completedQty: 875,
+      unit: 'CARTON',
+      status: 'COMPLETED',
+      priority: 'HIGH',
+      plannedStart: daysAgo(8),
+      plannedEnd: daysAgo(6),
+      actualStart: daysAgo(7),
+      actualEnd: new Date(daysAgo(7).getTime() + 8.5 * 3600000),
+      customer: 'Panda Retail Company',
+      notes: 'June monthly replenishment — Al-Othaim stores. Delivered on time.',
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  const po2 = await (prisma as any).productionOrder.upsert({
+    where: { orderNumber: 'PO-NCC-1051' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'PO-NCC-1051',
+      sapOrderNumber: 'SAP-4500011051',
+      skuId: skuMap['10310189'],       // GENTO Flower HF 2.25kg
+      targetQty: 750,
+      completedQty: 720,
+      unit: 'CARTON',
+      status: 'COMPLETED',
+      priority: 'MEDIUM',
+      plannedStart: daysAgo(6),
+      plannedEnd: daysAgo(4),
+      actualStart: daysAgo(5),
+      actualEnd: new Date(daysAgo(5).getTime() + 7.5 * 3600000),
+      customer: 'Carrefour KSA',
+      notes: 'NCR raised for fill weight on nozzle #3. Batch partially reworked.',
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  const po3 = await (prisma as any).productionOrder.upsert({
+    where: { orderNumber: 'PO-NCC-1052' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'PO-NCC-1052',
+      sapOrderNumber: 'SAP-4500011052',
+      skuId: skuMap['10310190'],       // GENTO Oud HF 2.25kg
+      targetQty: 1200,
+      completedQty: 640,
+      unit: 'CARTON',
+      status: 'IN_PROGRESS',
+      priority: 'HIGH',
+      plannedStart: daysAgo(1),
+      plannedEnd: daysAhead(2),
+      actualStart: daysAgo(1),
+      customer: 'Extra Stores',
+      notes: 'Running — 53% complete. On track for delivery.',
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  const po4 = await (prisma as any).productionOrder.upsert({
+    where: { orderNumber: 'PO-NCC-1053' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'PO-NCC-1053',
+      sapOrderNumber: 'SAP-4500011053',
+      skuId: skuMap['10310214'],       // Safe Original HF 2.25kg
+      targetQty: 500,
+      completedQty: 0,
+      unit: 'CARTON',
+      status: 'RELEASED',
+      priority: 'MEDIUM',
+      plannedStart: daysAhead(1),
+      plannedEnd: daysAhead(3),
+      customer: 'Danube Group',
+      notes: 'Released to shop floor — machine allocation pending.',
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  const po5 = await (prisma as any).productionOrder.upsert({
+    where: { orderNumber: 'PO-NCC-1054' },
+    update: {},
+    create: {
+      factoryId: sidco.id,
+      orderNumber: 'PO-NCC-1054',
+      sapOrderNumber: 'SAP-4500011054',
+      skuId: skuMap['10310067'],       // Alwatani Blue HF 2.0kg
+      targetQty: 600,
+      completedQty: 198,
+      unit: 'CARTON',
+      status: 'ON_HOLD',
+      priority: 'MEDIUM',
+      plannedStart: daysAgo(2),
+      plannedEnd: daysAhead(2),
+      actualStart: daysAgo(2),
+      customer: 'Tamimi Markets',
+      notes: 'On hold — packaging film delayed from supplier (ETA +3 days).',
+      createdById: issaMasadeh.id,
+    },
+  });
+
+  console.log(`✅ SIDCO production orders: 5 POs (COMPLETED×2, IN_PROGRESS×1, RELEASED×1, ON_HOLD×1)`);
+
+  // ============================================================
   // SIDCO — WORK ORDERS (realistic production schedule)
   // Linked to GENTO, Safe, Alwatani SKUs on Big Betti / PL-01
   // ============================================================
@@ -1385,6 +1503,7 @@ async function main() {
     create: {
       factoryId: sidco.id,
       orderNumber: 'WO-2026-0001',
+      productionOrderId: po1.id,
       skuId: skuMap['10310191'],    // GENTO Original HF 2.25kg
       machineId: bigBetti.id,
       lineId: sidcoPackingLine1.id,
@@ -1413,6 +1532,7 @@ async function main() {
     create: {
       factoryId: sidco.id,
       orderNumber: 'WO-2026-0002',
+      productionOrderId: po2.id,
       skuId: skuMap['10310189'],    // GENTO Flower HF 2.25kg
       machineId: bigBetti.id,
       lineId: sidcoPackingLine1.id,
@@ -1442,6 +1562,7 @@ async function main() {
     create: {
       factoryId: sidco.id,
       orderNumber: 'WO-2026-0003',
+      productionOrderId: po3.id,
       skuId: skuMap['10310190'],    // GENTO Oud HF 2.25kg
       machineId: bigBetti.id,
       lineId: sidcoPackingLine1.id,
@@ -1469,6 +1590,7 @@ async function main() {
     create: {
       factoryId: sidco.id,
       orderNumber: 'WO-2026-0004',
+      productionOrderId: po4.id,
       skuId: skuMap['10310214'],    // Safe Original HF 2.25kg
       machineId: bigBetti.id,
       lineId: sidcoPackingLine1.id,
@@ -1490,6 +1612,7 @@ async function main() {
     create: {
       factoryId: sidco.id,
       orderNumber: 'WO-2026-0005',
+      productionOrderId: po5.id,
       skuId: skuMap['10310067'],    // Alwatani Blue HF 2.0kg
       machineId: bigBetti.id,
       lineId: sidcoPackingLine1.id,
@@ -1863,7 +1986,8 @@ async function main() {
   console.log('    quality@sidco.com.sa           → QUALITY_ENGINEER');
   console.log('');
   console.log('  Demo data summary:');
-  console.log('    Work Orders: WO-2026-0001 → WO-2026-0006 (all statuses)');
+  console.log('    Production Orders: PO-NCC-1050 → PO-NCC-1054 (COMPLETED×2, IN_PROGRESS×1, RELEASED×1, ON_HOLD×1)');
+  console.log('    Work Orders: WO-2026-0001 → WO-2026-0006 (all statuses, linked to POs)');
   console.log('    Quality Plans: QP-RM-SIDCO-001 (INCOMING), QP-IP-LINE1-001 (IN_PROCESS), QP-FN-GENTO-001 (FINAL)');
   console.log('    Inspections: INSP-2026-001 → 006 (PASS, CONDITIONAL, FAIL scenarios)');
   console.log('    NCR: NCR-2026-001 (fill weight, CAPA_PENDING), NCR-2026-002 (labeling, RESOLVED)');

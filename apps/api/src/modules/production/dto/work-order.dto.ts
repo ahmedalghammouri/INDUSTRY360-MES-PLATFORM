@@ -218,3 +218,184 @@ export class WorkOrderFiltersDto {
   @Max(100)
   limit?: number = 20;
 }
+
+// ─────────────────────────────────────────────────────────────
+// PRODUCTION ORDER DTOs (ISA-95 Level 4 — ERP/Scheduling)
+// ─────────────────────────────────────────────────────────────
+
+export class CreateProductionOrderDto {
+  @ApiProperty({ example: 'PO-NCC-1055' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(50)
+  orderNumber!: string;
+
+  @ApiPropertyOptional({ example: 'SAP-4500012345', description: 'SAP / ERP reference number' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  sapOrderNumber?: string;
+
+  @ApiProperty({ example: 'uuid-sku-id' })
+  @IsUUID()
+  skuId!: string;
+
+  @ApiProperty({ example: 1000, description: 'Target quantity (cartons/units)' })
+  @IsInt()
+  @IsPositive()
+  @Max(10_000_000)
+  targetQty!: number;
+
+  @ApiPropertyOptional({ example: 'CARTON' })
+  @IsOptional()
+  @IsString()
+  unit?: string;
+
+  @ApiProperty({ enum: WOPriority, example: WOPriority.HIGH })
+  @IsEnum(WOPriority)
+  priority!: WOPriority;
+
+  @ApiProperty({ example: '2026-06-08T07:30:00.000Z' })
+  @IsDateString()
+  plannedStart!: string;
+
+  @ApiProperty({ example: '2026-06-09T19:30:00.000Z' })
+  @IsDateString()
+  plannedEnd!: string;
+
+  @ApiPropertyOptional({ example: 'Al-Othaim Markets — June restock' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  customer?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
+}
+
+export class UpdateProductionOrderDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  targetQty?: number;
+
+  @ApiPropertyOptional({ enum: WOPriority })
+  @IsOptional()
+  @IsEnum(WOPriority)
+  priority?: WOPriority;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  plannedStart?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  plannedEnd?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  customer?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
+}
+
+export class CreateWOFromPODto {
+  @ApiProperty({ example: 'uuid-machine-id' })
+  @IsUUID()
+  machineId!: string;
+
+  @ApiProperty({ example: 1000 })
+  @IsInt()
+  @IsPositive()
+  @Max(10_000_000)
+  plannedQty!: number;
+
+  @ApiProperty({ example: '2026-06-08T07:30:00.000Z' })
+  @IsDateString()
+  plannedStart!: string;
+
+  @ApiProperty({ example: '2026-06-08T19:30:00.000Z' })
+  @IsDateString()
+  plannedEnd!: string;
+
+  @ApiPropertyOptional({ enum: WOPriority })
+  @IsOptional()
+  @IsEnum(WOPriority)
+  priority?: WOPriority;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  operatorId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
+}
+
+export class HoldProductionOrderDto {
+  @ApiProperty({ example: 'Waiting for raw material delivery' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason!: string;
+}
+
+export class CancelProductionOrderDto {
+  @ApiProperty({ example: 'Customer order postponed' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason!: string;
+}
+
+export class AutoGenerateWOsDto {
+  @ApiProperty({ example: '2026-06-09T07:30:00.000Z' })
+  @IsDateString()
+  plannedStart!: string;
+
+  @ApiProperty({ example: '2026-06-11T19:30:00.000Z' })
+  @IsDateString()
+  plannedEnd!: string;
+}
+
+export class ProductionOrderFiltersDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @ApiPropertyOptional({ default: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 20;
+}

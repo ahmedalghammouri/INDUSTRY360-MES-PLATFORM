@@ -9,6 +9,8 @@ import type { WorkOrderStatus, Prisma } from '@prisma/client';
 import type {
   CreateWorkOrderDto, UpdateWorkOrderDto, CompleteWorkOrderDto,
   HoldWorkOrderDto, RecordCountDto,
+  CreateProductionOrderDto, UpdateProductionOrderDto,
+  CreateWOFromPODto, ProductionOrderFiltersDto,
 } from './dto/work-order.dto';
 
 const VALID_TRANSITIONS: Record<WorkOrderStatus, WorkOrderStatus[]> = {
@@ -228,6 +230,422 @@ export class ProductionService {
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // PRODUCTION ORDERS (ISA-95 Level 4 — ERP/Scheduling)
+  // ────────────────────────────────────────────────────────────
+
+  async createProductionOrder(factoryId: string | null, userId: string, dto: CreateProductionOrderDto) {
+    if (!factoryId) throw new BadRequestException('Factory context required');
+
+    const sku = await this.prisma.sKU.findFirst({ where: { id: dto.skuId, factoryId } });
+    if (!sku) throw new NotFoundException('SKU not found');
+
+    const existing = await this.prisma.productionOrder.findFirst({ where: { orderNumber: dto.orderNumber } });
+    if (existing) throw new ConflictException(`Order number ${dto.orderNumber} already exists`);
+
+    return this.prisma.productionOrder.create({
+      data: {
+        factoryId,
+        orderNumber: dto.orderNumber,
+        sapOrderNumber: dto.sapOrderNumber,
+        skuId: dto.skuId,
+        targetQty: dto.targetQty,
+        unit: dto.unit ?? 'CARTON',
+        priority: dto.priority as any,
+        plannedStart: new Date(dto.plannedStart),
+        plannedEnd: new Date(dto.plannedEnd),
+        customer: dto.customer,
+        notes: dto.notes,
+        createdById: userId,
+        status: 'PLANNED',
+      },
+      include: { sku: { select: { name: true, code: true, itemNumber: true } } },
+    });
+  }
+
+  async findProductionOrders(factoryId: string | null, filters: ProductionOrderFiltersDto) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const page = filters.page ?? 1;
+    const limit = filters.limit ?? 20;
+
+    const where: Prisma.ProductionOrderWhereInput = {
+      ...factoryFilter,
+      deletedAt: null,
+      ...(filters.status && { status: filters.status as any }),
+      ...(filters.search && {
+        OR: [
+          { orderNumber: { contains: filters.search, mode: 'insensitive' } },
+          { sapOrderNumber: { contains: filters.search, mode: 'insensitive' } },
+          { customer: { contains: filters.search, mode: 'insensitive' } },
+          { sku: { name: { contains: filters.search, mode: 'insensitive' } } },
+        ],
+      }),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.productionOrder.findMany({
+        where,
+        orderBy: { plannedStart: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          sku: { select: { name: true, code: true, itemNumber: true, brand: true, weight: true, weightUnit: true } },
+          workOrders: {
+            where: { deletedAt: null },
+            select: { id: true, orderNumber: true, status: true, plannedQty: true, actualQty: true, goodQty: true, machine: { select: { name: true, code: true } } },
+          },
+        },
+      }),
+      this.prisma.productionOrder.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
+  }
+
+  async findOneProductionOrder(factoryId: string | null, id: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const po = await this.prisma.productionOrder.findFirst({
+      where: { id, ...factoryFilter, deletedAt: null },
+      include: {
+        sku: { select: { name: true, code: true, itemNumber: true, brand: true, weight: true, weightUnit: true, packagingType: true } },
+        workOrders: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            machine: { select: { id: true, name: true, code: true } },
+            operator: { select: { id: true, name: true } },
+            inspectionResults: {
+              select: { id: true, inspectionNumber: true, type: true, result: true, totalQty: true, passQty: true, failQty: true, inspectedAt: true },
+              orderBy: { inspectedAt: 'desc' },
+              take: 5,
+            },
+          },
+        },
+      },
+    });
+    if (!po) throw new NotFoundException('Production order not found');
+    return po;
+  }
+
+  async updateProductionOrder(factoryId: string | null, id: string, dto: UpdateProductionOrderDto) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const po = await this.prisma.productionOrder.findFirst({ where: { id, ...factoryFilter, deletedAt: null } });
+    if (!po) throw new NotFoundException('Production order not found');
+    if (['COMPLETED', 'CANCELLED'].includes(po.status)) {
+      throw new BadRequestException(`Cannot modify a ${po.status} production order`);
+    }
+
+    return this.prisma.productionOrder.update({
+      where: { id },
+      data: {
+        ...(dto.targetQty && { targetQty: dto.targetQty }),
+        ...(dto.priority && { priority: dto.priority as any }),
+        ...(dto.plannedStart && { plannedStart: new Date(dto.plannedStart) }),
+        ...(dto.plannedEnd && { plannedEnd: new Date(dto.plannedEnd) }),
+        ...(dto.customer !== undefined && { customer: dto.customer }),
+        ...(dto.notes !== undefined && { notes: dto.notes }),
+      },
+      include: { sku: { select: { name: true, code: true } } },
+    });
+  }
+
+  async releaseProductionOrder(factoryId: string | null, id: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const po = await this.prisma.productionOrder.findFirst({ where: { id, ...factoryFilter, deletedAt: null } });
+    if (!po) throw new NotFoundException('Production order not found');
+    if (po.status !== 'PLANNED') throw new BadRequestException(`Only PLANNED orders can be released (current: ${po.status})`);
+
+    return this.prisma.productionOrder.update({ where: { id }, data: { status: 'RELEASED' } });
+  }
+
+  async createWorkOrderFromPO(factoryId: string | null, userId: string, poId: string, dto: CreateWOFromPODto) {
+    if (!factoryId) throw new BadRequestException('Factory context required');
+    const factoryFilter = { factoryId };
+
+    const [po, machine] = await Promise.all([
+      this.prisma.productionOrder.findFirst({ where: { id: poId, ...factoryFilter, deletedAt: null }, include: { sku: true } }),
+      this.prisma.machine.findFirst({ where: { id: dto.machineId, ...factoryFilter } }),
+    ]);
+
+    if (!po) throw new NotFoundException('Production order not found');
+    if (!machine) throw new NotFoundException('Machine not found');
+    if (po.status === 'CANCELLED') throw new BadRequestException('Cannot create WO for a cancelled production order');
+    if (!po.skuId) throw new BadRequestException('Production order has no SKU assigned');
+
+    // Generate WO number: WO-{YYYY}-{seq}
+    const year = new Date().getFullYear();
+    const count = await this.prisma.workOrder.count({ where: { factoryId } });
+    const orderNumber = `WO-${year}-${String(count + 1).padStart(4, '0')}`;
+
+    const wo = await this.prisma.workOrder.create({
+      data: {
+        factoryId,
+        productionOrderId: poId,
+        skuId: po.skuId,
+        machineId: dto.machineId,
+        lineId: machine.lineId,
+        orderNumber,
+        status: 'PLANNED',
+        priority: (dto.priority ?? po.priority) as any,
+        plannedQty: dto.plannedQty,
+        plannedStart: new Date(dto.plannedStart),
+        plannedEnd: new Date(dto.plannedEnd),
+        operatorId: dto.operatorId,
+        notes: dto.notes,
+        createdById: userId,
+      },
+      include: {
+        sku: { select: { name: true, code: true } },
+        machine: { select: { name: true, code: true } },
+        productionOrder: { select: { orderNumber: true } },
+      },
+    });
+
+    // Update PO status to IN_PROGRESS if RELEASED
+    if (po.status === 'RELEASED') {
+      await this.prisma.productionOrder.update({ where: { id: poId }, data: { status: 'IN_PROGRESS', actualStart: new Date() } });
+    }
+
+    this.logger.log(`WO ${orderNumber} created from PO ${po.orderNumber}`);
+    return wo;
+  }
+
+  async cancelProductionOrder(factoryId: string | null, id: string, reason: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const po = await this.prisma.productionOrder.findFirst({
+      where: { id, ...factoryFilter, deletedAt: null },
+      include: { workOrders: { where: { status: 'IN_PROGRESS', deletedAt: null } } },
+    });
+    if (!po) throw new NotFoundException('Production order not found');
+    if (po.status === 'COMPLETED') throw new BadRequestException('Cannot cancel a completed production order');
+    if (po.workOrders.length > 0) throw new BadRequestException('Cannot cancel PO with in-progress work orders');
+
+    return this.prisma.productionOrder.update({
+      where: { id },
+      data: { status: 'CANCELLED', notes: po.notes ? `${po.notes}\n[Cancelled: ${reason}]` : `[Cancelled: ${reason}]` },
+    });
+  }
+
+  async holdProductionOrder(factoryId: string | null, id: string, reason: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const po = await this.prisma.productionOrder.findFirst({ where: { id, ...factoryFilter, deletedAt: null } });
+    if (!po) throw new NotFoundException('Production order not found');
+    if (!['RELEASED', 'IN_PROGRESS'].includes(po.status)) {
+      throw new BadRequestException(`Cannot hold a ${po.status} production order`);
+    }
+    return this.prisma.productionOrder.update({
+      where: { id },
+      data: { status: 'ON_HOLD', notes: po.notes ? `${po.notes}\n[Hold: ${reason}]` : `[Hold: ${reason}]` },
+    });
+  }
+
+  async resumeProductionOrder(factoryId: string | null, id: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const po = await this.prisma.productionOrder.findFirst({ where: { id, ...factoryFilter, deletedAt: null } });
+    if (!po) throw new NotFoundException('Production order not found');
+    if (po.status !== 'ON_HOLD') throw new BadRequestException('Only ON_HOLD orders can be resumed');
+    // Resume: if actual start exists → IN_PROGRESS, otherwise → RELEASED
+    const resumeStatus = po.actualStart ? 'IN_PROGRESS' : 'RELEASED';
+    return this.prisma.productionOrder.update({ where: { id }, data: { status: resumeStatus } });
+  }
+
+  async completeProductionOrder(factoryId: string | null, id: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const po = await this.prisma.productionOrder.findFirst({
+      where: { id, ...factoryFilter, deletedAt: null },
+      include: { workOrders: { where: { deletedAt: null } } },
+    });
+    if (!po) throw new NotFoundException('Production order not found');
+    if (po.status !== 'IN_PROGRESS') throw new BadRequestException(`Only IN_PROGRESS orders can be completed (current: ${po.status})`);
+
+    const completedQty = po.workOrders.reduce((s, w) => s + (w.goodQty || 0), 0);
+    return this.prisma.productionOrder.update({
+      where: { id },
+      data: { status: 'COMPLETED', actualEnd: new Date(), completedQty },
+    });
+  }
+
+  async deleteProductionOrder(factoryId: string | null, id: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const po = await this.prisma.productionOrder.findFirst({
+      where: { id, ...factoryFilter, deletedAt: null },
+      include: { workOrders: { where: { deletedAt: null, status: { notIn: ['CANCELLED'] } } } },
+    });
+    if (!po) throw new NotFoundException('Production order not found');
+    if (!['PLANNED', 'CANCELLED'].includes(po.status)) {
+      throw new BadRequestException(`Only PLANNED or CANCELLED orders can be deleted (current: ${po.status})`);
+    }
+    if (po.workOrders.length > 0) {
+      throw new BadRequestException('Cannot delete PO with active work orders. Cancel them first.');
+    }
+    await this.prisma.productionOrder.update({ where: { id }, data: { deletedAt: new Date() } });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // AUTO-GENERATE WORK ORDERS (ISA-95 — Recipe + Routing driven)
+  // ─────────────────────────────────────────────────────────────
+
+  async previewAutoGenerateWOs(factoryId: string | null, poId: string): Promise<any> {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const po = await this.prisma.productionOrder.findFirst({
+      where: { id: poId, ...factoryFilter, deletedAt: null },
+      include: { sku: true },
+    });
+    if (!po) throw new NotFoundException('Production order not found');
+    if (!po.skuId) throw new BadRequestException('Production order has no SKU assigned');
+    if (!['RELEASED', 'IN_PROGRESS'].includes(po.status)) {
+      throw new BadRequestException(`Release the PO first before auto-generating work orders (current: ${po.status})`);
+    }
+
+    // Find approved recipe for this SKU
+    const recipe: any = await this.prisma.recipe.findFirst({
+      where: { skuId: po.skuId, status: 'APPROVED' as any, ...(factoryId ? { factoryId } : {}) },
+      orderBy: { approvedAt: 'desc' },
+      include: {
+        process: {
+          include: {
+            routingSteps: {
+              where: { isOptional: false },
+              orderBy: { stepNumber: 'asc' },
+              include: { machine: { select: { id: true, name: true, code: true, machineType: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    // Fallback: any active manufacturing process for the SKU
+    const process: any = recipe?.process ?? await this.prisma.manufacturingProcess.findFirst({
+      where: { skuId: po.skuId, isActive: true, ...(factoryId ? { factoryId } : {}) },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        routingSteps: {
+          where: { isOptional: false },
+          orderBy: { stepNumber: 'asc' },
+          include: { machine: { select: { id: true, name: true, code: true, machineType: true } } },
+        },
+      },
+    });
+
+    const steps: any[] = process?.routingSteps ?? [];
+    const stepsWithMachine: any[] = steps.filter((s: any) => s.machineId && s.machine);
+
+    // Existing WO count for this PO
+    const existingWOCount = await this.prisma.workOrder.count({ where: { productionOrderId: poId, deletedAt: null } });
+
+    if (stepsWithMachine.length === 0) {
+      // No routing — fallback to single WO on first available packing machine
+      const fallbackMachine = await this.prisma.machine.findFirst({
+        where: { factoryId: factoryId ?? undefined, isActive: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      return {
+        recipe: recipe ? { id: recipe.id, code: recipe.code, version: recipe.version, name: recipe.name } : null,
+        process: null,
+        steps: [],
+        workOrdersToCreate: fallbackMachine ? [{
+          stepNumber: 1, operationName: 'Production Run',
+          machine: fallbackMachine ? { id: fallbackMachine.id, name: fallbackMachine.name } : null,
+          plannedQty: po.targetQty, estimatedDurationMins: null,
+        }] : [],
+        existingWOCount,
+        canGenerate: !!fallbackMachine,
+        warning: 'No routing steps found. Will create a single work order on the primary machine.',
+      };
+    }
+
+    // Calculate time distribution across steps
+    const totalMins: number = process?.totalCycleTimeMins ?? stepsWithMachine.reduce((s: number, r: any) => s + (r.cycleTimeMins ?? 0), 0) ?? 0;
+    const workOrdersToCreate = stepsWithMachine.map((step: any) => ({
+      stepNumber: step.stepNumber,
+      operationName: step.operationName,
+      machine: step.machine ? { id: step.machine.id, name: step.machine.name, code: step.machine.code } : null,
+      plannedQty: po.targetQty,
+      estimatedDurationMins: step.cycleTimeMins ?? (totalMins / stepsWithMachine.length),
+      setupTimeMins: step.setupTimeMins ?? 0,
+    }));
+
+    return {
+      recipe: recipe ? { id: recipe.id, code: recipe.code, version: recipe.version, name: recipe.name } : null,
+      process: process ? { id: process.id, name: process.name, totalCycleTimeMins: process.totalCycleTimeMins } : null,
+      steps: workOrdersToCreate,
+      workOrdersToCreate,
+      existingWOCount,
+      canGenerate: true,
+      warning: existingWOCount > 0 ? `This PO already has ${existingWOCount} work order(s). New WOs will be added.` : null,
+    };
+  }
+
+  async autoGenerateWorkOrders(
+    factoryId: string | null, userId: string, poId: string,
+    dto: { plannedStart: string; plannedEnd: string },
+  ): Promise<any> {
+    if (!factoryId) throw new BadRequestException('Factory context required');
+
+    const preview = await this.previewAutoGenerateWOs(factoryId, poId);
+    if (!preview.canGenerate) throw new BadRequestException('Cannot auto-generate: no machines available');
+
+    const po = await this.prisma.productionOrder.findFirst({
+      where: { id: poId, factoryId, deletedAt: null },
+    });
+    if (!po) throw new NotFoundException('Production order not found');
+
+    const start = new Date(dto.plannedStart);
+    const end   = new Date(dto.plannedEnd);
+    const totalMs = end.getTime() - start.getTime();
+    const steps: any[] = preview.workOrdersToCreate;
+    const perStepMs = Math.floor(totalMs / (steps.length || 1));
+
+    const year = new Date().getFullYear();
+    const existing = await this.prisma.workOrder.count({ where: { factoryId } });
+
+    const createdWOs: any[] = [];
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (!step.machine?.id) continue;
+
+      const woStart = new Date(start.getTime() + i * perStepMs);
+      const woEnd   = new Date(start.getTime() + (i + 1) * perStepMs);
+      const orderNumber = `WO-${year}-${String(existing + i + 1).padStart(4, '0')}`;
+
+      const machine = await this.prisma.machine.findFirst({ where: { id: step.machine.id } });
+
+      const wo = await this.prisma.workOrder.create({
+        data: {
+          factoryId,
+          productionOrderId: poId,
+          skuId: po.skuId!,
+          machineId: step.machine.id,
+          lineId: machine?.lineId ?? null,
+          orderNumber,
+          status: 'PLANNED',
+          priority: po.priority as any,
+          plannedQty: step.plannedQty ?? po.targetQty,
+          plannedStart: woStart,
+          plannedEnd: woEnd,
+          notes: `Auto-generated from PO ${po.orderNumber} — Step ${step.stepNumber}: ${step.operationName}`,
+          createdById: userId,
+        },
+        include: {
+          sku: { select: { name: true, code: true } },
+          machine: { select: { name: true, code: true } },
+        },
+      });
+      createdWOs.push(wo);
+    }
+
+    // Update PO status
+    if (po.status === 'RELEASED') {
+      await this.prisma.productionOrder.update({
+        where: { id: poId },
+        data: { status: 'IN_PROGRESS', actualStart: new Date() },
+      });
+    }
+
+    this.logger.log(`Auto-generated ${createdWOs.length} WOs for PO ${po.orderNumber}`);
+    return { created: createdWOs.length, workOrders: createdWOs };
   }
 
   // ────────────────────────────────────────────────────────────
