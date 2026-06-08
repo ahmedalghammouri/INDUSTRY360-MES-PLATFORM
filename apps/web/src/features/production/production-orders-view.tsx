@@ -6,7 +6,8 @@ import {
   CheckCircle2, Clock, Package, Cpu, SendHorizonal,
   ClipboardList, RefreshCw, PauseCircle, XCircle, Trash2,
   Pencil, Play, MoreHorizontal, Zap, Eye, ChevronDown,
-  BarChart3, User, TrendingUp, Info,
+  BarChart3, User, TrendingUp, Info, Layers, GitBranch,
+  CheckSquare, Circle, Loader2,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -52,6 +53,29 @@ interface ProductionOrder {
   createdAt: string;
 }
 
+type JOStatus = 'SCHEDULED' | 'READY' | 'EXECUTING' | 'PAUSED' | 'COMPLETE' | 'CANCELLED';
+
+interface JobOrder {
+  id: string;
+  sequenceOrder: number;
+  operationName: string;
+  status: JOStatus;
+  machine?: { name: string; code: string };
+  workCenter?: { name: string; code: string };
+  plannedStart?: string | null;
+  plannedEnd?: string | null;
+  actualStart?: string | null;
+  actualEnd?: string | null;
+  plannedQtyIn?: number | null;
+  plannedQtyOut?: number | null;
+  outputUnit?: string | null;
+  actualQtyGood: number;
+  actualQtyRejected: number;
+  handoverQty: number;
+  idealCycleTimeSec?: number | null;
+  notes?: string | null;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Status / Priority config
 // ─────────────────────────────────────────────────────────────
@@ -79,6 +103,15 @@ const PRI_CLS: Record<Priority, string> = {
   HIGH:     'border-orange-500 text-orange-400',
   MEDIUM:   'border-yellow-500 text-yellow-400',
   LOW:      'border-slate-500 text-slate-400',
+};
+
+const JO_STATUS: Record<JOStatus, { label: string; color: string; bg: string; dot: string }> = {
+  SCHEDULED: { label: 'Scheduled', color: 'text-slate-400',  bg: 'bg-slate-500/15',  dot: 'bg-slate-500'  },
+  READY:     { label: 'Ready',     color: 'text-blue-400',   bg: 'bg-blue-500/15',   dot: 'bg-blue-500'   },
+  EXECUTING: { label: 'Running',   color: 'text-brand-400',  bg: 'bg-brand-500/15',  dot: 'bg-brand-500'  },
+  PAUSED:    { label: 'Paused',    color: 'text-amber-400',  bg: 'bg-amber-500/15',  dot: 'bg-amber-500'  },
+  COMPLETE:  { label: 'Complete',  color: 'text-green-400',  bg: 'bg-green-500/15',  dot: 'bg-green-500'  },
+  CANCELLED: { label: 'Cancelled', color: 'text-red-400',    bg: 'bg-red-500/15',    dot: 'bg-red-500'    },
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -481,11 +514,19 @@ function AutoGenDialog({ po, open, onClose }: AutoGenDialogProps) {
     onSuccess: (res: any) => {
       qc.invalidateQueries({ queryKey: ['production-orders'] });
       qc.invalidateQueries({ queryKey: ['work-orders'] });
-      toast({ title: `${res?.created ?? 0} work orders generated`, description: `Linked to ${po.orderNumber}` });
+      qc.invalidateQueries({ queryKey: ['job-orders'] });
+      const joCount = res?.jobOrdersCreated ?? 0;
+      toast({
+        title: `Work order created + ${joCount} job order${joCount !== 1 ? 's' : ''} dispatched`,
+        description: `Linked to ${po.orderNumber}`,
+      });
       onClose();
     },
     onError: (e: any) => toast({ variant: 'destructive', title: 'Error', description: e?.response?.data?.message ?? 'Failed' }),
   });
+
+  const joSteps: any[] = prev?.jobOrdersToCreate ?? prev?.workOrdersToCreate ?? [];
+  const isDispatchMode = prev?.mode === 'dispatch' || joSteps.length > 1;
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
@@ -493,7 +534,7 @@ function AutoGenDialog({ po, open, onClose }: AutoGenDialogProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-yellow-400" />
-            Auto-Generate Work Orders
+            Auto-Generate Work Order
           </DialogTitle>
           <DialogDescription>
             {po.orderNumber} · {po.sku?.name} · {po.targetQty.toLocaleString()} {po.unit}
@@ -520,18 +561,34 @@ function AutoGenDialog({ po, open, onClose }: AutoGenDialogProps) {
             </div>
           ) : prev ? (
             <div className="space-y-3">
-              {/* Recipe / Process info */}
+              {/* ISA-95 model explanation + recipe/process badges */}
               <div className="flex items-center gap-3 flex-wrap text-xs">
-                {prev.recipe && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border border-green-500/20">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
-                    <span className="text-green-300 font-medium">Recipe: {prev.recipe.code} v{prev.recipe.version}</span>
+                {isDispatchMode && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border border-purple-500/20">
+                    <Layers className="w-3.5 h-3.5 text-purple-400" />
+                    <span className="text-purple-300 font-medium">
+                      ISA-95: 1 Work Order → {joSteps.length} Job Orders
+                    </span>
                   </div>
                 )}
+                {prev.recipe && (() => {
+                  const approved = prev.recipe.status === 'APPROVED';
+                  return (
+                    <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border ${approved ? 'border-green-500/20' : 'border-amber-500/20'}`}>
+                      {approved
+                        ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                        : <AlertCircle className="w-3.5 h-3.5 text-amber-400" />}
+                      <span className={`font-medium ${approved ? 'text-green-300' : 'text-amber-300'}`}>
+                        Recipe: {prev.recipe.code} v{prev.recipe.version}
+                        {!approved && <span className="ml-1 opacity-70">({prev.recipe.status})</span>}
+                      </span>
+                    </div>
+                  );
+                })()}
                 {prev.process && (
                   <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border border-blue-500/20">
                     <BarChart3 className="w-3.5 h-3.5 text-blue-400" />
-                    <span className="text-blue-300 font-medium">Process: {prev.process.name}</span>
+                    <span className="text-blue-300 font-medium">{prev.process.name}</span>
                     {prev.process.totalCycleTimeMins && (
                       <span className="text-muted-foreground">({prev.process.totalCycleTimeMins} min)</span>
                     )}
@@ -540,7 +597,7 @@ function AutoGenDialog({ po, open, onClose }: AutoGenDialogProps) {
                 {!prev.recipe && !prev.process && (
                   <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border border-amber-500/20">
                     <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-                    <span className="text-amber-300">No approved recipe found — using fallback</span>
+                    <span className="text-amber-300">No recipe found — using fallback</span>
                   </div>
                 )}
               </div>
@@ -553,36 +610,56 @@ function AutoGenDialog({ po, open, onClose }: AutoGenDialogProps) {
                 </div>
               )}
 
-              {/* Steps preview */}
+              {/* Dispatch list preview */}
               <div className="glass-card rounded-xl overflow-hidden">
-                <div className="px-4 py-2 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Work Orders to be Created ({prev.workOrdersToCreate?.length ?? 0})
+                <div className="px-4 py-2 border-b border-border flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    {isDispatchMode ? `Dispatch List — ${joSteps.length} Job Order${joSteps.length !== 1 ? 's' : ''}` : `Work Order Steps (${joSteps.length})`}
+                  </span>
+                  {isDispatchMode && (
+                    <span className="text-xs text-muted-foreground">SCHEDULED → READY on execution</span>
+                  )}
                 </div>
-                {prev.workOrdersToCreate?.length === 0 ? (
+                {joSteps.length === 0 ? (
                   <div className="p-6 text-center text-sm text-muted-foreground">
-                    No machines found. Assign machines to routing steps first.
+                    No routing steps found. Assign machines to routing steps first.
                   </div>
                 ) : (
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border/50">
-                        {['#', 'Operation', 'Machine', 'Qty', 'Est. Duration'].map(h => (
+                        {['#', 'Operation', 'Machine / Cell', 'Qty', 'Est. Duration'].map(h => (
                           <th key={h} className="text-left p-3 text-xs text-muted-foreground font-medium">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {prev.workOrdersToCreate?.map((step: any, i: number) => (
+                      {joSteps.map((step: any, i: number) => (
                         <tr key={i} className="border-b border-border/30">
                           <td className="p-3 text-xs font-mono text-brand-400">{step.stepNumber}</td>
                           <td className="p-3 text-xs font-medium">{step.operationName}</td>
                           <td className="p-3">
-                            <div className="flex items-center gap-1.5 text-xs">
-                              <Cpu className="w-3 h-3 text-muted-foreground" />
-                              {step.machine?.name ?? <span className="text-red-400">No machine</span>}
+                            <div className="flex flex-col gap-0.5">
+                              {step.machine ? (
+                                <div className="flex items-center gap-1.5 text-xs">
+                                  <Cpu className="w-3 h-3 text-muted-foreground" />
+                                  {step.machine.name}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-amber-400">No machine</span>
+                              )}
+                              {step.workCenter && (
+                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                  <Layers className="w-2.5 h-2.5" />
+                                  {step.workCenter.name}
+                                </div>
+                              )}
                             </div>
                           </td>
-                          <td className="p-3 text-xs">{(step.plannedQty ?? po.targetQty).toLocaleString()} {po.unit}</td>
+                          <td className="p-3 text-xs">
+                            {(step.plannedQtyOut ?? step.plannedQty ?? po.targetQty).toLocaleString()}
+                            {' '}<span className="text-muted-foreground font-medium">{step.outputUnit ?? po.unit}</span>
+                          </td>
                           <td className="p-3 text-xs text-muted-foreground">
                             {step.estimatedDurationMins ? `${Math.round(step.estimatedDurationMins)} min` : '—'}
                           </td>
@@ -594,8 +671,8 @@ function AutoGenDialog({ po, open, onClose }: AutoGenDialogProps) {
               </div>
 
               {prev.existingWOCount > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  This PO already has <span className="font-medium text-foreground">{prev.existingWOCount}</span> work order(s). New WOs will be added alongside them.
+                <p className="text-xs text-amber-400/80">
+                  ⚠ This PO already has <span className="font-medium">{prev.existingWOCount}</span> work order(s).
                 </p>
               )}
             </div>
@@ -612,7 +689,9 @@ function AutoGenDialog({ po, open, onClose }: AutoGenDialogProps) {
             <Zap className="w-3.5 h-3.5" />
             {genMut.isPending
               ? 'Generating…'
-              : `Generate ${prev?.workOrdersToCreate?.length ?? 0} Work Order${(prev?.workOrdersToCreate?.length ?? 0) !== 1 ? 's' : ''}`}
+              : isDispatchMode
+                ? `Generate 1 Work Order + ${joSteps.length} Job Orders`
+                : `Generate Work Order`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -673,6 +752,105 @@ function POActionMenu({ po, onEdit, onDelete, onRelease, onHold, onResume, onCom
         {canDelete   && <DropdownMenuItem onClick={onDelete} className="text-red-400 focus:text-red-400"><Trash2 className="w-3.5 h-3.5 mr-2" />Delete</DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// WOs list with expandable dispatch list per WO
+// ─────────────────────────────────────────────────────────────
+
+interface WOsWithDispatchProps {
+  po: ProductionOrder;
+  actions: Omit<POActionsProps, 'po'>;
+}
+
+function WOsWithDispatch({ po, actions }: WOsWithDispatchProps) {
+  const [expandedWO, setExpandedWO] = useState<string | null>(null);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm font-semibold">Work Orders ({po.workOrders.length})</p>
+        {['RELEASED', 'IN_PROGRESS'].includes(po.status) && (
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={actions.onCreateWO}>
+              <Plus className="w-3 h-3 mr-1" /> Manual
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10" onClick={actions.onAutoGen}>
+              <Zap className="w-3 h-3 mr-1" /> Auto-Generate
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {po.workOrders.length === 0 ? (
+        <div className="glass-card rounded-lg p-4 text-center text-sm text-muted-foreground">
+          <ClipboardList className="w-6 h-6 mx-auto mb-2 opacity-40" />
+          {po.status === 'PLANNED' ? 'Release this PO first to create work orders.' : 'No work orders yet.'}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {po.workOrders.map(wo => {
+            const wcfg = WO_STATUS[wo.status] ?? { label: wo.status, color: 'text-muted-foreground', bar: 'bg-slate-500' };
+            const pct = woProgress(wo);
+            const isExpanded = expandedWO === wo.id;
+
+            return (
+              <div key={wo.id} className={cn(
+                'glass-card rounded-lg border transition-colors',
+                isExpanded ? 'border-brand-500/30' : 'border-white/5',
+              )}>
+                {/* WO header row */}
+                <button
+                  className="w-full text-left p-3"
+                  onClick={() => setExpandedWO(isExpanded ? null : wo.id)}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <ChevronDown className={cn(
+                        'w-3 h-3 text-muted-foreground transition-transform shrink-0',
+                        isExpanded && 'rotate-180',
+                      )} />
+                      <span className="font-mono text-xs text-blue-300">{wo.orderNumber}</span>
+                    </div>
+                    <span className={cn('text-[10px] font-medium', wcfg.color)}>{wcfg.label}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground mb-1.5 pl-5">
+                    {wo.machine && (
+                      <span className="flex items-center gap-1">
+                        <Cpu className="w-3 h-3" />{wo.machine.name}
+                      </span>
+                    )}
+                    <span>{wo.plannedQty.toLocaleString()} units</span>
+                    <span className="flex items-center gap-1 text-brand-400/60">
+                      <Layers className="w-3 h-3" />Dispatch List
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 pl-5">
+                    <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
+                      <div className={cn('h-full rounded-full', wcfg.bar)} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-[10px] text-muted-foreground w-7 shrink-0">{pct}%</span>
+                  </div>
+                </button>
+
+                {/* Expandable dispatch list */}
+                {isExpanded && (
+                  <div className="px-3 pb-3 border-t border-white/5 pt-2">
+                    <DispatchListPanel
+                      woId={wo.id}
+                      woStatus={wo.status}
+                      plannedStart={wo.plannedStart}
+                      plannedEnd={wo.plannedEnd}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -802,52 +980,7 @@ function PODetailSheet({ po, open, onClose, actions }: PODetailSheetProps) {
           </div>
 
           {/* WOs section */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-semibold">Work Orders ({po.workOrders.length})</p>
-              {['RELEASED', 'IN_PROGRESS'].includes(po.status) && (
-                <div className="flex items-center gap-1.5">
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={actions.onCreateWO}>
-                    <Plus className="w-3 h-3 mr-1" /> Manual
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10" onClick={actions.onAutoGen}>
-                    <Zap className="w-3 h-3 mr-1" /> Auto-Generate
-                  </Button>
-                </div>
-              )}
-            </div>
-            {po.workOrders.length === 0 ? (
-              <div className="glass-card rounded-lg p-4 text-center text-sm text-muted-foreground">
-                <ClipboardList className="w-6 h-6 mx-auto mb-2 opacity-40" />
-                {po.status === 'PLANNED' ? 'Release this PO first to create work orders.' : 'No work orders yet.'}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {po.workOrders.map(wo => {
-                  const wcfg = WO_STATUS[wo.status] ?? { label: wo.status, color: 'text-muted-foreground', bar: 'bg-slate-500' };
-                  const pct = woProgress(wo);
-                  return (
-                    <div key={wo.id} className="glass-card rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="font-mono text-xs text-blue-300">{wo.orderNumber}</span>
-                        <span className={cn('text-[10px] font-medium', wcfg.color)}>{wcfg.label}</span>
-                      </div>
-                      <div className="flex items-center gap-3 text-[10px] text-muted-foreground mb-1.5">
-                        {wo.machine && <span className="flex items-center gap-1"><Cpu className="w-3 h-3" />{wo.machine.name}</span>}
-                        <span>{wo.plannedQty.toLocaleString()} units</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
-                          <div className={cn('h-full rounded-full', wcfg.bar)} style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="text-[10px] text-muted-foreground w-7 shrink-0">{pct}%</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <WOsWithDispatch po={po} actions={actions} />
 
           {po.notes && (
             <div className="text-xs text-muted-foreground p-3 glass-card rounded-lg">
@@ -857,6 +990,191 @@ function PODetailSheet({ po, open, onClose, actions }: PODetailSheetProps) {
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Dispatch List Panel (Job Orders for a single Work Order)
+// ─────────────────────────────────────────────────────────────
+
+interface DispatchListPanelProps {
+  woId: string;
+  woStatus: WOStatus;
+  plannedStart?: string | null;
+  plannedEnd?: string | null;
+}
+
+function DispatchListPanel({ woId, woStatus, plannedStart, plannedEnd }: DispatchListPanelProps) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data, isLoading, refetch } = useQuery<JobOrder[]>({
+    queryKey: ['job-orders', woId],
+    queryFn: () => api.get(`/production/work-orders/${woId}/job-orders`) as any,
+    staleTime: 30_000,
+  });
+  const jobs: JobOrder[] = (data as any) ?? [];
+
+  const genMut = useMutation({
+    mutationFn: () => api.post(`/production/work-orders/${woId}/job-orders/generate`, {
+      plannedStart: plannedStart ? new Date(plannedStart).toISOString() : undefined,
+      plannedEnd:   plannedEnd   ? new Date(plannedEnd).toISOString()   : undefined,
+      clearExisting: jobs.length > 0,
+    }),
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ['job-orders', woId] });
+      toast({ title: `${res?.created ?? 0} job orders generated` });
+    },
+    onError: (e: any) => toast({ variant: 'destructive', title: 'Error', description: e?.response?.data?.message ?? 'Failed' }),
+  });
+
+  const statusMut = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      api.patch(`/production/job-orders/${id}/status`, { status }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['job-orders', woId] }); },
+    onError: (e: any) => toast({ variant: 'destructive', title: 'Error', description: e?.response?.data?.message }),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2 mt-2">
+        {Array.from({ length: 3 }).map((_, i) => <div key={i} className="shimmer h-9 rounded-lg" />)}
+      </div>
+    );
+  }
+
+  if (jobs.length === 0) {
+    return (
+      <div className="mt-3 p-3 rounded-lg bg-white/3 border border-white/8 text-center">
+        <GitBranch className="w-5 h-5 mx-auto mb-1.5 text-muted-foreground opacity-40" />
+        <p className="text-xs text-muted-foreground mb-2">No dispatch list yet.</p>
+        {['RELEASED', 'IN_PROGRESS', 'PLANNED'].includes(woStatus) && (
+          <Button
+            size="sm" variant="outline"
+            className="h-7 text-xs text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
+            onClick={() => genMut.mutate()}
+            disabled={genMut.isPending}
+          >
+            {genMut.isPending
+              ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Generating…</>
+              : <><Zap className="w-3 h-3 mr-1" />Generate from Routing</>}
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-1.5">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
+          Dispatch List ({jobs.length} operations)
+        </span>
+        <Button
+          size="sm" variant="ghost"
+          className="h-6 text-[10px] text-yellow-400 hover:bg-yellow-500/10 px-2"
+          onClick={() => genMut.mutate()}
+          disabled={genMut.isPending}
+        >
+          {genMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+        </Button>
+      </div>
+
+      {/* Chain: each JO as a card */}
+      <div className="relative pl-4">
+        {/* Vertical connector line */}
+        <div className="absolute left-1.5 top-2 bottom-2 w-px bg-white/8" />
+
+        {jobs.map((jo, idx) => {
+          const cfg = JO_STATUS[jo.status] ?? JO_STATUS.SCHEDULED;
+          const canStart    = jo.status === 'READY';
+          const canComplete = jo.status === 'EXECUTING';
+          const canPause    = jo.status === 'EXECUTING';
+          const canResume   = jo.status === 'PAUSED';
+
+          return (
+            <div key={jo.id} className="relative mb-1.5 last:mb-0">
+              {/* Connector dot */}
+              <div className={cn(
+                'absolute -left-3 top-3.5 w-2 h-2 rounded-full border border-background',
+                cfg.dot,
+              )} />
+
+              <div className={cn(
+                'rounded-lg px-3 py-2 border transition-colors',
+                jo.status === 'EXECUTING' ? 'border-brand-500/40 bg-brand-500/8' : 'border-white/6 bg-white/3',
+              )}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                      {String(jo.sequenceOrder).padStart(2, '0')}
+                    </span>
+                    <span className="text-xs font-medium truncate">{jo.operationName}</span>
+                    {jo.machine && (
+                      <span className="flex items-center gap-1 text-[10px] text-muted-foreground shrink-0">
+                        <Cpu className="w-2.5 h-2.5" />{jo.machine.code}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded', cfg.bg, cfg.color)}>
+                      {cfg.label}
+                    </span>
+                    {canStart && (
+                      <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-green-400 hover:bg-green-500/15"
+                        onClick={() => statusMut.mutate({ id: jo.id, status: 'EXECUTING' })}>
+                        <Play className="w-3 h-3" />
+                      </Button>
+                    )}
+                    {canPause && (
+                      <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-amber-400 hover:bg-amber-500/15"
+                        onClick={() => statusMut.mutate({ id: jo.id, status: 'PAUSED' })}>
+                        <PauseCircle className="w-3 h-3" />
+                      </Button>
+                    )}
+                    {canResume && (
+                      <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-blue-400 hover:bg-blue-500/15"
+                        onClick={() => statusMut.mutate({ id: jo.id, status: 'EXECUTING' })}>
+                        <Play className="w-3 h-3" />
+                      </Button>
+                    )}
+                    {canComplete && (
+                      <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-green-400 hover:bg-green-500/15"
+                        onClick={() => statusMut.mutate({ id: jo.id, status: 'COMPLETE' })}>
+                        <CheckSquare className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sub-row: qty + cycle time */}
+                {(jo.plannedQtyOut || jo.idealCycleTimeSec) && (
+                  <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground">
+                    {jo.plannedQtyOut && (
+                      <span>Plan: {jo.plannedQtyOut.toLocaleString()} <span className="font-medium text-foreground/70">{jo.outputUnit ?? 'units'}</span></span>
+                    )}
+                    {jo.actualQtyGood > 0 && (
+                      <span className="text-green-400">✓ {jo.actualQtyGood.toLocaleString()} {jo.outputUnit ?? ''}</span>
+                    )}
+                    {jo.idealCycleTimeSec && (
+                      <span>ICT: {jo.idealCycleTimeSec.toFixed(1)}s</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Arrow connector between steps */}
+              {idx < jobs.length - 1 && (
+                <div className="flex items-center justify-center h-2 -mt-0.5 mb-0.5">
+                  <ChevronRight className="w-3 h-3 text-muted-foreground/30" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

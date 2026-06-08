@@ -487,6 +487,92 @@ export class ProductionService {
   // AUTO-GENERATE WORK ORDERS (ISA-95 — Recipe + Routing driven)
   // ─────────────────────────────────────────────────────────────
 
+  /** Look up the StepDependency type between two routing steps.
+   *  Returns 'FINISH_TO_START' (default) when no explicit record exists. */
+  private async lookupDepType(
+    fromStepId: string | null | undefined,
+    toStepId: string | null | undefined,
+  ): Promise<string> {
+    if (!fromStepId || !toStepId) return 'FINISH_TO_START';
+    const dep = await this.prisma.stepDependency.findFirst({
+      where: { fromStepId, toStepId },
+      select: { type: true },
+    });
+    return dep?.type ?? 'FINISH_TO_START';
+  }
+
+  /** Resolve the best machine for a routing step when machineId is null.
+   *  Three attempts: name-prefix match → machine-name-in-WC-name → code-suffix match */
+  private async resolveStepMachine(
+    step: { machineId?: string | null; machine?: any; workCenterId?: string | null; workCenterRef?: any },
+    factoryId: string | null,
+  ): Promise<{ id: string; name: string; code: string; machineType: string } | null> {
+    if (step.machine) return step.machine;
+
+    const wc = step.workCenterRef;
+    if (!wc) return null;
+
+    const baseWhere = factoryId ? { factoryId, isActive: true } : { isActive: true };
+    const sel = { id: true, name: true, code: true, machineType: true } as const;
+
+    // Attempt 1: stripped WorkCenter name contained in machine name
+    const stripped = wc.name
+      .replace(/\s+cell$/i, '')
+      .replace(/\s+work\s*center$/i, '')
+      .trim();
+
+    const m1 = await this.prisma.machine.findFirst({
+      where: { ...baseWhere, name: { contains: stripped, mode: 'insensitive' } },
+      select: sel,
+    });
+    if (m1) return m1;
+
+    // Attempt 2: machine name contained within WorkCenter name
+    const all = await this.prisma.machine.findMany({ where: baseWhere, select: sel });
+    const m2 = all.find((m) => wc.name.toLowerCase().includes(m.name.toLowerCase())) ?? null;
+    if (m2) return m2;
+
+    // Attempt 3: WorkCenter code suffix (after "WC-") matches machine code
+    const wcSuffix = (wc.code as string).replace(/^WC-/i, '');
+    if (wcSuffix) {
+      const m3 = all.find(
+        (m) =>
+          m.code.toLowerCase().includes(wcSuffix.toLowerCase()) ||
+          wcSuffix.toLowerCase().includes(m.code.replace(/^SDPF-M\d+-/i, '').toLowerCase()),
+      ) ?? null;
+      if (m3) return m3;
+    }
+
+    return null;
+  }
+
+  /** Map an operation name to its output unit (PIECE → CARTON → PALLET). */
+  private resolveStepOutputUnit(operationName: string, prevUnit: string): string {
+    const op = operationName.toLowerCase();
+    if (/carton(?:ing)?|cartomac|boxing|carto\b/.test(op)) return 'CARTON';
+    if (/palletiz(?:ing|er)?|palletis(?:ing|er)?|robot|stacking/.test(op)) return 'PALLET';
+    // wrapping keeps the same unit (pallet stays pallet after shrink-wrap)
+    return prevUnit;
+  }
+
+  /** Calculate the expected output quantity when the unit changes between steps. */
+  private calcOutputQty(
+    outputUnit: string,
+    prevUnit: string,
+    prevQty: number,
+    pkg: { unitsPerInner: number; innersPerCarton: number; cartonsPerPallet: number },
+  ): number {
+    if (outputUnit === prevUnit) return prevQty;
+    const ppc = Math.max(1, pkg.unitsPerInner * pkg.innersPerCarton); // pieces per carton
+    const cpp = Math.max(1, pkg.cartonsPerPallet);
+    if (outputUnit === 'CARTON') return Math.ceil(prevQty / ppc);
+    if (outputUnit === 'PALLET') {
+      const cartonsIn = prevUnit === 'CARTON' ? prevQty : Math.ceil(prevQty / ppc);
+      return Math.ceil(cartonsIn / cpp);
+    }
+    return prevQty;
+  }
+
   async previewAutoGenerateWOs(factoryId: string | null, poId: string): Promise<any> {
     const factoryFilter = factoryId ? { factoryId } : {};
     const po = await this.prisma.productionOrder.findFirst({
@@ -496,85 +582,129 @@ export class ProductionService {
     if (!po) throw new NotFoundException('Production order not found');
     if (!po.skuId) throw new BadRequestException('Production order has no SKU assigned');
     if (!['RELEASED', 'IN_PROGRESS'].includes(po.status)) {
-      throw new BadRequestException(`Release the PO first before auto-generating work orders (current: ${po.status})`);
+      throw new BadRequestException(
+        `Release the PO first before auto-generating (current: ${po.status})`,
+      );
     }
 
-    // Find approved recipe for this SKU
+    const stepIncludes = {
+      where: { isOptional: false },
+      orderBy: { stepNumber: 'asc' } as const,
+      include: {
+        machine: { select: { id: true, name: true, code: true, machineType: true } },
+        workCenterRef: { select: { id: true, name: true, code: true, level: true } },
+      },
+    };
+
+    // APPROVED recipe first, then REVIEW as fallback
     const recipe: any = await this.prisma.recipe.findFirst({
-      where: { skuId: po.skuId, status: 'APPROVED' as any, ...(factoryId ? { factoryId } : {}) },
-      orderBy: { approvedAt: 'desc' },
-      include: {
-        process: {
-          include: {
-            routingSteps: {
-              where: { isOptional: false },
-              orderBy: { stepNumber: 'asc' },
-              include: { machine: { select: { id: true, name: true, code: true, machineType: true } } },
-            },
-          },
-        },
-      },
+      where: { skuId: po.skuId, status: { in: ['APPROVED', 'REVIEW'] as any }, ...factoryFilter },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      include: { process: { include: { routingSteps: stepIncludes } } },
     });
 
-    // Fallback: any active manufacturing process for the SKU
     const process: any = recipe?.process ?? await this.prisma.manufacturingProcess.findFirst({
-      where: { skuId: po.skuId, isActive: true, ...(factoryId ? { factoryId } : {}) },
+      where: { skuId: po.skuId, isActive: true, ...factoryFilter },
       orderBy: { createdAt: 'desc' },
-      include: {
-        routingSteps: {
-          where: { isOptional: false },
-          orderBy: { stepNumber: 'asc' },
-          include: { machine: { select: { id: true, name: true, code: true, machineType: true } } },
-        },
-      },
+      include: { routingSteps: stepIncludes },
     });
 
-    const steps: any[] = process?.routingSteps ?? [];
-    const stepsWithMachine: any[] = steps.filter((s: any) => s.machineId && s.machine);
+    const rawSteps: any[] = (process?.routingSteps ?? []).filter((s: any) => !s.isOptional);
 
-    // Existing WO count for this PO
-    const existingWOCount = await this.prisma.workOrder.count({ where: { productionOrderId: poId, deletedAt: null } });
+    // Packaging specs for unit-flow calculation
+    const skuPkg = {
+      unitsPerInner: (po.sku as any)?.unitsPerInner ?? 1,
+      innersPerCarton: (po.sku as any)?.innersPerCarton ?? 1,
+      cartonsPerPallet: (po.sku as any)?.cartonsPerPallet ?? 1,
+    };
+    const ppc = Math.max(1, skuPkg.unitsPerInner * skuPkg.innersPerCarton);
+    // Normalise PO qty to PIECE base for step-by-step calculations
+    let prevQty = (po as any).unit === 'CARTON' ? po.targetQty * ppc
+      : (po as any).unit === 'PALLET' ? po.targetQty * ppc * skuPkg.cartonsPerPallet
+      : po.targetQty;
+    let prevUnit = 'PIECE';
 
-    if (stepsWithMachine.length === 0) {
-      // No routing — fallback to single WO on first available packing machine
-      const fallbackMachine = await this.prisma.machine.findFirst({
-        where: { factoryId: factoryId ?? undefined, isActive: true },
+    // Sequential loop — prevQty/prevUnit must flow step-to-step
+    const jobOrdersToCreate: any[] = [];
+    for (const step of rawSteps) {
+      const resolvedMachine = await this.resolveStepMachine(step as any, factoryId);
+      const outputUnit = this.resolveStepOutputUnit((step as any).operationName, prevUnit);
+      const outputQty  = this.calcOutputQty(outputUnit, prevUnit, prevQty, skuPkg);
+      prevUnit = outputUnit;
+      prevQty  = outputQty;
+
+      jobOrdersToCreate.push({
+        stepNumber: (step as any).stepNumber,
+        operationName: (step as any).operationName,
+        machine: resolvedMachine
+          ? { id: resolvedMachine.id, name: resolvedMachine.name, code: resolvedMachine.code }
+          : null,
+        workCenter: (step as any).workCenterRef
+          ? { name: (step as any).workCenterRef.name, code: (step as any).workCenterRef.code }
+          : null,
+        plannedQtyOut: outputQty,
+        outputUnit,
+        estimatedDurationMins:
+          (step as any).cycleTimeMins ??
+          (process?.totalCycleTimeMins && rawSteps.length
+            ? process.totalCycleTimeMins / rawSteps.length
+            : null),
+        setupTimeMins: (step as any).setupTimeMins ?? 0,
+      });
+    }
+
+    const existingWOCount = await this.prisma.workOrder.count({
+      where: { productionOrderId: poId, deletedAt: null },
+    });
+
+    if (jobOrdersToCreate.length === 0) {
+      const fallback = await this.prisma.machine.findFirst({
+        where: { ...(factoryId ? { factoryId } : {}), isActive: true },
         orderBy: { createdAt: 'asc' },
       });
       return {
-        recipe: recipe ? { id: recipe.id, code: recipe.code, version: recipe.version, name: recipe.name } : null,
+        recipe: recipe ? { id: recipe.id, code: recipe.code, version: recipe.version, name: recipe.name, status: recipe.status } : null,
         process: null,
-        steps: [],
-        workOrdersToCreate: fallbackMachine ? [{
-          stepNumber: 1, operationName: 'Production Run',
-          machine: fallbackMachine ? { id: fallbackMachine.id, name: fallbackMachine.name } : null,
-          plannedQty: po.targetQty, estimatedDurationMins: null,
-        }] : [],
+        jobOrdersToCreate: fallback
+          ? [{ stepNumber: 1, operationName: 'Production Run', machine: { id: fallback.id, name: fallback.name }, plannedQty: po.targetQty, estimatedDurationMins: null }]
+          : [],
+        workOrdersToCreate: fallback
+          ? [{ stepNumber: 1, operationName: 'Production Run', machine: { id: fallback.id, name: fallback.name }, plannedQty: po.targetQty, estimatedDurationMins: null }]
+          : [],
         existingWOCount,
-        canGenerate: !!fallbackMachine,
-        warning: 'No routing steps found. Will create a single work order on the primary machine.',
+        canGenerate: !!fallback,
+        warning: 'No routing steps found — will create a single work order on the primary machine.',
+        mode: 'fallback',
       };
     }
 
-    // Calculate time distribution across steps
-    const totalMins: number = process?.totalCycleTimeMins ?? stepsWithMachine.reduce((s: number, r: any) => s + (r.cycleTimeMins ?? 0), 0) ?? 0;
-    const workOrdersToCreate = stepsWithMachine.map((step: any) => ({
-      stepNumber: step.stepNumber,
-      operationName: step.operationName,
-      machine: step.machine ? { id: step.machine.id, name: step.machine.name, code: step.machine.code } : null,
-      plannedQty: po.targetQty,
-      estimatedDurationMins: step.cycleTimeMins ?? (totalMins / stepsWithMachine.length),
-      setupTimeMins: step.setupTimeMins ?? 0,
-    }));
+    const warnings: string[] = [];
+    if (recipe?.status && recipe.status !== 'APPROVED') {
+      warnings.push(`Recipe ${recipe.code} is in "${recipe.status}" status — not yet approved for production.`);
+    }
+    if (!recipe) {
+      warnings.push('No recipe found — using manufacturing process routing only.');
+    }
+    if (existingWOCount > 0) {
+      warnings.push(`This PO already has ${existingWOCount} work order(s).`);
+    }
+    const noMachine = jobOrdersToCreate.filter((s) => !s.machine);
+    if (noMachine.length > 0) {
+      warnings.push(
+        `${noMachine.length} step(s) have no machine resolved (${noMachine.map((s) => s.operationName).join(', ')}). Assign machines after generation.`,
+      );
+    }
 
     return {
-      recipe: recipe ? { id: recipe.id, code: recipe.code, version: recipe.version, name: recipe.name } : null,
+      recipe: recipe ? { id: recipe.id, code: recipe.code, version: recipe.version, name: recipe.name, status: recipe.status } : null,
       process: process ? { id: process.id, name: process.name, totalCycleTimeMins: process.totalCycleTimeMins } : null,
-      steps: workOrdersToCreate,
-      workOrdersToCreate,
+      // ISA-95: 1 Work Order + N Job Orders (dispatch list)
+      jobOrdersToCreate,
+      workOrdersToCreate: jobOrdersToCreate, // kept for backward compat
       existingWOCount,
       canGenerate: true,
-      warning: existingWOCount > 0 ? `This PO already has ${existingWOCount} work order(s). New WOs will be added.` : null,
+      warning: warnings.length > 0 ? warnings.join(' | ') : null,
+      mode: 'dispatch', // signals the UI that we create 1 WO + N JOs
     };
   }
 
@@ -594,49 +724,52 @@ export class ProductionService {
 
     const start = new Date(dto.plannedStart);
     const end   = new Date(dto.plannedEnd);
-    const totalMs = end.getTime() - start.getTime();
-    const steps: any[] = preview.workOrdersToCreate;
-    const perStepMs = Math.floor(totalMs / (steps.length || 1));
-
-    const year = new Date().getFullYear();
+    const year  = new Date().getFullYear();
     const existing = await this.prisma.workOrder.count({ where: { factoryId } });
 
-    const createdWOs: any[] = [];
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      if (!step.machine?.id) continue;
+    // ISA-95: 1 Work Order per Production Order (the production run)
+    // N Job Orders are the dispatch list (one per routing step)
+    const firstStep: any = preview.jobOrdersToCreate?.[0];
+    const primaryMachineId: string | null = firstStep?.machine?.id ?? null;
 
-      const woStart = new Date(start.getTime() + i * perStepMs);
-      const woEnd   = new Date(start.getTime() + (i + 1) * perStepMs);
-      const orderNumber = `WO-${year}-${String(existing + i + 1).padStart(4, '0')}`;
-
-      const machine = await this.prisma.machine.findFirst({ where: { id: step.machine.id } });
-
-      const wo = await this.prisma.workOrder.create({
-        data: {
-          factoryId,
-          productionOrderId: poId,
-          skuId: po.skuId!,
-          machineId: step.machine.id,
-          lineId: machine?.lineId ?? null,
-          orderNumber,
-          status: 'PLANNED',
-          priority: po.priority as any,
-          plannedQty: step.plannedQty ?? po.targetQty,
-          plannedStart: woStart,
-          plannedEnd: woEnd,
-          notes: `Auto-generated from PO ${po.orderNumber} — Step ${step.stepNumber}: ${step.operationName}`,
-          createdById: userId,
-        },
-        include: {
-          sku: { select: { name: true, code: true } },
-          machine: { select: { name: true, code: true } },
-        },
-      });
-      createdWOs.push(wo);
+    let lineId: string | null = null;
+    if (primaryMachineId) {
+      const m = await this.prisma.machine.findFirst({ where: { id: primaryMachineId }, select: { lineId: true } });
+      lineId = m?.lineId ?? null;
     }
 
-    // Update PO status
+    const orderNumber = `WO-${year}-${String(existing + 1).padStart(4, '0')}`;
+
+    const wo = await this.prisma.workOrder.create({
+      data: {
+        factoryId,
+        productionOrderId: poId,
+        skuId: po.skuId!,
+        machineId: primaryMachineId,
+        lineId,
+        orderNumber,
+        status: 'PLANNED',
+        priority: po.priority as any,
+        plannedQty: po.targetQty,
+        plannedStart: start,
+        plannedEnd: end,
+        notes: `Auto-generated from PO ${po.orderNumber}${preview.process ? ` — Process: ${preview.process.name}` : ''}`,
+        createdById: userId,
+      },
+      include: {
+        sku: { select: { name: true, code: true } },
+        machine: { select: { name: true, code: true } },
+      },
+    });
+
+    // Generate dispatch list (Job Orders) for each routing step
+    const joResult = await this.generateJobOrders(factoryId, wo.id, {
+      plannedStart: dto.plannedStart,
+      plannedEnd: dto.plannedEnd,
+      clearExisting: false,
+    });
+
+    // Advance PO to IN_PROGRESS
     if (po.status === 'RELEASED') {
       await this.prisma.productionOrder.update({
         where: { id: poId },
@@ -644,8 +777,16 @@ export class ProductionService {
       });
     }
 
-    this.logger.log(`Auto-generated ${createdWOs.length} WOs for PO ${po.orderNumber}`);
-    return { created: createdWOs.length, workOrders: createdWOs };
+    this.logger.log(
+      `Auto-generated WO ${wo.orderNumber} + ${joResult.created} job orders for PO ${po.orderNumber}`,
+    );
+    return {
+      workOrder: wo,
+      jobOrdersCreated: joResult.created,
+      jobOrders: joResult.jobOrders,
+      process: preview.process,
+      warning: preview.warning,
+    };
   }
 
   // ────────────────────────────────────────────────────────────
@@ -1315,5 +1456,392 @@ export class ProductionService {
 
     const seq = lastOrder ? parseInt(lastOrder.orderNumber.slice(-4), 10) + 1 : 1;
     return `${prefix}-${String(seq).padStart(4, '0')}`;
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // JOB ORDERS (ISA-95 Dispatch List — per RoutingStep per WO)
+  // ────────────────────────────────────────────────────────────
+
+  async listAllJobOrders(
+    factoryId: string | null,
+    filters: { status?: string; workOrderId?: string },
+  ) {
+    const where: any = {
+      ...(factoryId ? { factoryId } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.workOrderId ? { workOrderId: filters.workOrderId } : {}),
+    };
+
+    const jos = await this.prisma.jobOrder.findMany({
+      where,
+      orderBy: [{ workOrderId: 'asc' }, { sequenceOrder: 'asc' }],
+      include: {
+        machine: { select: { name: true, code: true } },
+        workCenter: { select: { name: true, code: true } },
+        workOrder: {
+          select: {
+            id: true, orderNumber: true,
+            sku: { select: { name: true, code: true } },
+            productionOrder: { select: { orderNumber: true } },
+          },
+        },
+        predecessor: {
+          select: { id: true, operationName: true, status: true, routingStepId: true, actualStart: true },
+        },
+      },
+    });
+
+    return this.attachDepTypes(jos);
+  }
+
+  /** Bulk-attach depType to a list of job orders without N+1 queries */
+  private async attachDepTypes(jos: any[]): Promise<any[]> {
+    const pairs = jos
+      .filter((j) => j.routingStepId && j.predecessor?.routingStepId)
+      .map((j) => ({ from: j.predecessor.routingStepId as string, to: j.routingStepId as string }));
+
+    const recs = pairs.length
+      ? await this.prisma.stepDependency.findMany({
+          where: { OR: pairs.map((p) => ({ fromStepId: p.from, toStepId: p.to })) },
+          select: { fromStepId: true, toStepId: true, type: true },
+        })
+      : [];
+
+    const depMap = new Map(recs.map((r) => [`${r.fromStepId}:${r.toStepId}`, r.type as string]));
+
+    return jos.map((jo) => ({
+      ...jo,
+      depType: jo.predecessor?.routingStepId && jo.routingStepId
+        ? (depMap.get(`${jo.predecessor.routingStepId as string}:${jo.routingStepId as string}`) ?? 'FINISH_TO_START')
+        : null,
+    }));
+  }
+
+  async getJobOrders(factoryId: string | null, workOrderId: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const wo = await this.prisma.workOrder.findFirst({
+      where: { id: workOrderId, ...factoryFilter, deletedAt: null },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+
+    const jos = await this.prisma.jobOrder.findMany({
+      where: { workOrderId },
+      include: {
+        machine: { select: { name: true, code: true, machineType: true } },
+        workCenter: { select: { name: true, code: true } },
+        routingStep: { select: { stepNumber: true, operationName: true } },
+        materials: true,
+        predecessor: {
+          select: { id: true, operationName: true, status: true, routingStepId: true, actualStart: true },
+        },
+        successors: { select: { id: true, operationName: true, status: true } },
+      },
+      orderBy: { sequenceOrder: 'asc' },
+    });
+
+    return this.attachDepTypes(jos);
+  }
+
+  async generateJobOrders(
+    factoryId: string | null,
+    workOrderId: string,
+    dto: { plannedStart?: string; plannedEnd?: string; clearExisting?: boolean },
+  ) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    const wo = await this.prisma.workOrder.findFirst({
+      where: { id: workOrderId, ...factoryFilter, deletedAt: null },
+      include: {
+        sku: true,
+        productionOrder: { select: { orderNumber: true, unit: true } },
+      },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+    if (!wo.skuId) throw new BadRequestException('Work order has no product (SKU) assigned');
+
+    // Resolve manufacturing process for this SKU
+    const process = await this.prisma.manufacturingProcess.findFirst({
+      where: { skuId: wo.skuId, isActive: true },
+      include: {
+        routingSteps: {
+          include: {
+            machine: { select: { id: true, name: true, code: true } },
+            workCenterRef: { select: { id: true, name: true, code: true } },
+          },
+          orderBy: { stepNumber: 'asc' },
+        },
+      },
+      orderBy: { version: 'desc' },
+    });
+
+    if (!process || process.routingSteps.length === 0) {
+      throw new BadRequestException(
+        'No active manufacturing process with routing steps found for this product. ' +
+        'Configure a Manufacturing Process first.',
+      );
+    }
+
+    const resolvedFactoryId = factoryId ?? wo.factoryId;
+
+    if (dto.clearExisting) {
+      await this.prisma.jobOrder.deleteMany({ where: { workOrderId } });
+    } else {
+      const existing = await this.prisma.jobOrder.count({ where: { workOrderId } });
+      if (existing > 0) {
+        throw new BadRequestException(
+          `Work order already has ${existing} job orders. ` +
+          'Pass clearExisting:true to regenerate.',
+        );
+      }
+    }
+
+    // Compute time window for distributing JOs
+    const startMs = dto.plannedStart
+      ? new Date(dto.plannedStart).getTime()
+      : wo.plannedStart.getTime();
+    const endMs = dto.plannedEnd
+      ? new Date(dto.plannedEnd).getTime()
+      : wo.plannedEnd.getTime();
+    const steps = process.routingSteps;
+    const slotMs = steps.length > 0 ? (endMs - startMs) / steps.length : 0;
+
+    // Packaging specs for unit-flow calculation
+    const skuPkg = {
+      unitsPerInner: wo.sku?.unitsPerInner ?? 1,
+      innersPerCarton: wo.sku?.innersPerCarton ?? 1,
+      cartonsPerPallet: wo.sku?.cartonsPerPallet ?? 1,
+    };
+    const ppc = Math.max(1, skuPkg.unitsPerInner * skuPkg.innersPerCarton);
+    const poUnit = (wo.productionOrder as any)?.unit ?? 'PIECE';
+    // Normalise WO.plannedQty to PIECE base
+    let prevOutputQty: number = poUnit === 'CARTON' ? wo.plannedQty * ppc
+      : poUnit === 'PALLET' ? wo.plannedQty * ppc * skuPkg.cartonsPerPallet
+      : wo.plannedQty;
+    let prevOutputUnit = 'PIECE';
+
+    const created: any[] = [];
+    let prevId: string | null = null;
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+
+      // Resolve machine via helper (WorkCenter fallback)
+      const resolvedMachine = await this.resolveStepMachine(step, factoryId);
+      const resolvedMachineId = resolvedMachine?.id ?? null;
+
+      // Look up ideal cycle time for this machine × product
+      const cycleTime = resolvedMachineId
+        ? await this.prisma.machineCycleTime.findFirst({
+            where: { machineId: resolvedMachineId, skuId: wo.skuId, isActive: true },
+          })
+        : null;
+
+      const jPlannedStart = new Date(startMs + i * slotMs);
+      const jPlannedEnd = new Date(startMs + (i + 1) * slotMs);
+
+      const idealCycleTimeSec: number | null = cycleTime?.cycleTimeSeconds
+        ?? (step.cycleTimeMins != null ? step.cycleTimeMins * 60 : null);
+
+      // Packaging-aware unit/qty per step
+      const outputUnit = this.resolveStepOutputUnit(step.operationName, prevOutputUnit);
+      const outputQty  = this.calcOutputQty(outputUnit, prevOutputUnit, prevOutputQty, skuPkg);
+
+      const jo: Record<string, unknown> = await this.prisma.jobOrder.create({
+        data: {
+          factoryId: resolvedFactoryId,
+          workOrderId,
+          routingStepId: step.id,
+          machineId: resolvedMachineId,
+          workCenterId: step.workCenterId ?? null,
+          sequenceOrder: step.stepNumber,
+          operationName: step.operationName,
+          status: i === 0 ? 'READY' : 'SCHEDULED',
+          predecessorId: prevId,
+          plannedStart: jPlannedStart,
+          plannedEnd: jPlannedEnd,
+          plannedQtyIn: prevOutputQty,
+          plannedQtyOut: outputQty,
+          outputUnit,
+          idealCycleTimeSec,
+        },
+        include: {
+          machine: { select: { name: true, code: true } },
+          workCenter: { select: { name: true, code: true } },
+        },
+      });
+
+      prevOutputUnit = outputUnit;
+      prevOutputQty  = outputQty;
+      created.push(jo);
+      prevId = jo['id'] as string;
+    }
+
+    this.logger.log(
+      `Generated ${created.length} job orders for WO ${wo.orderNumber} ` +
+      `(Process: ${process.name} v${process.version})`,
+    );
+
+    return { created: created.length, jobOrders: created, process: { name: process.name, version: process.version } };
+  }
+
+  async updateJobOrderStatus(
+    factoryId: string | null,
+    jobOrderId: string,
+    status: string,
+    dto: { actualQtyGood?: number; actualQtyRejected?: number; handoverQty?: number; notes?: string },
+  ) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const jo = await this.prisma.jobOrder.findFirst({
+      where: { id: jobOrderId, ...factoryFilter },
+      include: {
+        predecessor: {
+          select: {
+            id: true, operationName: true, status: true,
+            routingStepId: true, actualStart: true,
+          },
+        },
+      },
+    });
+    if (!jo) throw new NotFoundException('Job order not found');
+
+    const VALID_JO_TRANSITIONS: Record<string, string[]> = {
+      SCHEDULED: ['READY', 'CANCELLED'],
+      READY:     ['EXECUTING', 'CANCELLED'],
+      EXECUTING: ['PAUSED', 'COMPLETE', 'CANCELLED'],
+      PAUSED:    ['EXECUTING', 'CANCELLED'],
+      COMPLETE:  [],
+      CANCELLED: [],
+    };
+
+    const allowed = VALID_JO_TRANSITIONS[jo.status] ?? [];
+    if (!allowed.includes(status)) {
+      throw new BadRequestException(
+        `Cannot transition job order from ${jo.status} to ${status}. ` +
+        `Allowed: [${allowed.join(', ')}]`,
+      );
+    }
+
+    // ── Dependency-aware start validation (→ EXECUTING) ──────────────────
+    if (status === 'EXECUTING' && (jo as any).predecessor) {
+      const pred = (jo as any).predecessor;
+      const dep = await this.lookupDepType(pred.routingStepId, jo.routingStepId);
+
+      if (dep === 'FINISH_TO_START' && pred.status !== 'COMPLETE') {
+        throw new BadRequestException(
+          `FS dependency: "${pred.operationName}" must FINISH before "${jo.operationName}" can start.`,
+        );
+      }
+      if (dep === 'START_TO_START' && !['EXECUTING', 'COMPLETE'].includes(pred.status)) {
+        throw new BadRequestException(
+          `SS dependency: "${pred.operationName}" must START before "${jo.operationName}" can start.`,
+        );
+      }
+      // SF and FF impose NO start restriction — B can start independently
+    }
+
+    // ── Dependency-aware complete validation (→ COMPLETE) ────────────────
+    if (status === 'COMPLETE' && (jo as any).predecessor) {
+      const pred = (jo as any).predecessor;
+      const dep = await this.lookupDepType(pred.routingStepId, jo.routingStepId);
+
+      if (dep === 'FINISH_TO_FINISH' && pred.status !== 'COMPLETE') {
+        throw new BadRequestException(
+          `FF dependency: "${pred.operationName}" must FINISH before "${jo.operationName}" can complete.`,
+        );
+      }
+      if (dep === 'START_TO_FINISH' && !pred.actualStart) {
+        throw new BadRequestException(
+          `SF dependency: "${pred.operationName}" must START before "${jo.operationName}" can complete.`,
+        );
+      }
+    }
+
+    const updated = await this.prisma.jobOrder.update({
+      where: { id: jobOrderId },
+      data: {
+        status: status as any,
+        ...(dto.notes !== undefined && { notes: dto.notes }),
+        ...(status === 'EXECUTING' && !jo.actualStart && { actualStart: new Date() }),
+        ...(status === 'COMPLETE' && {
+          actualEnd: new Date(),
+          // auto-set handoverQty so successor step receives the right qty
+          handoverQty: dto.handoverQty ?? dto.actualQtyGood ?? (jo as any).plannedQtyOut ?? 0,
+        }),
+        ...(dto.actualQtyGood !== undefined && { actualQtyGood: dto.actualQtyGood }),
+        ...(dto.actualQtyRejected !== undefined && { actualQtyRejected: dto.actualQtyRejected }),
+        ...(dto.handoverQty !== undefined && { handoverQty: dto.handoverQty }),
+      },
+    });
+
+    // ── Auto-promote successors based on their dep type ───────────────────
+    const successors = await this.prisma.jobOrder.findMany({
+      where: { predecessorId: jobOrderId, status: 'SCHEDULED' },
+    });
+
+    for (const succ of successors) {
+      const dep = await this.lookupDepType(jo.routingStepId, succ.routingStepId);
+      let shouldPromote = false;
+
+      // FS: promote on predecessor COMPLETE
+      if (status === 'COMPLETE' && dep === 'FINISH_TO_START') shouldPromote = true;
+      // SS: promote on predecessor EXECUTING (parallel start!)
+      if (status === 'EXECUTING' && dep === 'START_TO_START') shouldPromote = true;
+      // FF: B can start anytime → promote immediately on first transition of predecessor
+      if (dep === 'FINISH_TO_FINISH' && ['EXECUTING', 'COMPLETE'].includes(status)) shouldPromote = true;
+      // SF: B must start before A → promote immediately (unusual ordering)
+      if (dep === 'START_TO_FINISH') shouldPromote = true;
+
+      if (shouldPromote) {
+        const transferQty = dto.handoverQty ?? updated.actualQtyGood ?? 0;
+        if (transferQty >= (succ.handoverCriteria ?? 0)) {
+          await this.prisma.jobOrder.update({ where: { id: succ.id }, data: { status: 'READY' } });
+          this.logger.log(`[${dep}] "${succ.operationName}" promoted READY after "${jo.operationName}" → ${status}`);
+        }
+      }
+    }
+
+    return updated;
+  }
+
+  /** Report actual output quantities for an EXECUTING or COMPLETE job order.
+   *  Does NOT change the status — pure qty update so operators can log partial progress. */
+  async reportJobOrderOutput(
+    factoryId: string | null,
+    jobOrderId: string,
+    dto: { actualQtyGood: number; actualQtyRejected?: number },
+  ) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const jo = await this.prisma.jobOrder.findFirst({ where: { id: jobOrderId, ...factoryFilter } });
+    if (!jo) throw new NotFoundException('Job order not found');
+    if (!['EXECUTING', 'COMPLETE'].includes(jo.status)) {
+      throw new BadRequestException(
+        `Can only report output for EXECUTING or COMPLETE job orders (current: ${jo.status})`,
+      );
+    }
+    return this.prisma.jobOrder.update({
+      where: { id: jobOrderId },
+      data: {
+        actualQtyGood: dto.actualQtyGood,
+        ...(dto.actualQtyRejected !== undefined && { actualQtyRejected: dto.actualQtyRejected }),
+      },
+    });
+  }
+
+  async deleteJobOrders(factoryId: string | null, workOrderId: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const wo = await this.prisma.workOrder.findFirst({
+      where: { id: workOrderId, ...factoryFilter, deletedAt: null },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+
+    const active = await this.prisma.jobOrder.count({
+      where: { workOrderId, status: { in: ['EXECUTING', 'PAUSED'] } },
+    });
+    if (active > 0) {
+      throw new ConflictException('Cannot delete job orders while any are EXECUTING or PAUSED.');
+    }
+
+    const { count } = await this.prisma.jobOrder.deleteMany({ where: { workOrderId } });
+    return { deleted: count };
   }
 }

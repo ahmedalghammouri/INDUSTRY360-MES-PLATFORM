@@ -57,18 +57,24 @@ export function formatDuration(minutes: number): string {
 }
 
 // Date helpers
-export function formatDate(date: Date | string, fmt = 'MMM dd, yyyy'): string {
+export function formatDate(date: Date | string | null | undefined, fmt = 'MMM dd, yyyy'): string {
+  if (!date) return '—';
   const d = typeof date === 'string' ? parseISO(date) : date;
+  if (isNaN(d.getTime())) return '—';
   return format(d, fmt);
 }
 
-export function formatDateTime(date: Date | string): string {
+export function formatDateTime(date: Date | string | null | undefined): string {
+  if (!date) return '—';
   const d = typeof date === 'string' ? parseISO(date) : date;
+  if (isNaN(d.getTime())) return '—';
   return format(d, 'MMM dd, yyyy HH:mm');
 }
 
-export function timeAgo(date: Date | string): string {
+export function timeAgo(date: Date | string | null | undefined): string {
+  if (!date) return '—';
   const d = typeof date === 'string' ? parseISO(date) : date;
+  if (isNaN(d.getTime())) return '—';
   return formatDistance(d, new Date(), { addSuffix: true });
 }
 

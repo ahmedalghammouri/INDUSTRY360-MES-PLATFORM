@@ -108,6 +108,7 @@ model Factory {
   recipes                Recipe[]
   energyWOSummaries      EnergyWOSummary[]
   traceabilityLinks      TraceabilityLink[]
+  jobOrders              JobOrder[]
 
   @@map("factories")
 }
@@ -236,6 +237,7 @@ model Machine {
   alarmEvents        AlarmEvent[]
   energyMeters       EnergyMeter[]
   routingSteps       RoutingStep[]
+  jobOrders          JobOrder[]
 
   @@unique([factoryId, code])
   @@map("machines")
@@ -543,6 +545,7 @@ model WorkOrder {
   inspectionResults    InspectionResult[]
   energyWOSummary      EnergyWOSummary?
   maintenanceOrders    MaintenanceWO[]       @relation("MaintLinkedProdWO")
+  jobOrders            JobOrder[]
 
   @@map("work_orders")
   @@index([factoryId, status])
@@ -671,6 +674,7 @@ model MaterialLot {
   rawMaterial        RawMaterial?          @relation(fields: [rawMaterialId], references: [id])
   storageLocationRef StorageLocation?      @relation(fields: [storageLocationId], references: [id])
   consumptions       MaterialConsumption[]
+  jobOrderMaterials  JobOrderMaterial[]
 
   @@unique([factoryId, lotNumber, materialCode])
   @@map("material_lots")
@@ -2186,6 +2190,7 @@ model RoutingStep {
   workCenterRef   WorkCenter?           @relation(fields: [workCenterId], references: [id])
   predecessors    StepDependency[]      @relation("DepTo")
   successors      StepDependency[]      @relation("DepFrom")
+  jobOrders       JobOrder[]
 
   @@unique([processId, stepNumber])
   @@map("routing_steps")
@@ -2232,6 +2237,7 @@ model WorkCenter {
   routingSteps   RoutingStep[]
   downtimeEvents DowntimeEvent[] @relation("WCDowntimes")
   energyReadings EnergyReading[] @relation("WCEnergyReadings")
+  jobOrders      JobOrder[]
 
   @@unique([factoryId, code])
   @@map("work_centers")
@@ -2324,4 +2330,90 @@ model RecipeIngredient {
   rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id])
 
   @@map("recipe_ingredients")
+}
+
+// ============================================================
+// JOB ORDER (ISA-95 Part 2 — Dispatch List)
+// One JobOrder per RoutingStep per WorkOrder.
+// Represents the atomic unit of work assigned to one machine
+// for one operation segment of the production run.
+// ============================================================
+
+enum JobOrderStatus {
+  SCHEDULED   // created, not yet ready to start (predecessor incomplete)
+  READY       // predecessor handover criteria met — operator can start
+  EXECUTING   // machine actively running this step
+  PAUSED      // temporarily interrupted
+  COMPLETE    // step finished, output confirmed
+  CANCELLED
+}
+
+model JobOrder {
+  id                String         @id @default(uuid())
+  factoryId         String
+  workOrderId       String
+  routingStepId     String?        // link to ManufacturingProcess RoutingStep
+  machineId         String?
+  workCenterId      String?
+  sequenceOrder     Int            // mirrors RoutingStep.stepNumber
+  operationName     String         // e.g. "Filling", "Cartoning", "Check-weigh"
+  status            JobOrderStatus @default(SCHEDULED)
+
+  // Predecessor chain — JO[N] becomes READY when JO[N-1] signals COMPLETE
+  predecessorId     String?
+
+  // Schedule
+  plannedStart      DateTime?
+  plannedEnd        DateTime?
+  actualStart       DateTime?
+  actualEnd         DateTime?
+
+  // Quantities
+  plannedQtyIn      Float?         // input quantity planned
+  plannedQtyOut     Float?         // expected output quantity
+  actualQtyGood     Float          @default(0)
+  actualQtyRejected Float          @default(0)
+  handoverQty       Float          @default(0)   // qty actually transferred to next step
+  handoverCriteria  Float?         // min qty before successor becomes READY
+  outputUnit        String?        // PIECE, CARTON, PALLET — unit of plannedQtyOut / actualQtyGood
+
+  // OEE denominator — stamped from MachineCycleTime at JO creation
+  idealCycleTimeSec Float?
+
+  notes             String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  factory      Factory         @relation(fields: [factoryId], references: [id])
+  workOrder    WorkOrder       @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  routingStep  RoutingStep?    @relation(fields: [routingStepId], references: [id])
+  machine      Machine?        @relation(fields: [machineId], references: [id])
+  workCenter   WorkCenter?     @relation(fields: [workCenterId], references: [id])
+  predecessor  JobOrder?       @relation("JOChain", fields: [predecessorId], references: [id])
+  successors   JobOrder[]      @relation("JOChain")
+  materials    JobOrderMaterial[]
+
+  @@map("job_orders")
+  @@index([workOrderId])
+  @@index([factoryId, status])
+  @@index([machineId])
+}
+
+// Per-step material specification: inputs consumed and outputs produced
+model JobOrderMaterial {
+  id            String   @id @default(uuid())
+  jobOrderId    String
+  materialCode  String
+  materialName  String
+  direction     String   // IN | OUT | REJECT
+  materialLotId String?
+  plannedQty    Float
+  actualQty     Float    @default(0)
+  unit          String
+
+  jobOrder    JobOrder     @relation(fields: [jobOrderId], references: [id], onDelete: Cascade)
+  materialLot MaterialLot? @relation(fields: [materialLotId], references: [id])
+
+  @@map("job_order_materials")
+  @@index([jobOrderId])
 }

@@ -473,4 +473,81 @@ export class ProductionController {
   ) {
     return this.productionService.autoGenerateWorkOrders(user.factoryId, user.id, id, dto);
   }
+
+  // ────────────────────────────────────────────────────────────
+  // JOB ORDERS (ISA-95 Dispatch List — per RoutingStep per WO)
+  // ────────────────────────────────────────────────────────────
+
+  @Get('job-orders')
+  @ApiOperation({ summary: 'List all job orders for the factory (dispatch list overview)' })
+  async listAllJobOrders(
+    @CurrentUser() user: RequestUser,
+    @Query('status') status?: string,
+    @Query('workOrderId') workOrderId?: string,
+  ) {
+    return this.productionService.listAllJobOrders(user.factoryId, { status, workOrderId });
+  }
+
+  @Get('work-orders/:id/job-orders')
+  @ApiOperation({ summary: 'Get job orders (dispatch list) for a work order' })
+  async getJobOrders(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.getJobOrders(user.factoryId, id);
+  }
+
+  @Post('work-orders/:id/job-orders/generate')
+  @RequirePermissions('production:manage')
+  @AuditLog('JOB_ORDERS_GENERATE')
+  @ApiOperation({ summary: 'Auto-generate job orders from manufacturing process routing steps' })
+  async generateJobOrders(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { plannedStart?: string; plannedEnd?: string; clearExisting?: boolean },
+  ) {
+    return this.productionService.generateJobOrders(user.factoryId, id, dto);
+  }
+
+  @Delete('work-orders/:id/job-orders')
+  @RequirePermissions('production:manage')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete all job orders for a work order (none must be EXECUTING)' })
+  async deleteJobOrders(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.deleteJobOrders(user.factoryId, id);
+  }
+
+  @Patch('job-orders/:id/output')
+  @RequirePermissions('production:execute')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Report actual output quantities for an executing/complete job order (no status change)' })
+  async reportJobOrderOutput(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { actualQtyGood: number; actualQtyRejected?: number },
+  ) {
+    return this.productionService.reportJobOrderOutput(user.factoryId, id, body);
+  }
+
+  @Patch('job-orders/:id/status')
+  @RequirePermissions('production:execute')
+  @AuditLog('JOB_ORDER_STATUS')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Transition a job order status (READY → EXECUTING → COMPLETE etc.)' })
+  async updateJobOrderStatus(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: {
+      status: string;
+      actualQtyGood?: number;
+      actualQtyRejected?: number;
+      handoverQty?: number;
+      notes?: string;
+    },
+  ) {
+    return this.productionService.updateJobOrderStatus(user.factoryId, id, body.status, body);
+  }
 }
