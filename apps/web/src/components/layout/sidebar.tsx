@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
   Factory,
@@ -45,7 +45,6 @@ import {
   MapPin,
   Workflow,
   GitMerge,
-  Star,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
@@ -200,43 +199,29 @@ const bottomNavItems: NavItem[] = [
   { label: 'Settings',      href: '/settings', icon: Settings },
 ];
 
-// ── Live counts fetched once per Sidebar mount, refreshed every 60 s ─────────
+// ── Live counts — single query, 4 parallel fetches, 1 cache entry ────────────
 
 function useSidebarCounts(): Record<string, number> {
-  const { data: downtimeData } = useQuery({
-    queryKey: ['sidebar-count-downtime'],
-    queryFn: () => api.get('/production/downtime/events?isOpen=true&limit=1').catch(() => null),
+  const { data } = useQuery({
+    queryKey: ['sidebar-counts'],
+    queryFn: async () => {
+      const [downtime, workOrders, ncr, maintenance] = await Promise.all([
+        api.get('/production/downtime/events?isOpen=true&limit=1').catch(() => null),
+        api.get('/production/work-orders?status=IN_PROGRESS&limit=1').catch(() => null),
+        api.get('/quality/ncr?status=OPEN&limit=1').catch(() => null),
+        api.get('/maintenance/work-orders?status=OPEN&limit=1').catch(() => null),
+      ]);
+      return {
+        openDowntime:    (downtime    as any)?.total ?? 0,
+        workOrders:      (workOrders  as any)?.total ?? 0,
+        openNcr:         (ncr         as any)?.total ?? 0,
+        openMaintenance: (maintenance as any)?.total ?? 0,
+      };
+    },
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
-
-  const { data: workOrderData } = useQuery({
-    queryKey: ['sidebar-count-workorders'],
-    queryFn: () => api.get('/production/work-orders?status=IN_PROGRESS&limit=1').catch(() => null),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
-  });
-
-  const { data: ncrData } = useQuery({
-    queryKey: ['sidebar-count-ncr'],
-    queryFn: () => api.get('/quality/ncr?status=OPEN&limit=1').catch(() => null),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
-  });
-
-  const { data: maintenanceData } = useQuery({
-    queryKey: ['sidebar-count-maintenance'],
-    queryFn: () => api.get('/maintenance/work-orders?status=OPEN&limit=1').catch(() => null),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
-  });
-
-  return {
-    openDowntime:    (downtimeData  as any)?.total   ?? 0,
-    workOrders:      (workOrderData as any)?.total   ?? 0,
-    openNcr:         (ncrData       as any)?.total   ?? 0,
-    openMaintenance: (maintenanceData as any)?.total ?? 0,
-  };
+  return data ?? { openDowntime: 0, workOrders: 0, openNcr: 0, openMaintenance: 0 };
 }
 
 // ── SidebarItem ─────────────────────────────────────────────────
@@ -298,47 +283,32 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge, countsMap }: 
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-destructive ring-2 ring-sidebar" />
             )}
           </span>
-          <AnimatePresence>
-            {!isCollapsed && (
-              <motion.span
-                initial={{ opacity: 0, width: 0 }}
-                animate={{ opacity: 1, width: 'auto' }}
-                exit={{ opacity: 0, width: 0 }}
-                className="flex-1 text-left overflow-hidden whitespace-nowrap"
-              >
-                {item.label}
-              </motion.span>
-            )}
-          </AnimatePresence>
           {!isCollapsed && (
-            <ChevronDown
-              size={14}
-              className={cn('shrink-0 transition-transform duration-200', isOpen && 'rotate-180')}
-            />
+            <>
+              <span className="flex-1 text-left overflow-hidden whitespace-nowrap">
+                {item.label}
+              </span>
+              <ChevronDown
+                size={14}
+                className={cn('shrink-0 transition-transform duration-200', isOpen && 'rotate-180')}
+              />
+            </>
           )}
         </button>
 
-        <AnimatePresence>
-          {isOpen && !isCollapsed && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden ml-3 mt-0.5 pl-4 border-l border-sidebar-border/50"
-            >
-              {item.children.map((child) => (
-                <SidebarItem
-                  key={child.href || child.label}
-                  item={child}
-                  isCollapsed={false}
-                  depth={depth + 1}
-                  countsMap={countsMap}
-                />
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {isOpen && !isCollapsed && (
+          <div className="overflow-hidden ml-3 mt-0.5 pl-4 border-l border-sidebar-border/50">
+            {item.children.map((child) => (
+              <SidebarItem
+                key={child.href || child.label}
+                item={child}
+                isCollapsed={false}
+                depth={depth + 1}
+                countsMap={countsMap}
+              />
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -359,25 +329,20 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge, countsMap }: 
         size={depth > 0 ? 15 : 18}
         className={cn('shrink-0', isActive && 'text-sidebar-primary')}
       />
-      <AnimatePresence>
-        {!isCollapsed && (
-          <motion.span
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex-1 overflow-hidden whitespace-nowrap"
-          >
+      {!isCollapsed && (
+        <>
+          <span className="flex-1 overflow-hidden whitespace-nowrap">
             {item.label}
-          </motion.span>
-        )}
-      </AnimatePresence>
-      {!isCollapsed && resolvedBadge !== undefined && (
-        <Badge
-          variant={item.badgeVariant || 'secondary'}
-          className="ml-auto text-[10px] h-4 min-w-4 px-1"
-        >
-          {typeof resolvedBadge === 'number' && resolvedBadge > 99 ? '99+' : resolvedBadge}
-        </Badge>
+          </span>
+          {resolvedBadge !== undefined && (
+            <Badge
+              variant={item.badgeVariant || 'secondary'}
+              className="ml-auto text-[10px] h-4 min-w-4 px-1"
+            >
+              {typeof resolvedBadge === 'number' && resolvedBadge > 99 ? '99+' : resolvedBadge}
+            </Badge>
+          )}
+        </>
       )}
     </Link>
   );
@@ -429,14 +394,9 @@ function BackToMapButton({ isCollapsed }: { isCollapsed: boolean }) {
     >
       <span className="absolute left-0 top-0 h-full w-0.5 bg-cyan-400/50 group-hover:bg-cyan-400 transition-colors" />
       <Map size={15} className="shrink-0 text-cyan-400 group-hover:text-cyan-300 transition-colors" />
-      <AnimatePresence>
-        {!isCollapsed && (
-          <motion.div
-            initial={{ opacity: 0, width: 0 }}
-            animate={{ opacity: 1, width: 'auto' }}
-            exit={{ opacity: 0, width: 0 }}
-            className="flex-1 min-w-0 overflow-hidden"
-          >
+      {!isCollapsed && (
+        <>
+          <div className="flex-1 min-w-0 overflow-hidden">
             <div className="whitespace-nowrap leading-tight">
               {selectedFactory ? (
                 <>
@@ -449,11 +409,9 @@ function BackToMapButton({ isCollapsed }: { isCollapsed: boolean }) {
                 <span className="text-[11px]">Back to Map</span>
               )}
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      {!isCollapsed && (
-        <LogOut size={12} className="shrink-0 opacity-40 group-hover:opacity-80 transition-opacity" />
+          </div>
+          <LogOut size={12} className="shrink-0 opacity-40 group-hover:opacity-80 transition-opacity" />
+        </>
       )}
     </button>
   );
@@ -491,34 +449,28 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex items-center h-16 px-3 border-b border-sidebar-border shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
-          {/* Brand mark — star with gradient glow */}
-          <div className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center shadow-glow-brand"
-            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #7c3aed 100%)' }}>
-            <Star size={19} className="text-white" fill="rgba(255,255,255,0.85)" />
-          </div>
-          <AnimatePresence>
-            {!isCollapsed && (
-              <motion.div
-                initial={{ opacity: 0, width: 0 }}
-                animate={{ opacity: 1, width: 'auto' }}
-                exit={{ opacity: 0, width: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="whitespace-nowrap leading-none">
-                  <span
-                    className="font-black text-[15px] tracking-tight"
-                    style={{ background: 'linear-gradient(90deg, #818cf8, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
-                  >
-                    STAR
-                  </span>
-                  <span className="font-bold text-[15px] tracking-tight text-sidebar-foreground/75">-MES</span>
-                </div>
-                <div className="text-sidebar-foreground/35 text-[9px] font-semibold tracking-[0.12em] uppercase whitespace-nowrap mt-0.5">
-                  Manufacturing Execution
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* Brand mark */}
+          <img
+            src="/logo.png"
+            alt="STAR-MES"
+            className="shrink-0 w-9 h-9 rounded-xl object-cover"
+          />
+          {!isCollapsed && (
+            <div className="overflow-hidden">
+              <div className="whitespace-nowrap leading-none">
+                <span
+                  className="font-black text-[15px] tracking-tight"
+                  style={{ background: 'linear-gradient(90deg, #818cf8, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
+                >
+                  STAR
+                </span>
+                <span className="font-bold text-[15px] tracking-tight text-sidebar-foreground/75">-MES</span>
+              </div>
+              <div className="text-sidebar-foreground/35 text-[9px] font-semibold tracking-[0.12em] uppercase whitespace-nowrap mt-0.5">
+                Manufacturing Execution
+              </div>
+            </div>
+          )}
         </div>
 
         <button
@@ -568,23 +520,16 @@ export function Sidebar() {
             {user?.name?.substring(0, 2).toUpperCase() || 'US'}
           </AvatarFallback>
         </Avatar>
-        <AnimatePresence>
-          {!isCollapsed && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex-1 min-w-0"
-            >
-              <div className="text-sidebar-foreground text-xs font-semibold truncate">
-                {user?.name || 'User'}
-              </div>
-              <div className="text-sidebar-foreground/40 text-[10px] truncate">
-                {user?.role || 'Operator'}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {!isCollapsed && (
+          <div className="flex-1 min-w-0">
+            <div className="text-sidebar-foreground text-xs font-semibold truncate">
+              {user?.name || 'User'}
+            </div>
+            <div className="text-sidebar-foreground/40 text-[10px] truncate">
+              {user?.role || 'Operator'}
+            </div>
+          </div>
+        )}
       </div>
     </motion.aside>
   );

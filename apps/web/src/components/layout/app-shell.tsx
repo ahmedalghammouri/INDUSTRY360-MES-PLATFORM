@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React from 'react';
 
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { useSidebarStore } from '@/store/ui-store';
+import { NavigationProgress } from '@/components/ui/navigation-progress';
+import { RouteLoader } from '@/components/ui/route-loader';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -16,28 +17,16 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      {/* Sidebar */}
+      <NavigationProgress />
       <Sidebar />
-
-      {/* Main content */}
       <div
-        className="flex flex-1 flex-col overflow-hidden transition-all duration-300"
+        className="flex flex-1 flex-col overflow-hidden transition-[margin-left] duration-300 ease-in-out"
         style={{ marginLeft: isCollapsed ? '64px' : '260px' }}
       >
         <Topbar />
-        <main className="flex-1 overflow-auto">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={typeof window !== 'undefined' ? window.location.pathname : 'content'}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.2 }}
-              className="h-full"
-            >
-              {children}
-            </motion.div>
-          </AnimatePresence>
+        <main className="relative flex-1 overflow-auto">
+          <RouteLoader />
+          {children}
         </main>
       </div>
     </div>
