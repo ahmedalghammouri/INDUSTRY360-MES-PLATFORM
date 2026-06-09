@@ -12,6 +12,7 @@ volumes:
   influxdb-data:
   minio-data:
   nginx-certs:
+  grafana-data:
 
 services:
   # ============================================================
@@ -238,11 +239,39 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: starmes
+      # Embedding inside the STAR-MES Dashboard Center
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_SECURITY_COOKIE_SAMESITE: "lax"
+      GF_USERS_DEFAULT_THEME: "dark"
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: "5s"
+      # Plugins used by the dashboard library (GF_PLUGINS_PREINSTALL replaces the
+      # deprecated GF_INSTALL_PLUGINS as of Grafana 11.5+/13)
+      GF_PLUGINS_PREINSTALL: "redis-datasource,marcusolsson-treemap-panel"
+      # Datasource connection (consumed by provisioning/datasources/datasources.yaml)
+      MES_PG_HOST: postgres
+      MES_PG_PORT: "5432"
+      MES_PG_DB: star_mes
+      MES_PG_USER: mes_user
+      MES_PG_PASSWORD: mes_password
+      MES_INFLUX_URL: http://influxdb:8086
+      MES_INFLUX_ORG: star-mes
+      MES_INFLUX_BUCKET: mes_timeseries
+      MES_INFLUX_TOKEN: mes-influx-super-secret-token
+      MES_PROM_URL: http://prometheus:9090
+      # Alert routing back into STAR-MES
+      MES_ALERT_WEBHOOK: http://api:4001/api/v1/notifications/grafana-webhook
     volumes:
-      - ./infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning
+      # Provisioning: datasources, dashboard providers, alerting (STAR-MES suite)
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      # Dashboard JSON library (read-only) — lives in source control, survives recreation
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Grafana state (alert history, annotations)
+      - grafana-data:/var/lib/grafana
     ports:
       - "3003:3000"
     networks:
       - mes-network
     depends_on:
       - prometheus
+      - postgres
+      - influxdb
