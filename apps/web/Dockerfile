@@ -17,7 +17,7 @@ COPY package.json .npmrc* ./
 RUN pnpm install --no-frozen-lockfile
 COPY . .
 EXPOSE 3000
-CMD ["pnpm", "dev"]
+CMD ["pnpm", "dev:turbo"]
 
 FROM base AS builder
 WORKDIR /app

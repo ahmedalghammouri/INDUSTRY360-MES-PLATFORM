@@ -1,9 +1,17 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,
+
+  // Monorepo root so Turbopack resolves cross-package paths
+  // (e.g. tailwind content globs to ../../packages/ui) within
+  // the filesystem boundary instead of panicking on root escape.
+  turbopack: {
+    root: path.join(__dirname, '..', '..'),
+  },
 
   images: {
     domains: ['localhost', 'star-mes.sa', 'storage.star-mes.sa'],

@@ -6,7 +6,6 @@ import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { useSidebarStore } from '@/store/ui-store';
 import { NavigationProgress } from '@/components/ui/navigation-progress';
-import { RouteLoader } from '@/components/ui/route-loader';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -25,7 +24,6 @@ export function AppShell({ children }: AppShellProps) {
       >
         <Topbar />
         <main className="relative flex-1 overflow-auto">
-          <RouteLoader />
           {children}
         </main>
       </div>

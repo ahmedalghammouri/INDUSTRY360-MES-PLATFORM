@@ -526,7 +526,7 @@ export function Sidebar() {
           <img
             src="/logo.png"
             alt="STAR-MES"
-            className="shrink-0 w-9 h-9 rounded-xl object-cover"
+            className="shrink-0 w-9 h-9 rounded-lg object-contain"
           />
           {!isCollapsed && (
             <div className="overflow-hidden">
