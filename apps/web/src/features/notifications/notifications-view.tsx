@@ -292,8 +292,8 @@ export function NotificationsView() {
                   transition={{ duration: 0.2 }}
                   className={cn(
                     'flex items-start gap-4 p-4 group transition-colors',
-                    !notif.isRead ? 'bg-white/[0.025]' : 'opacity-70',
-                    'hover:bg-white/[0.04] hover:opacity-100',
+                    !notif.isRead ? 'bg-foreground/[0.025]' : 'opacity-70',
+                    'hover:bg-foreground/[0.04] hover:opacity-100',
                   )}
                 >
                   {/* Severity icon */}

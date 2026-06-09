@@ -53,6 +53,31 @@ interface Inspection {
   totalQty: number;
 }
 
+interface SPCParameter {
+  parameterName: string;
+  unit: string | null;
+  machineId: string | null;
+  mean: number | null;
+  ucl: number | null;
+  lcl: number | null;
+  sampleCount: number;
+}
+
+interface SPCMeasurement {
+  id: string;
+  parameterName: string;
+  parameterUnit: string | null;
+  value: number;
+  machineId: string | null;
+  ucl: number | null;
+  lcl: number | null;
+  cl: number | null;
+  isOutOfControl: boolean;
+  measuredAt: string;
+  sampleSize: number | null;
+  subgroupNumber: number | null;
+}
+
 const NCR_SEVERITY = {
   MINOR: { label: 'Minor', color: 'text-brand-400', bg: 'bg-brand-500/10' },
   MAJOR: { label: 'Major', color: 'text-warning-400', bg: 'bg-warning-500/10' },
@@ -100,6 +125,41 @@ export function QualityOverview() {
     }),
   });
 
+  // SPC — pick the first tracked parameter and chart its recent measurements
+  const { data: spcParams } = useQuery({
+    queryKey: ['quality', 'spc', 'params'],
+    queryFn: () => api.get<SPCParameter[]>('/quality/spc'),
+    refetchInterval: 60_000,
+  });
+
+  const activeParam = spcParams?.[0];
+
+  const { data: spcMeasurements, isLoading: spcLoading } = useQuery({
+    queryKey: ['quality', 'spc', 'measurements', activeParam?.parameterName],
+    queryFn: () => api.get<SPCMeasurement[]>('/quality/spc/measurements', {
+      params: { parameterId: activeParam!.parameterName, limit: 30 },
+    }),
+    enabled: !!activeParam,
+    refetchInterval: 60_000,
+  });
+
+  const spcData = React.useMemo(
+    () =>
+      (spcMeasurements ?? [])
+        .slice()
+        .reverse()
+        .map((m, i) => ({
+          sample: i + 1,
+          value: m.value,
+          time: m.subgroupNumber != null
+            ? `#${m.subgroupNumber}`
+            : new Date(m.measuredAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit' }),
+        })),
+    [spcMeasurements],
+  );
+
+  const latestSpc = spcMeasurements?.[0];
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -132,7 +192,16 @@ export function QualityOverview() {
         </div>
 
         {/* SPC Chart */}
-        <SPCChart isLoading={kpisLoading} />
+        <SPCChart
+          title={activeParam
+            ? `SPC — ${activeParam.parameterName}${activeParam.unit ? ` (${activeParam.unit})` : ''}`
+            : 'Statistical Process Control (X-Bar Chart)'}
+          data={spcData}
+          mean={latestSpc?.cl ?? activeParam?.mean ?? undefined}
+          ucl={latestSpc?.ucl ?? activeParam?.ucl ?? undefined}
+          lcl={latestSpc?.lcl ?? activeParam?.lcl ?? undefined}
+          isLoading={spcLoading}
+        />
 
         {/* Tabs for NCR and Inspections */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>

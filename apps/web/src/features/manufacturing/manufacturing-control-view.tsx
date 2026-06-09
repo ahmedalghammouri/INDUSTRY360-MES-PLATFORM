@@ -29,10 +29,11 @@ type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 interface JobOrder {
   id: string;
-  joNumber: string;
+  operationName: string;
+  sequenceOrder: number;
   status: string;
-  machine?: { name: string };
-  operator?: { firstName: string; lastName: string };
+  machine?: { name: string; code?: string } | null;
+  operator?: { name: string } | null;
   joOEE?: number | null;
 }
 
@@ -162,14 +163,14 @@ interface JOChipProps {
 
 function JOChip({ jo }: JOChipProps) {
   const statusCls = JO_STATUS_CLS[jo.status] ?? 'text-muted-foreground bg-muted/20 border-border/30';
-  const operatorName = jo.operator
-    ? `${jo.operator.firstName} ${jo.operator.lastName}`
-    : null;
+  const operatorName = jo.operator?.name ?? null;
 
   return (
     <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-background/40 border border-border/20">
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className="font-mono text-[10px] text-primary shrink-0">{jo.joNumber}</span>
+        <span className="font-mono text-[10px] text-primary shrink-0">
+          {jo.sequenceOrder != null ? `${jo.sequenceOrder}. ` : ''}{jo.operationName}
+        </span>
         {jo.machine && (
           <span className="text-[10px] text-muted-foreground truncate">{jo.machine.name}</span>
         )}
@@ -327,7 +328,7 @@ function WOCard({ wo, onStart, onHold, onRelease, onComplete, isPending }: WOCar
       </div>
 
       {/* Job orders toggle */}
-      {wo.jobOrders.length > 0 && (
+      {(wo.jobOrders?.length ?? 0) > 0 && (
         <>
           <button
             onClick={() => setExpanded(v => !v)}
@@ -335,7 +336,7 @@ function WOCard({ wo, onStart, onHold, onRelease, onComplete, isPending }: WOCar
           >
             <span className="flex items-center gap-1">
               <Layers size={10} />
-              {wo.jobOrders.length} Job Order{wo.jobOrders.length !== 1 ? 's' : ''}
+              {wo.jobOrders!.length} Job Order{wo.jobOrders!.length !== 1 ? 's' : ''}
             </span>
             <ChevronRight
               size={11}
@@ -353,7 +354,7 @@ function WOCard({ wo, onStart, onHold, onRelease, onComplete, isPending }: WOCar
                 className="overflow-hidden"
               >
                 <div className="px-3 pb-2 space-y-1">
-                  {wo.jobOrders.map(jo => (
+                  {(wo.jobOrders ?? []).map(jo => (
                     <JOChip key={jo.id} jo={jo} />
                   ))}
                 </div>
@@ -483,7 +484,7 @@ function CompletedTable({ orders }: CompletedTableProps) {
           <tbody>
             {last10.map((wo, i) => {
               // Compute a rough OEE from job orders if available
-              const oees = wo.jobOrders
+              const oees = (wo.jobOrders ?? [])
                 .map(j => j.joOEE)
                 .filter((v): v is number => v != null);
               const avgOEE =

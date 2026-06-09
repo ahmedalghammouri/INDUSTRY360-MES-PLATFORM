@@ -40,7 +40,17 @@ export class MaintenanceService {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const [openWOs, overdueWOs, completedWOs, totalWOs, completedThisMonth] = await Promise.all([
+    const [
+      openWOs,
+      overdueWOs,
+      completedWOs,
+      totalWOs,
+      completedThisMonth,
+      failureCount,
+      machineCount,
+      pmTotal,
+      pmCompleted,
+    ] = await Promise.all([
       this.prisma.maintenanceWO.count({
         where: {
           ...factoryFilter,
@@ -69,6 +79,34 @@ export class MaintenanceService {
         },
         select: { estimatedHours: true, actualHours: true, startedAt: true, completedAt: true },
       }),
+      // Failures = unplanned breakdown work this month (corrective + emergency)
+      this.prisma.maintenanceWO.count({
+        where: {
+          ...factoryFilter,
+          type: { in: [MaintType.CORRECTIVE, MaintType.EMERGENCY] },
+          createdAt: { gte: monthStart },
+          deletedAt: null,
+        },
+      }),
+      this.prisma.machine.count({ where: { ...factoryFilter, isActive: true } }),
+      // PM compliance: preventive WOs due this month vs completed
+      this.prisma.maintenanceWO.count({
+        where: {
+          ...factoryFilter,
+          type: { in: [MaintType.PREVENTIVE, MaintType.INSPECTION, MaintType.LUBRICATION] },
+          dueDate: { gte: monthStart, lte: now },
+          deletedAt: null,
+        },
+      }),
+      this.prisma.maintenanceWO.count({
+        where: {
+          ...factoryFilter,
+          type: { in: [MaintType.PREVENTIVE, MaintType.INSPECTION, MaintType.LUBRICATION] },
+          dueDate: { gte: monthStart, lte: now },
+          status: MaintStatus.COMPLETED,
+          deletedAt: null,
+        },
+      }),
     ]);
 
     // MTTR = Mean Time To Repair (avg hours to complete a WO)
@@ -76,17 +114,85 @@ export class MaintenanceService {
       ? completedThisMonth.reduce((s, w) => s + (w.actualHours ?? 0), 0) / completedThisMonth.length
       : 0;
 
+    // MTBF = total operating machine-hours in period / number of failures
+    const periodHours = Math.max((now.getTime() - monthStart.getTime()) / 3_600_000, 1);
+    const operatingHours = Math.max(machineCount, 1) * periodHours;
+    const mtbf = failureCount > 0 ? operatingHours / failureCount : operatingHours;
+
+    // Availability = MTBF / (MTBF + MTTR) — standard reliability formula
+    const availabilityRate = mtbf + mttr > 0 ? (mtbf / (mtbf + mttr)) * 100 : 100;
+
     const completionRate = totalWOs > 0 ? (completedWOs / totalWOs) * 100 : 0;
+    const pmCompliance = pmTotal > 0 ? (pmCompleted / pmTotal) * 100 : 100;
 
     return {
       openWOs,
       overdueWOs,
       completionRate: parseFloat(completionRate.toFixed(1)),
       mttr: parseFloat(mttr.toFixed(1)),
-      mtbf: 520,
-      availabilityRate: 97.8,
-      pmCompliance: 88.5,
+      mtbf: parseFloat(mtbf.toFixed(0)),
+      availabilityRate: parseFloat(availabilityRate.toFixed(1)),
+      pmCompliance: parseFloat(pmCompliance.toFixed(1)),
     };
+  }
+
+  /**
+   * MTTR / MTBF reliability trend for the last N months (default 6).
+   * MTTR = avg actual repair hours for completed corrective/emergency WOs that month.
+   * MTBF = operating machine-hours that month / number of failures that month.
+   */
+  async getReliabilityTrend(factoryId: string | null, months = 6) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const now = new Date();
+
+    const machineCount = await this.prisma.machine.count({
+      where: { ...factoryFilter, isActive: true },
+    });
+
+    const buckets: { month: string; mttr: number; mtbf: number }[] = [];
+
+    for (let i = months - 1; i >= 0; i--) {
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const periodEnd = end > now ? now : end;
+
+      const [completed, failures] = await Promise.all([
+        this.prisma.maintenanceWO.findMany({
+          where: {
+            ...factoryFilter,
+            type: { in: [MaintType.CORRECTIVE, MaintType.EMERGENCY] },
+            status: MaintStatus.COMPLETED,
+            completedAt: { gte: start, lt: end },
+            deletedAt: null,
+          },
+          select: { actualHours: true },
+        }),
+        this.prisma.maintenanceWO.count({
+          where: {
+            ...factoryFilter,
+            type: { in: [MaintType.CORRECTIVE, MaintType.EMERGENCY] },
+            createdAt: { gte: start, lt: end },
+            deletedAt: null,
+          },
+        }),
+      ]);
+
+      const mttr = completed.length > 0
+        ? completed.reduce((s, w) => s + (w.actualHours ?? 0), 0) / completed.length
+        : 0;
+
+      const periodHours = Math.max((periodEnd.getTime() - start.getTime()) / 3_600_000, 1);
+      const operatingHours = Math.max(machineCount, 1) * periodHours;
+      const mtbf = failures > 0 ? operatingHours / failures : operatingHours;
+
+      buckets.push({
+        month: start.toLocaleString('en-US', { month: 'short' }),
+        mttr: parseFloat(mttr.toFixed(1)),
+        mtbf: parseFloat(mtbf.toFixed(0)),
+      });
+    }
+
+    return buckets;
   }
 
   // ────────────────────────────────────────────────────────────

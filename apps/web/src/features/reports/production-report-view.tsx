@@ -110,7 +110,7 @@ export function ProductionReportView() {
               <button
                 key={r}
                 onClick={() => setRange(r)}
-                className={`px-3 py-1.5 text-sm transition-colors ${range === r ? 'bg-brand-600 text-white' : 'text-muted-foreground hover:bg-white/5'}`}
+                className={`px-3 py-1.5 text-sm transition-colors ${range === r ? 'bg-brand-600 text-white' : 'text-muted-foreground hover:bg-foreground/5'}`}
               >
                 {r}
               </button>
@@ -224,7 +224,7 @@ export function ProductionReportView() {
               </thead>
               <tbody>
                 {records.map((r, i) => (
-                  <tr key={i} className="border-b border-border/30 hover:bg-white/5">
+                  <tr key={i} className="border-b border-border/30 hover:bg-foreground/5">
                     <td className="p-3 text-xs text-muted-foreground">{r.date.slice(0, 10)}</td>
                     <td className="p-3 text-xs font-medium">{r.machine}</td>
                     <td className="p-3 text-xs text-right">{Number(r.plannedQty ?? 0).toLocaleString()}</td>

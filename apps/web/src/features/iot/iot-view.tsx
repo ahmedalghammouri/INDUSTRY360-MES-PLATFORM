@@ -99,7 +99,7 @@ export function IoTView() {
           const Icon = stat.icon;
           return (
             <div key={stat.label} className="glass-card rounded-xl p-4 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-lg bg-foreground/5 flex items-center justify-center">
                 <Icon className={cn('w-4 h-4', stat.color)} />
               </div>
               <div>
@@ -216,7 +216,7 @@ export function IoTView() {
                   </tr>
                 ) : (
                   tags.map(tag => (
-                    <tr key={tag.id} className="border-b border-border/50 hover:bg-white/5">
+                    <tr key={tag.id} className="border-b border-border/50 hover:bg-foreground/5">
                       <td className="p-4 font-medium text-sm">{tag.name}</td>
                       <td className="p-4 font-mono text-xs text-muted-foreground">{tag.code}</td>
                       <td className="p-4 text-right font-mono text-sm">

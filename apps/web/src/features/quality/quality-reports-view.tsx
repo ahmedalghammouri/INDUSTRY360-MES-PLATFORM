@@ -237,7 +237,7 @@ export default function QualityReportsView() {
           return (
             <motion.div key={card.href} variants={itemVariants}>
               <Link href={card.href} className="block group">
-                <div className="glass-card rounded-xl p-5 flex items-start gap-4 transition-colors hover:bg-white/5 hover:border-border/80 cursor-pointer">
+                <div className="glass-card rounded-xl p-5 flex items-start gap-4 transition-colors hover:bg-foreground/5 hover:border-border/80 cursor-pointer">
                   <div
                     className={cn(
                       'w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105',

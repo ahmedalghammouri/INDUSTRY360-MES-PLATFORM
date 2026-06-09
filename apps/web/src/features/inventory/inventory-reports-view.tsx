@@ -298,7 +298,7 @@ export default function InventoryReportsView() {
                   return (
                     <li
                       key={item.id}
-                      className="flex items-center gap-4 px-5 py-3 hover:bg-white/5 transition-colors"
+                      className="flex items-center gap-4 px-5 py-3 hover:bg-foreground/5 transition-colors"
                     >
                       <div className="w-8 h-8 rounded-lg bg-red-500/15 flex items-center justify-center shrink-0">
                         <AlertTriangle className="w-3.5 h-3.5 text-red-400" />

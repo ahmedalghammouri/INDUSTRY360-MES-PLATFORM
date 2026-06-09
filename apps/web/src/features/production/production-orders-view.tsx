@@ -787,7 +787,7 @@ function WOsWithDispatch({ po, actions }: WOsWithDispatchProps) {
             return (
               <div key={wo.id} className={cn(
                 'glass-card rounded-lg border transition-colors',
-                isExpanded ? 'border-brand-500/30' : 'border-white/5',
+                isExpanded ? 'border-brand-500/30' : 'border-foreground/5',
               )}>
                 {/* WO header row */}
                 <button
@@ -811,7 +811,7 @@ function WOsWithDispatch({ po, actions }: WOsWithDispatchProps) {
                     </span>
                   </div>
                   <div className="flex items-center gap-2 pl-5">
-                    <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
+                    <div className="flex-1 h-1 rounded-full bg-foreground/10 overflow-hidden">
                       <div className={cn('h-full rounded-full', wcfg.bar)} style={{ width: `${pct}%` }} />
                     </div>
                     <span className="text-[10px] text-muted-foreground w-7 shrink-0">{pct}%</span>
@@ -820,7 +820,7 @@ function WOsWithDispatch({ po, actions }: WOsWithDispatchProps) {
 
                 {/* Expandable dispatch list */}
                 {isExpanded && (
-                  <div className="px-3 pb-3 border-t border-white/5 pt-2">
+                  <div className="px-3 pb-3 border-t border-foreground/5 pt-2">
                     <DispatchListPanel
                       woId={wo.id}
                       woStatus={wo.status}
@@ -884,7 +884,7 @@ function PODetailSheet({ po, open, onClose, actions }: PODetailSheetProps) {
               <span className="text-xs text-muted-foreground">Overall Progress</span>
               <span className="text-sm font-bold">{progress}%</span>
             </div>
-            <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+            <div className="h-2 rounded-full bg-foreground/10 overflow-hidden">
               <div className={cn('h-full rounded-full transition-all', {
                 'bg-green-500': po.status === 'COMPLETED',
                 'bg-brand-500': po.status === 'IN_PROGRESS',
@@ -934,7 +934,7 @@ function PODetailSheet({ po, open, onClose, actions }: PODetailSheetProps) {
           </div>
 
           {/* Status action buttons */}
-          <div className="flex flex-wrap gap-2 p-3 glass-card rounded-lg border border-white/5">
+          <div className="flex flex-wrap gap-2 p-3 glass-card rounded-lg border border-foreground/5">
             <p className="w-full text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Status Actions</p>
             {po.status === 'PLANNED' && (
               <Button size="sm" variant="outline" className="text-blue-400 border-blue-500/30 hover:bg-blue-500/10" onClick={actions.onRelease}>
@@ -1029,7 +1029,7 @@ function DispatchListPanel({ woId, woStatus, plannedStart, plannedEnd }: Dispatc
 
   if (jobs.length === 0) {
     return (
-      <div className="mt-3 p-3 rounded-lg bg-white/3 border border-white/8 text-center">
+      <div className="mt-3 p-3 rounded-lg bg-foreground/3 border border-foreground/8 text-center">
         <GitBranch className="w-5 h-5 mx-auto mb-1.5 text-muted-foreground opacity-40" />
         <p className="text-xs text-muted-foreground mb-2">No dispatch list yet.</p>
         {['RELEASED', 'IN_PROGRESS', 'PLANNED'].includes(woStatus) && (
@@ -1068,7 +1068,7 @@ function DispatchListPanel({ woId, woStatus, plannedStart, plannedEnd }: Dispatc
       {/* Chain: each JO as a card */}
       <div className="relative pl-4">
         {/* Vertical connector line */}
-        <div className="absolute left-1.5 top-2 bottom-2 w-px bg-white/8" />
+        <div className="absolute left-1.5 top-2 bottom-2 w-px bg-foreground/8" />
 
         {jobs.map((jo, idx) => {
           const cfg = JO_STATUS[jo.status] ?? JO_STATUS.SCHEDULED;
@@ -1087,7 +1087,7 @@ function DispatchListPanel({ woId, woStatus, plannedStart, plannedEnd }: Dispatc
 
               <div className={cn(
                 'rounded-lg px-3 py-2 border transition-colors',
-                jo.status === 'EXECUTING' ? 'border-brand-500/40 bg-brand-500/8' : 'border-white/6 bg-white/3',
+                jo.status === 'EXECUTING' ? 'border-brand-500/40 bg-brand-500/8' : 'border-foreground/6 bg-foreground/3',
               )}>
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
@@ -1179,7 +1179,7 @@ function PORow({ po, idx, onSelect, actions }: PORowProps) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: idx * 0.03 }}
       onClick={onSelect}
-      className="border-b border-border/30 hover:bg-white/5 cursor-pointer transition-colors"
+      className="border-b border-border/30 hover:bg-foreground/5 cursor-pointer transition-colors"
     >
       <td className="p-3">
         <div className="font-mono text-xs text-brand-400">{po.orderNumber}</div>
@@ -1199,7 +1199,7 @@ function PORow({ po, idx, onSelect, actions }: PORowProps) {
       </td>
       <td className="p-3 w-28">
         <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+          <div className="flex-1 h-1.5 rounded-full bg-foreground/10 overflow-hidden">
             <div className={cn('h-full rounded-full', {
               'bg-green-500': po.status === 'COMPLETED',
               'bg-brand-500': po.status === 'IN_PROGRESS',

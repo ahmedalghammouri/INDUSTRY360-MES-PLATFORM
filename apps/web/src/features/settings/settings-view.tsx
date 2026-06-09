@@ -100,7 +100,7 @@ export function SettingsView() {
                     'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors text-left',
                     activeSection === section.id
                       ? 'bg-brand-600/20 text-brand-300'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-white/5',
+                      : 'text-muted-foreground hover:text-foreground hover:bg-foreground/5',
                   )}
                 >
                   <Icon className="w-4 h-4" />
@@ -214,7 +214,7 @@ export function SettingsView() {
                 </div>
 
                 {mfaSetupData && (
-                  <div className="bg-white/5 rounded-lg p-4 space-y-3">
+                  <div className="bg-foreground/5 rounded-lg p-4 space-y-3">
                     <p className="text-sm text-muted-foreground">
                       Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
                     </p>
@@ -255,7 +255,7 @@ export function SettingsView() {
                     <button
                       className={cn(
                         'relative w-10 h-5 rounded-full transition-colors',
-                        pref.enabled ? 'bg-brand-600' : 'bg-white/20',
+                        pref.enabled ? 'bg-brand-600' : 'bg-foreground/20',
                       )}
                     >
                       <span

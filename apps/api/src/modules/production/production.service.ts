@@ -157,8 +157,20 @@ export class ProductionService {
           supervisor: { select: { name: true } },
           _count: { select: { jobOrders: true } },
           jobOrders: {
-            select: { status: true, actualQtyGood: true, actualQtyRejected: true, sequenceOrder: true },
             orderBy: { sequenceOrder: 'asc' },
+            select: {
+              id: true,
+              operationName: true,
+              sequenceOrder: true,
+              status: true,
+              actualQtyGood: true,
+              actualQtyRejected: true,
+              actualStart: true,
+              actualEnd: true,
+              idealCycleTimeSec: true,
+              machine: { select: { name: true, code: true } },
+              operator: { select: { name: true } },
+            },
           },
         },
         orderBy: [{ priority: 'desc' }, { plannedStart: 'asc' }],
@@ -182,6 +194,15 @@ export class ProductionService {
           // Final output qty from last JO
           goodQty:  lastJO?.actualQtyGood     ?? mapped.goodQty,
           scrapQty: wo.jobOrders.reduce((s, j) => s + j.actualQtyRejected, 0),
+          jobOrders: wo.jobOrders.map((jo) => ({
+            id: jo.id,
+            operationName: jo.operationName,
+            sequenceOrder: jo.sequenceOrder,
+            status: jo.status,
+            machine: jo.machine,
+            operator: jo.operator,
+            joOEE: this.calcJobOrderOEE(jo).joOEE,
+          })),
         };
       }),
       total,

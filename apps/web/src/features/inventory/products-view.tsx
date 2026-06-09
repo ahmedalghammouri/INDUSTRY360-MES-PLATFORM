@@ -79,7 +79,7 @@ function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onD
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: index * 0.02 }}
-        className="border-b border-border/30 hover:bg-white/5 cursor-pointer"
+        className="border-b border-border/30 hover:bg-foreground/5 cursor-pointer"
         onClick={() => hasBOM && setExpanded(v => !v)}
       >
         <td className="p-3 text-xs">
@@ -152,7 +152,7 @@ function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onD
         </td>
       </motion.tr>
       {expanded && hasBOM && (
-        <tr className="bg-white/2 border-b border-border/20">
+        <tr className="bg-foreground/2 border-b border-border/20">
           <td colSpan={13} className="px-6 py-3">
             <div className="text-xs font-semibold text-muted-foreground mb-2">Bill of Materials</div>
             <table className="w-full text-xs">

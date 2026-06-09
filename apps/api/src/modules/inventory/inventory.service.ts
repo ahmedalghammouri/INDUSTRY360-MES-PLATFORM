@@ -605,6 +605,7 @@ export class InventoryService {
         where,
         include: {
           sku: { select: { id: true, code: true, name: true, itemNumber: true, category: true } },
+          _count: { select: { items: true } },
           items: {
             include: {
               rawMaterial: { select: { id: true, code: true, name: true, unit: true } },

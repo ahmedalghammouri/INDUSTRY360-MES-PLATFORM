@@ -130,7 +130,7 @@ function POScheduleRow({ po, idx }: { po: ProductionOrder; idx: number }) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: idx * 0.04 }}
         onClick={() => setExpanded(e => !e)}
-        className="border-b border-border/50 hover:bg-white/5 cursor-pointer transition-colors"
+        className="border-b border-border/50 hover:bg-foreground/5 cursor-pointer transition-colors"
       >
         {/* Expand toggle */}
         <td className="p-3 w-8">
@@ -177,7 +177,7 @@ function POScheduleRow({ po, idx }: { po: ProductionOrder; idx: number }) {
         {/* Progress */}
         <td className="p-3 w-36">
           <div className="flex items-center gap-2">
-            <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+            <div className="flex-1 h-1.5 rounded-full bg-foreground/10 overflow-hidden">
               <div className={cn('h-full rounded-full transition-all', {
                 'bg-green-500': po.status === 'COMPLETED',
                 'bg-brand-500': po.status === 'IN_PROGRESS',
@@ -214,7 +214,7 @@ function POScheduleRow({ po, idx }: { po: ProductionOrder; idx: number }) {
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ delay: wi * 0.03 }}
-              className="border-b border-border/20 bg-white/[0.02]"
+              className="border-b border-border/20 bg-foreground/[0.02]"
             >
               <td className="p-2" />
               <td className="p-2 pl-6">
@@ -236,7 +236,7 @@ function POScheduleRow({ po, idx }: { po: ProductionOrder; idx: number }) {
               <td className="p-2 text-[10px] text-muted-foreground">{wo.plannedQty.toLocaleString()}</td>
               <td className="p-2 w-36">
                 <div className="flex items-center gap-2">
-                  <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
+                  <div className="flex-1 h-1 rounded-full bg-foreground/10 overflow-hidden">
                     <div className={cn('h-full rounded-full', woCfg.barColor)} style={{ width: `${woProg}%` }} />
                   </div>
                   <span className="text-[10px] text-muted-foreground w-7 shrink-0">{woProg}%</span>
@@ -267,7 +267,7 @@ function StandaloneWORow({ wo, idx }: { wo: WorkOrder; idx: number }) {
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: idx * 0.03 }}
-      className="border-b border-border/30 hover:bg-white/5"
+      className="border-b border-border/30 hover:bg-foreground/5"
     >
       <td className="p-3 w-8" />
       <td className="p-3">
@@ -295,7 +295,7 @@ function StandaloneWORow({ wo, idx }: { wo: WorkOrder; idx: number }) {
       <td className="p-3 text-xs">{wo.plannedQty.toLocaleString()}</td>
       <td className="p-3 w-36">
         <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+          <div className="flex-1 h-1.5 rounded-full bg-foreground/10 overflow-hidden">
             <div className={cn('h-full rounded-full', cfg.barColor)} style={{ width: `${progress}%` }} />
           </div>
           <span className="text-[10px] text-muted-foreground w-7 shrink-0">{progress}%</span>
@@ -442,7 +442,7 @@ export function ProductionSchedulingView() {
 
                 {statusFilter === 'all' && standaloneWOs.length > 0 && (
                   <>
-                    <tr className="bg-white/[0.02]">
+                    <tr className="bg-foreground/[0.02]">
                       <td colSpan={9} className="px-4 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold border-t border-border">
                         Standalone Work Orders (no PO)
                       </td>

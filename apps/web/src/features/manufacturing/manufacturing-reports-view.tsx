@@ -208,7 +208,7 @@ export default function ManufacturingReportsView() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full justify-between text-xs group-hover:border-white/20 transition-colors"
+                  className="w-full justify-between text-xs group-hover:border-foreground/20 transition-colors"
                   asChild
                 >
                   <Link href={card.href}>

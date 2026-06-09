@@ -210,14 +210,14 @@ function normalizeRows(data: unknown): Record<string, unknown>[] {
 function LoadingSkeleton() {
   return (
     <div className="space-y-3 animate-pulse">
-      <div className="h-8 bg-white/5 rounded w-1/3" />
-      <div className="h-4 bg-white/5 rounded w-full" />
-      <div className="h-4 bg-white/5 rounded w-full" />
-      <div className="h-4 bg-white/5 rounded w-5/6" />
-      <div className="h-4 bg-white/5 rounded w-full" />
-      <div className="h-4 bg-white/5 rounded w-4/5" />
-      <div className="h-4 bg-white/5 rounded w-full" />
-      <div className="h-4 bg-white/5 rounded w-3/4" />
+      <div className="h-8 bg-foreground/5 rounded w-1/3" />
+      <div className="h-4 bg-foreground/5 rounded w-full" />
+      <div className="h-4 bg-foreground/5 rounded w-full" />
+      <div className="h-4 bg-foreground/5 rounded w-5/6" />
+      <div className="h-4 bg-foreground/5 rounded w-full" />
+      <div className="h-4 bg-foreground/5 rounded w-4/5" />
+      <div className="h-4 bg-foreground/5 rounded w-full" />
+      <div className="h-4 bg-foreground/5 rounded w-3/4" />
     </div>
   );
 }
@@ -250,10 +250,10 @@ function DataTable({ rows, totalCount }: DataTableProps) {
           <span className="text-xs opacity-60">Export CSV to view all rows</span>
         )}
       </div>
-      <div className="overflow-x-auto rounded-lg border border-white/10">
+      <div className="overflow-x-auto rounded-lg border border-foreground/10">
         <table className="w-full text-xs">
           <thead>
-            <tr className="bg-white/5 border-b border-white/10">
+            <tr className="bg-foreground/5 border-b border-foreground/10">
               {columns.map((col) => (
                 <th
                   key={col}
@@ -272,8 +272,8 @@ function DataTable({ rows, totalCount }: DataTableProps) {
               <tr
                 key={i}
                 className={cn(
-                  'border-b border-white/5 transition-colors hover:bg-white/5',
-                  i % 2 === 0 ? 'bg-transparent' : 'bg-white/[0.02]'
+                  'border-b border-foreground/5 transition-colors hover:bg-foreground/5',
+                  i % 2 === 0 ? 'bg-transparent' : 'bg-foreground/[0.02]'
                 )}
               >
                 {columns.map((col) => {
@@ -435,7 +435,7 @@ export default function ReportsBuilderView() {
           transition={{ duration: 0.3, delay: 0.05 }}
           className="lg:col-span-1 space-y-5"
         >
-          <div className="rounded-xl border border-white/10 bg-card/60 backdrop-blur-sm p-4 space-y-5">
+          <div className="rounded-xl border border-foreground/10 bg-card/60 backdrop-blur-sm p-4 space-y-5">
             {/* Select Report Type */}
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
@@ -461,8 +461,8 @@ export default function ReportsBuilderView() {
                         'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
                         isDisabled && 'opacity-40 cursor-not-allowed',
                         isSelected
-                          ? cn('border-2', colorBorder[rt.color] ?? 'border-brand-500', 'bg-white/5')
-                          : 'border-white/10 hover:border-white/20 hover:bg-white/5 cursor-pointer'
+                          ? cn('border-2', colorBorder[rt.color] ?? 'border-brand-500', 'bg-foreground/5')
+                          : 'border-foreground/10 hover:border-foreground/20 hover:bg-foreground/5 cursor-pointer'
                       )}
                     >
                       {rt.comingSoon && (
@@ -508,7 +508,7 @@ export default function ReportsBuilderView() {
                       setDateFrom(e.target.value);
                       setIsGenerated(false);
                     }}
-                    className="w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="w-full rounded-lg border border-foreground/10 bg-foreground/5 px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-brand-500"
                   />
                 </div>
                 <div className="space-y-1">
@@ -520,7 +520,7 @@ export default function ReportsBuilderView() {
                       setDateTo(e.target.value);
                       setIsGenerated(false);
                     }}
-                    className="w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="w-full rounded-lg border border-foreground/10 bg-foreground/5 px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-brand-500"
                   />
                 </div>
               </div>
@@ -577,7 +577,7 @@ export default function ReportsBuilderView() {
           transition={{ duration: 0.3, delay: 0.1 }}
           className="lg:col-span-2"
         >
-          <div className="rounded-xl border border-white/10 bg-card/60 backdrop-blur-sm p-4 min-h-[400px]">
+          <div className="rounded-xl border border-foreground/10 bg-card/60 backdrop-blur-sm p-4 min-h-[400px]">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Report Preview
@@ -693,7 +693,7 @@ export default function ReportsBuilderView() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.15 }}
-          className="rounded-xl border border-white/10 bg-card/60 backdrop-blur-sm p-4"
+          className="rounded-xl border border-foreground/10 bg-card/60 backdrop-blur-sm p-4"
         >
           <div className="flex items-center gap-2 mb-4">
             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -713,7 +713,7 @@ export default function ReportsBuilderView() {
               return (
                 <div
                   key={i}
-                  className="flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 hover:bg-white/5 transition-colors"
+                  className="flex items-center justify-between rounded-lg border border-foreground/5 bg-foreground/[0.02] px-3 py-2 hover:bg-foreground/5 transition-colors"
                 >
                   <div className="flex items-center gap-3">
                     <div

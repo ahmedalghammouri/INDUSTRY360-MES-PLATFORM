@@ -211,7 +211,7 @@ export function SparePartsView() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: i * 0.02 }}
-                    className={cn('border-b border-border/30 hover:bg-white/5', p.isLowStock && 'bg-red-500/5')}
+                    className={cn('border-b border-border/30 hover:bg-foreground/5', p.isLowStock && 'bg-red-500/5')}
                   >
                     <td className="p-3 text-xs font-mono text-muted-foreground">{p.partNumber}</td>
                     <td className="p-3 text-xs font-medium">
@@ -296,7 +296,7 @@ export function SparePartsView() {
                   onClick={() => setAdjustType(t)}
                   className={cn(
                     'flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors',
-                    adjustType === t ? 'bg-brand-600 border-brand-600 text-white' : 'border-border text-muted-foreground hover:bg-white/5',
+                    adjustType === t ? 'bg-brand-600 border-brand-600 text-white' : 'border-border text-muted-foreground hover:bg-foreground/5',
                   )}
                 >
                   {t}

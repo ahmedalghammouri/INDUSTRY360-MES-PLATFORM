@@ -37,7 +37,7 @@ interface BOMSummary {
   version: string;
   isActive: boolean;
   status: string;
-  _count: { items: number };
+  _count?: { items: number };
 }
 
 interface RecipeSummary {
@@ -45,7 +45,7 @@ interface RecipeSummary {
   skuId: string;
   version: string;
   status: string;
-  _count: { ingredients: number };
+  _count?: { ingredients: number };
 }
 
 interface ProcessStep {
@@ -385,7 +385,7 @@ function DesignMatrixRow({
               <span className={cn('inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border w-fit', bomStatusVariant(bom.status))}>
                 {bom.status ?? 'DRAFT'}
               </span>
-              <span className="text-[10px] text-muted-foreground">{bom._count.items} item{bom._count.items !== 1 ? 's' : ''}</span>
+              <span className="text-[10px] text-muted-foreground">{bom._count?.items ?? 0} item{(bom._count?.items ?? 0) !== 1 ? 's' : ''}</span>
             </div>
           ) : (
             <NoBadge label="No BOM" />
@@ -400,7 +400,7 @@ function DesignMatrixRow({
               <span className={cn('inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border w-fit', recipeStatusVariant(recipe.status))}>
                 {recipe.status ?? 'DRAFT'}
               </span>
-              <span className="text-[10px] text-muted-foreground">{recipe._count.ingredients} ingredient{recipe._count.ingredients !== 1 ? 's' : ''}</span>
+              <span className="text-[10px] text-muted-foreground">{recipe._count?.ingredients ?? 0} ingredient{(recipe._count?.ingredients ?? 0) !== 1 ? 's' : ''}</span>
             </div>
           ) : (
             <NoBadge label="No Recipe" />
@@ -464,7 +464,7 @@ function DesignMatrixRow({
                     emptyLabel="No BOM defined"
                   >
                     {bom && (
-                      <BomPreview bomId={bom.id} itemCount={bom._count.items} />
+                      <BomPreview bomId={bom.id} itemCount={bom._count?.items ?? 0} />
                     )}
                   </ExpandedSection>
 
@@ -476,7 +476,7 @@ function DesignMatrixRow({
                     emptyLabel="No recipe defined"
                   >
                     {recipe && (
-                      <RecipePreview recipeId={recipe.id} ingredientCount={recipe._count.ingredients} />
+                      <RecipePreview recipeId={recipe.id} ingredientCount={recipe._count?.ingredients ?? 0} />
                     )}
                   </ExpandedSection>
 

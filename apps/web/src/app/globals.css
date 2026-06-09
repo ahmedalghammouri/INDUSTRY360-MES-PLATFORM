@@ -253,19 +253,26 @@
 }
 
 @layer components {
-  /* Glass morphism card */
+  /* Glass morphism card — light by default, richer in dark */
   .glass-card {
-    @apply bg-card/50 backdrop-blur-xl border border-white/10 shadow-glass;
+    @apply bg-card/70 backdrop-blur-xl border border-border shadow-sm;
+  }
+  .dark .glass-card {
+    @apply bg-card/50 border-white/10 shadow-glass;
   }
 
   .glass-card-hover {
     @apply glass-card transition-all duration-300 hover:shadow-card-hover hover:border-primary/30;
   }
 
-  /* Industrial dark card */
+  /* Industrial card — clean flat surface in light, gradient depth in dark */
   .industrial-card {
+    background: hsl(var(--card));
+    @apply border border-border shadow-sm rounded-lg;
+  }
+  .dark .industrial-card {
     background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(215 28% 8%) 100%);
-    @apply border border-border/50 shadow-industrial rounded-lg;
+    @apply border-border/50 shadow-industrial;
   }
 
   /* KPI Card */
@@ -362,11 +369,21 @@
     background: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(255, 255, 255, 0.05) 50%,
+      rgba(0, 0, 0, 0.05) 50%,
       transparent 100%
     );
     background-size: 200% 100%;
     animation: shimmer 2s linear infinite;
+  }
+
+  .dark .shimmer::after {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.05) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
   }
 
   /* Industrial badge */

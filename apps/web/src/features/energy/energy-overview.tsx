@@ -446,7 +446,7 @@ export function EnergyOverview() {
                   const color = TYPE_COLORS[m.type] ?? '#94a3b8';
                   const Icon = TYPE_ICONS[m.type] ?? Zap;
                   return (
-                    <tr key={m.id} className="border-b border-border/30 hover:bg-white/5">
+                    <tr key={m.id} className="border-b border-border/30 hover:bg-foreground/5">
                       <td className="p-3 text-xs">
                         <div className="font-medium">{m.name}</div>
                         <div className="text-muted-foreground font-mono">{m.meterNumber}</div>

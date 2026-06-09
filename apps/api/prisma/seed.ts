@@ -6,6 +6,7 @@
 
 import { PrismaClient, UserRole, MachineType, Criticality, AreaType, LineType, DowntimeCategory, MaintType, EnergyType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { seedDashboardCenter } from './seeds/dashboard-center.seed';
 
 const prisma = new PrismaClient();
 
@@ -1994,6 +1995,9 @@ async function main() {
   console.log('    CAPA: CAPA-2026-001 (corrective, IN_PROGRESS), CAPA-2026-002 (preventive, CLOSED)');
   console.log('    SPC: 14 fill-weight data points with visible drift + recovery pattern');
   console.log('');
+  // ── Dashboard Center catalog ───────────────────────────────────
+  await seedDashboardCenter(prisma);
+
   console.log('  Platform: http://localhost:3000');
   console.log('  API Docs: http://localhost:3001/api/docs');
 }

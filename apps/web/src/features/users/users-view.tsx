@@ -162,7 +162,7 @@ export function UsersView() {
           const Icon = stat.icon;
           return (
             <div key={stat.label} className="glass-card rounded-xl p-4 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-lg bg-foreground/5 flex items-center justify-center">
                 <Icon className={cn('w-4 h-4', stat.color)} />
               </div>
               <div>
@@ -230,7 +230,7 @@ export function UsersView() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.03 }}
-                  className="border-b border-border/50 hover:bg-white/5"
+                  className="border-b border-border/50 hover:bg-foreground/5"
                 >
                   <td className="p-4">
                     <div className="flex items-center gap-3">

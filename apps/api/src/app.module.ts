@@ -21,6 +21,8 @@ import { HierarchyModule } from './modules/hierarchy/hierarchy.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { EnergyModule } from './modules/energy/energy.module';
 import { TraceabilityModule } from './modules/traceability/traceability.module';
+import { AiModule } from './modules/ai/ai.module';
+import { DashboardsModule } from './modules/dashboards/dashboards.module';
 import { WebSocketGatewayModule } from './gateways/websocket.module';
 import { HealthModule } from './modules/health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -94,6 +96,8 @@ import { configuration } from './config/configuration';
     InventoryModule,
     EnergyModule,
     TraceabilityModule,
+    AiModule,
+    DashboardsModule,
     WebSocketGatewayModule,
     HealthModule,
   ],

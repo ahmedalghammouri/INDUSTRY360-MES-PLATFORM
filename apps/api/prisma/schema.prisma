@@ -2461,3 +2461,155 @@ model JobOrderMaterial {
   @@map("job_order_materials")
   @@index([jobOrderId])
 }
+
+// ════════════════════════════════════════════════════════════════
+// DASHBOARD CENTER — unified dashboard catalog & launcher
+// STAR-MES = system of record / auth / factory context.
+// Grafana   = visualization & dashboard engine (linked, not rebuilt).
+// Models are intentionally isolated (plain indexed FKs) to remain
+// fully additive — no changes to existing core models.
+// ════════════════════════════════════════════════════════════════
+
+enum DashboardSource {
+  STAR_MES_NATIVE   // existing in-app module dashboards / analytics pages
+  GRAFANA           // Grafana-hosted dashboard (embedded)
+  REPORT            // existing STAR-MES report pages
+  EXTERNAL          // arbitrary external/embeddable URL
+  TEMPLATE          // reusable dashboard template (clone to create)
+}
+
+enum DashboardType {
+  OPERATIONAL
+  KPI
+  ANALYTICS
+  REPORT
+  EXECUTIVE
+  ENERGY
+  QUALITY
+  MAINTENANCE
+  PRODUCTION
+  CUSTOM
+}
+
+enum DashboardVisibility {
+  PRIVATE       // only the creator
+  FACTORY       // everyone in the same factory
+  ENTERPRISE    // everyone in the enterprise
+  PUBLIC        // any authenticated user
+}
+
+enum DashboardPermissionLevel {
+  VIEW
+  EDIT
+  MANAGE
+}
+
+model DashboardCategory {
+  id          String      @id @default(uuid())
+  factoryId   String?     // null = global / enterprise-wide category
+  key         String      // stable slug e.g. "production", "energy"
+  name        String
+  nameAr      String?
+  description String?
+  icon        String?     // lucide icon name
+  color       String?
+  sortOrder   Int         @default(0)
+  isSystem    Boolean     @default(false) // seeded, non-deletable
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  dashboards  Dashboard[]
+
+  @@unique([factoryId, key])
+  @@map("dashboard_categories")
+  @@index([factoryId])
+}
+
+model Dashboard {
+  id            String              @id @default(uuid())
+  factoryId     String?             // null = global/enterprise dashboard (visible across factories)
+  enterpriseId  String?
+  categoryId    String?
+  slug          String?             // optional stable slug for deep-linking
+  title         String
+  titleAr       String?
+  description   String?
+  source        DashboardSource     @default(STAR_MES_NATIVE)
+  type          DashboardType       @default(OPERATIONAL)
+  visibility    DashboardVisibility @default(FACTORY)
+
+  // Native / external routing
+  route         String?             // internal Next.js route, e.g. "/production/oee"
+  externalUrl   String?             // external embeddable URL (EXTERNAL source)
+
+  // Grafana linkage
+  grafanaUid    String?             // Grafana dashboard UID
+  grafanaSlug   String?
+  grafanaOrgId  Int?
+  grafanaFolder String?
+
+  // Presentation / behavior
+  icon          String?             // lucide icon name
+  thumbnailUrl  String?
+  tags          String[]            @default([])
+  isFactoryAware Boolean            @default(true) // inherit selected factory context
+  supportedScopes String[]         @default([])    // e.g. ["FACTORY","AREA","LINE","MACHINE","SHIFT","PRODUCT","BATCH"]
+  defaultTimeRange String?          @default("now-24h")
+  refreshInterval  String?          @default("30s")
+
+  // Template support
+  isTemplate    Boolean             @default(false)
+  templateOfId  String?             // if cloned from a template
+
+  // Governance
+  isSystem      Boolean             @default(false) // seeded built-in, non-deletable
+  isPublished   Boolean             @default(true)
+  createdById   String?
+  updatedById   String?
+  viewCount     Int                 @default(0)
+  lastViewedAt  DateTime?
+
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  deletedAt     DateTime?
+
+  category      DashboardCategory?      @relation(fields: [categoryId], references: [id])
+  favorites     DashboardFavorite[]
+  permissions   DashboardPermission[]
+
+  @@map("dashboards")
+  @@index([factoryId, source])
+  @@index([categoryId])
+  @@index([type])
+  @@index([isTemplate])
+}
+
+model DashboardFavorite {
+  id          String    @id @default(uuid())
+  dashboardId String
+  userId      String
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  dashboard   Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@unique([dashboardId, userId])
+  @@map("dashboard_favorites")
+  @@index([userId])
+}
+
+model DashboardPermission {
+  id          String                   @id @default(uuid())
+  dashboardId String
+  // Exactly one of role / userId is set (a grant either targets a role or a specific user)
+  role        UserRole?
+  userId      String?
+  level       DashboardPermissionLevel @default(VIEW)
+  createdAt   DateTime                 @default(now())
+
+  dashboard   Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@map("dashboard_permissions")
+  @@index([dashboardId])
+  @@index([userId])
+}

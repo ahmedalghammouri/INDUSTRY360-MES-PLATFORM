@@ -15,35 +15,34 @@ interface SPCChartProps {
   isLoading?: boolean;
 }
 
-function generateSPCData() {
-  const mean = 50;
-  const stdDev = 3;
-  return Array.from({ length: 30 }, (_, i) => ({
-    sample: i + 1,
-    value: mean + (Math.random() - 0.5) * stdDev * 4 + Math.sin(i / 5) * 2,
-    time: `Sample ${i + 1}`,
-  }));
-}
-
 export function SPCChart({
   title = 'Statistical Process Control (X-Bar Chart)',
   data,
-  ucl = 59,
-  lcl = 41,
-  mean = 50,
-  usl = 62,
-  lsl = 38,
+  ucl,
+  lcl,
+  mean,
+  usl,
+  lsl,
   isLoading,
 }: SPCChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
-  const chartData = data ?? generateSPCData();
+  const chartData = data ?? [];
+  const hasData = chartData.length > 0;
 
   const option = useMemo(() => {
     const textColor = isDark ? '#ffffff50' : '#00000050';
     const gridColor = isDark ? '#ffffff10' : '#00000010';
     const values = chartData.map((d) => d.value);
+
+    const markLines = [
+      mean != null && { yAxis: mean, name: 'Mean', lineStyle: { color: '#22c55e', type: 'solid' } },
+      ucl != null && { yAxis: ucl, name: 'UCL', lineStyle: { color: '#f59e0b', type: 'dashed' } },
+      lcl != null && { yAxis: lcl, name: 'LCL', lineStyle: { color: '#f59e0b', type: 'dashed' } },
+      usl != null && { yAxis: usl, name: 'USL', lineStyle: { color: '#f43f5e', type: 'dotted' } },
+      lsl != null && { yAxis: lsl, name: 'LSL', lineStyle: { color: '#f43f5e', type: 'dotted' } },
+    ].filter(Boolean);
 
     return {
       backgroundColor: 'transparent',
@@ -51,7 +50,7 @@ export function SPCChart({
         trigger: 'axis',
         formatter: (params: Array<{ name: string; value: number }>) => {
           const pt = params[0];
-          const isOOC = pt.value > ucl || pt.value < lcl;
+          const isOOC = (ucl != null && pt.value > ucl) || (lcl != null && pt.value < lcl);
           return `${pt.name}<br/>Value: <b>${pt.value.toFixed(3)}</b>${isOOC ? ' ⚠️ OOC' : ''}`;
         },
         backgroundColor: isDark ? '#1a1f2e' : '#ffffff',
@@ -69,8 +68,8 @@ export function SPCChart({
         type: 'value',
         axisLabel: { color: textColor, fontSize: 10 },
         splitLine: { lineStyle: { color: gridColor } },
-        min: Math.min(...values, lsl) - 5,
-        max: Math.max(...values, usl) + 5,
+        min: Math.floor(Math.min(...values, lsl ?? lcl ?? Infinity) - 5),
+        max: Math.ceil(Math.max(...values, usl ?? ucl ?? -Infinity) + 5),
       },
       series: [
         // Data line
@@ -79,22 +78,19 @@ export function SPCChart({
           data: values,
           lineStyle: { color: '#6175f4', width: 2 },
           symbol: 'circle',
-          symbolSize: (val: number) => (val > ucl || val < lcl ? 8 : 4),
+          symbolSize: (val: number) =>
+            (ucl != null && val > ucl) || (lcl != null && val < lcl) ? 8 : 4,
           itemStyle: {
             color: (params: { data: number }) =>
-              params.data > ucl || params.data < lcl ? '#f43f5e' : '#6175f4',
+              (ucl != null && params.data > ucl) || (lcl != null && params.data < lcl)
+                ? '#f43f5e'
+                : '#6175f4',
           },
           smooth: false,
           markLine: {
             silent: true,
             lineStyle: { width: 1.5 },
-            data: [
-              { yAxis: mean, name: 'Mean', lineStyle: { color: '#22c55e', type: 'solid' } },
-              { yAxis: ucl, name: 'UCL', lineStyle: { color: '#f59e0b', type: 'dashed' } },
-              { yAxis: lcl, name: 'LCL', lineStyle: { color: '#f59e0b', type: 'dashed' } },
-              { yAxis: usl, name: 'USL', lineStyle: { color: '#f43f5e', type: 'dotted' } },
-              { yAxis: lsl, name: 'LSL', lineStyle: { color: '#f43f5e', type: 'dotted' } },
-            ],
+            data: markLines,
             label: {
               formatter: (p: { name: string; value: number }) => `${p.name}: ${p.value.toFixed(1)}`,
               fontSize: 9,
@@ -112,7 +108,11 @@ export function SPCChart({
         <div>
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           <p className="text-xs text-muted-foreground">
-            UCL: {ucl} | Mean: {mean} | LCL: {lcl}
+            {ucl != null ? `UCL: ${ucl.toFixed(1)}` : 'UCL: —'}
+            {' | '}
+            {mean != null ? `Mean: ${mean.toFixed(1)}` : 'Mean: —'}
+            {' | '}
+            {lcl != null ? `LCL: ${lcl.toFixed(1)}` : 'LCL: —'}
           </p>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
@@ -129,6 +129,10 @@ export function SPCChart({
       </div>
       {isLoading ? (
         <div className="shimmer h-48 rounded-lg" />
+      ) : !hasData ? (
+        <div className="flex h-[200px] items-center justify-center text-xs text-muted-foreground">
+          No SPC measurements recorded for this parameter
+        </div>
       ) : (
         <ReactECharts option={option} style={{ height: '200px' }} notMerge />
       )}

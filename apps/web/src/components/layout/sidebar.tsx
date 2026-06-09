@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
+  LayoutGrid,
   Factory,
   ShieldCheck,
   Wrench,
@@ -79,6 +80,9 @@ interface NavItem {
 const navItems: NavItem[] = [
   // ── 1. Dashboard ────────────────────────────────────────────
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+
+  // ── 1b. Dashboard Center (catalog & launcher) ───────────────
+  { label: 'Dashboard Center', href: '/dashboard-center', icon: LayoutGrid, badge: 'New', badgeVariant: 'default' },
 
   // ── 2. Production (Planning & Reporting) ────────────────────
   {

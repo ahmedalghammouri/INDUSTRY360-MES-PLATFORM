@@ -78,7 +78,7 @@ function TreeNode({
   return (
     <div>
       <div
-        className={cn('flex items-center gap-2 py-2 px-3 rounded-lg group cursor-pointer hover:bg-white/5 transition-colors')}
+        className={cn('flex items-center gap-2 py-2 px-3 rounded-lg group cursor-pointer hover:bg-foreground/5 transition-colors')}
         style={{ paddingLeft: `${depth * 24 + 12}px` }}
         onClick={() => hasChildren && setExpanded(!expanded)}
       >

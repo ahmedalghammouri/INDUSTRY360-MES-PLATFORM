@@ -43,6 +43,17 @@ export class MaintenanceController {
     return this.maintenanceService.getKPIs(user.factoryId);
   }
 
+  @Get('reliability-trend')
+  @ApiOperation({ summary: 'Get MTTR/MTBF reliability trend (monthly)' })
+  @ApiQuery({ name: 'months', required: false, type: Number })
+  async getReliabilityTrend(
+    @CurrentUser() user: RequestUser,
+    @Query('months') months?: string,
+  ) {
+    const n = months ? Math.min(Math.max(parseInt(months, 10) || 6, 1), 24) : 6;
+    return this.maintenanceService.getReliabilityTrend(user.factoryId, n);
+  }
+
   // ────────────────────────────────────────────────────────────
   // WORK ORDERS
   // ────────────────────────────────────────────────────────────

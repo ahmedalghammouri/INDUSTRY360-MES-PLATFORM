@@ -179,7 +179,7 @@ export default function ProductionReportsView() {
                   className={cn(
                     'glass-card rounded-xl p-5 h-full flex flex-col gap-4',
                     'border transition-all duration-200',
-                    'hover:border-white/10 hover:bg-white/[0.03]',
+                    'hover:border-foreground/10 hover:bg-foreground/[0.03]',
                     card.border,
                   )}
                 >

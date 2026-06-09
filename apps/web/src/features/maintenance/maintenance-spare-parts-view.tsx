@@ -378,7 +378,7 @@ export function MaintenanceSparePartsView() {
                   onClick={() => setAdjustType(t)}
                   className={cn(
                     'flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors',
-                    adjustType === t ? 'bg-brand-600 border-brand-600 text-white' : 'border-border text-muted-foreground hover:bg-white/5',
+                    adjustType === t ? 'bg-brand-600 border-brand-600 text-white' : 'border-border text-muted-foreground hover:bg-foreground/5',
                   )}
                 >
                   {t}

@@ -3,6 +3,14 @@
 import React, { useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { useTheme } from 'next-themes';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/services/api.client';
+
+interface ReliabilityPoint {
+  month: string;
+  mttr: number;
+  mtbf: number;
+}
 
 interface MTTRMTBFChartProps {
   isLoading?: boolean;
@@ -12,14 +20,17 @@ export function MTTRMTBFChart({ isLoading }: MTTRMTBFChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
-  const mockData = [
-    { month: 'Jan', mttr: 4.2, mtbf: 480 },
-    { month: 'Feb', mttr: 3.8, mtbf: 520 },
-    { month: 'Mar', mttr: 5.1, mtbf: 440 },
-    { month: 'Apr', mttr: 3.5, mtbf: 560 },
-    { month: 'May', mttr: 2.9, mtbf: 610 },
-    { month: 'Jun', mttr: 3.2, mtbf: 590 },
-  ];
+  const { data, isLoading: trendLoading } = useQuery({
+    queryKey: ['maintenance', 'reliability-trend'],
+    queryFn: () => api.get<ReliabilityPoint[]>('/maintenance/reliability-trend', {
+      params: { months: 6 },
+    }),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const points = data ?? [];
+  const loading = isLoading || trendLoading;
 
   const option = useMemo(() => {
     const textColor = isDark ? '#ffffff50' : '#00000050';
@@ -44,7 +55,7 @@ export function MTTRMTBFChart({ isLoading }: MTTRMTBFChartProps) {
       grid: { top: 36, left: 10, right: 50, bottom: 20, containLabel: true },
       xAxis: {
         type: 'category',
-        data: mockData.map((d) => d.month),
+        data: points.map((d) => d.month),
         axisLabel: { color: textColor, fontSize: 10 },
         axisLine: { lineStyle: { color: gridColor } },
       },
@@ -70,7 +81,7 @@ export function MTTRMTBFChart({ isLoading }: MTTRMTBFChartProps) {
         {
           name: 'MTTR (hours)',
           type: 'bar',
-          data: mockData.map((d) => d.mttr),
+          data: points.map((d) => d.mttr),
           itemStyle: {
             color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [{ offset: 0, color: '#f43f5e' }, { offset: 1, color: '#f43f5e40' }] },
@@ -82,7 +93,7 @@ export function MTTRMTBFChart({ isLoading }: MTTRMTBFChartProps) {
           name: 'MTBF (hours)',
           type: 'line',
           yAxisIndex: 1,
-          data: mockData.map((d) => d.mtbf),
+          data: points.map((d) => d.mtbf),
           lineStyle: { color: '#22c55e', width: 2 },
           symbol: 'circle',
           symbolSize: 5,
@@ -94,7 +105,7 @@ export function MTTRMTBFChart({ isLoading }: MTTRMTBFChartProps) {
         },
       ],
     };
-  }, [isDark]);
+  }, [isDark, points]);
 
   return (
     <div className="industrial-card p-4">
@@ -102,8 +113,12 @@ export function MTTRMTBFChart({ isLoading }: MTTRMTBFChartProps) {
         <h3 className="text-sm font-semibold">MTTR & MTBF Trends</h3>
         <p className="text-xs text-muted-foreground">Mean Time to Repair vs Mean Time Between Failures</p>
       </div>
-      {isLoading ? (
+      {loading ? (
         <div className="shimmer h-40 rounded-lg" />
+      ) : points.length === 0 ? (
+        <div className="flex h-40 items-center justify-center text-xs text-muted-foreground">
+          No reliability data available yet
+        </div>
       ) : (
         <ReactECharts option={option} style={{ height: '160px' }} notMerge />
       )}

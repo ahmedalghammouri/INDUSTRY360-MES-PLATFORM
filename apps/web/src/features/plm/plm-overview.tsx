@@ -229,7 +229,7 @@ function CoverageRow({ label, count, total, colorClass }: CoverageRowProps) {
   return (
     <div className="flex items-center gap-3">
       <span className="text-xs text-muted-foreground w-36 shrink-0">{label}</span>
-      <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+      <div className="flex-1 h-2 bg-foreground/5 rounded-full overflow-hidden">
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${pct}%` }}
@@ -597,7 +597,7 @@ export default function PlmOverview() {
                     return (
                       <tr
                         key={prod.id}
-                        className="border-b border-border/20 hover:bg-white/5 cursor-pointer"
+                        className="border-b border-border/20 hover:bg-foreground/5 cursor-pointer"
                       >
                         <td className="p-3 text-xs font-mono text-muted-foreground">
                           {prod.code}
@@ -627,7 +627,7 @@ export default function PlmOverview() {
                         <td className="p-3">
                           <Link
                             href={`/plm/design?product=${prod.id}`}
-                            className="inline-flex items-center justify-center w-7 h-7 rounded hover:bg-white/10 transition-colors"
+                            className="inline-flex items-center justify-center w-7 h-7 rounded hover:bg-foreground/10 transition-colors"
                           >
                             <ChevronRight className="w-4 h-4 text-muted-foreground" />
                           </Link>

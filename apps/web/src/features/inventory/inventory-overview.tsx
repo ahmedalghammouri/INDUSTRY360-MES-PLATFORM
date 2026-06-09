@@ -160,7 +160,7 @@ export function InventoryOverview() {
                 </tr>
               ) : (
                 parts.map(p => (
-                  <tr key={p.id} className="border-b border-border/30 hover:bg-white/5">
+                  <tr key={p.id} className="border-b border-border/30 hover:bg-foreground/5">
                     <td className="p-3 text-xs font-mono text-muted-foreground">{p.partNumber}</td>
                     <td className="p-3 text-xs font-medium">{p.name}</td>
                     <td className="p-3 text-xs">

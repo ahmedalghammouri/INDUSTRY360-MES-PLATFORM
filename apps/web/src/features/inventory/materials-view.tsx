@@ -214,7 +214,7 @@ export function MaterialsView() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: i * 0.02 }}
-                    className={cn('border-b border-border/30 hover:bg-white/5', lot.isExpired && 'bg-red-500/5')}
+                    className={cn('border-b border-border/30 hover:bg-foreground/5', lot.isExpired && 'bg-red-500/5')}
                   >
                     <td className="p-3 text-xs">
                       <div className="font-medium">{lot.materialName}</div>
@@ -229,7 +229,7 @@ export function MaterialsView() {
                     <td className="p-3 text-xs text-right font-semibold">{lot.remainingQty.toLocaleString()} {lot.unit}</td>
                     <td className="p-3 text-xs text-center">
                       <div className="flex items-center gap-1.5 justify-center">
-                        <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                        <div className="w-16 h-1.5 bg-foreground/10 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-brand-500 rounded-full"
                             style={{ width: `${lot.utilizationPct}%` }}
