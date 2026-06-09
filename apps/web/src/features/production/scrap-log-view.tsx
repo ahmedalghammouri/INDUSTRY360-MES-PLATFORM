@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, Filter, RefreshCw, TrendingDown,
@@ -13,6 +13,9 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { TablePagination } from '@/components/ui/table-pagination';
+import { useSortedData } from '@/lib/use-sorted-data';
 
 const CATEGORIES = ['QUALITY','SETUP','DAMAGE','OVERRUN','MATERIAL','MACHINE','OPERATOR','OTHER'] as const;
 type Category = typeof CATEGORIES[number];
@@ -55,6 +58,8 @@ export function ScrapLogView() {
   const [from, setFrom]         = useState('');
   const [to, setTo]             = useState('');
   const [search, setSearch]     = useState('');
+  const [page, setPage]         = useState(1);
+  const LIMIT = 25;
 
   const { data, isLoading, refetch, isFetching } = useQuery<ScrapLog[]>({
     queryKey: ['scrap-logs', category, from, to],
@@ -79,6 +84,16 @@ export function ScrapLogView() {
         l.jobOrder.operationName.toLowerCase().includes(search.toLowerCase()),
       )
     : logs;
+
+  const { sortedData: sortedLogs, sortCol, sortDir, handleSort } = useSortedData(
+    filtered as unknown as Record<string, unknown>[],
+    'createdAt',
+    'desc',
+  );
+  const pageData = sortedLogs.slice((page - 1) * LIMIT, page * LIMIT) as unknown as ScrapLog[];
+
+  // Reset page when filters or sort change
+  useEffect(() => { setPage(1); }, [search, category, from, to, sortCol, sortDir]);
 
   // KPIs
   const totalScrap = filtered.reduce((s, l) => s + l.qty, 0);
@@ -235,13 +250,13 @@ export function ScrapLogView() {
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b">
               <tr>
-                <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground">Timestamp</th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground">Work Order</th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground">Operation</th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground">Category</th>
-                <th className="text-right py-3 px-4 text-xs font-medium text-muted-foreground">Qty</th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground">Reason</th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground">Operator</th>
+                <SortableHeader column="createdAt"  label="Timestamp"   sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="workOrder"  label="Work Order"  sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="jobOrder"   label="Operation"   sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="category"   label="Category"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="qty"        label="Qty"         sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reason</th>
+                <SortableHeader column="operator"   label="Operator"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
@@ -256,7 +271,7 @@ export function ScrapLogView() {
                   </td>
                 </tr>
               ) : (
-                filtered.map(log => (
+                pageData.map(log => (
                   <tr key={log.id} className="hover:bg-muted/20 transition-colors">
                     <td className="py-2.5 px-4 text-xs text-muted-foreground whitespace-nowrap">
                       <div className="flex items-center gap-1.5">
@@ -308,6 +323,13 @@ export function ScrapLogView() {
             </tbody>
           </table>
         </div>
+        <TablePagination
+          page={page}
+          total={sortedLogs.length}
+          limit={LIMIT}
+          onPageChange={setPage}
+          isLoading={isLoading}
+        />
       </div>
     </div>
   );

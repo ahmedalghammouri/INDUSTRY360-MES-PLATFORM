@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Plus, Download, Search, AlertTriangle, Pencil, Trash2, MoreHorizontal, ArrowUpDown } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -14,6 +14,8 @@ import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { KPICard } from '@/components/widgets/kpi-card';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
 

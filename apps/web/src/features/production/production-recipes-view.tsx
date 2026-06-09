@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Search, BookOpen, FlaskConical, CheckCircle2, Clock3,
@@ -18,6 +18,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -109,16 +111,36 @@ export function ProductionRecipesView() {
   const [ingTarget, setIngTarget] = useState<{ recipeId: string; status: RecipeStatus } | null>(null);
   const [ingForm, setIngForm] = useState(EMPTY_ING_FORM());
 
+  // ── Sort state ────────────────────────────────────────────
+
+  const [sortCol, setSortCol] = useState('createdAt');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (col: string) => {
+    if (col === sortCol) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortCol(col);
+      setSortDir('desc');
+    }
+    setPage(1);
+  };
+
+  // Reset page when sort changes
+  useEffect(() => { setPage(1); }, [sortCol, sortDir]);
+
   // ── Queries ───────────────────────────────────────────────
 
   const { data, isLoading } = useQuery({
-    queryKey: ['production', 'recipes', search, statusFilter, page],
+    queryKey: ['production', 'recipes', search, statusFilter, page, sortCol, sortDir],
     queryFn: () => api.get('/production/recipes', {
       params: {
         search: search || undefined,
         status: statusFilter !== 'ALL' ? statusFilter : undefined,
         page,
         limit: 20,
+        sortBy: sortCol,
+        sortOrder: sortDir,
       },
     }),
     staleTime: 30_000,
@@ -150,6 +172,8 @@ export function ProductionRecipesView() {
   const skus: any[] = (skusData as any)?.data ?? [];
   const processes: any[] = (processesData as any)?.data ?? [];
   const rawMaterials: any[] = (rawMatsData as any)?.data ?? [];
+
+  const { sortedData } = useSortedData<Recipe>(recipes, sortCol, sortDir);
 
   // ── Mutations ─────────────────────────────────────────────
 
@@ -338,16 +362,34 @@ export function ProductionRecipesView() {
           </Select>
         </div>
 
+        {/* Sort toolbar */}
+        <div className="rounded-lg border bg-muted/20 overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b">
+                <SortableHeader column="code"      label="Code"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="name"      label="Name"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="status"    label="Status"  sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="version"   label="Version" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="yieldPct"  label="Yield"   sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="unitCost"  label="Cost"    sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="updatedAt" label="Updated" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="createdAt" label="Created" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+              </tr>
+            </thead>
+          </table>
+        </div>
+
         {/* Recipe list */}
         <div className="flex flex-col gap-3">
           {isLoading ? (
             <div className="text-sm text-muted-foreground p-8 text-center">Loading recipes...</div>
-          ) : recipes.length === 0 ? (
+          ) : sortedData.length === 0 ? (
             <div className="border rounded-xl p-12 text-center text-sm text-muted-foreground">
               <FlaskConical size={32} className="mx-auto mb-3 opacity-20" />
               No recipes found.
             </div>
-          ) : recipes.map(recipe => (
+          ) : sortedData.map(recipe => (
             <RecipeCard
               key={recipe.id}
               recipe={recipe}

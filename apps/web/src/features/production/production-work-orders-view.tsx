@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Plus, Download, Filter, Search, Play, Pause,
   CheckCircle, Pencil, Trash2, XCircle, ChevronDown,
@@ -25,6 +25,8 @@ import { TableRowActions } from '@/components/ui/table-row-actions';
 import { api } from '@/services/api.client';
 import { cn, formatDate, formatPercent } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
 
 const STATUS_COLORS: Record<string, 'secondary' | 'default' | 'outline' | 'destructive'> = {
   PLANNED: 'secondary', RELEASED: 'secondary', IN_PROGRESS: 'default',
@@ -306,16 +308,30 @@ export function ProductionWorkOrdersView() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const [sortCol, setSortCol] = useState('createdAt');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const handleSort = (col: string) => {
+    if (col === sortCol) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortCol(col);
+      setSortDir('desc');
+    }
+    setPage(1);
+  };
+
   const { data: workOrdersData, isLoading } = useQuery({
-    queryKey: ['production', 'work-orders', { search, status: statusFilter, page }],
+    queryKey: ['production', 'work-orders', { search, status: statusFilter, page, sortCol, sortDir }],
     queryFn: () => api.get('/production/work-orders', {
-      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page },
+      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page, sortBy: sortCol, sortOrder: sortDir },
     }),
     staleTime: 15_000,
     refetchInterval: 30_000,
   });
   const orders: WorkOrder[] = (workOrdersData as any)?.data ?? [];
   const total: number = (workOrdersData as any)?.total ?? 0;
+
+  const { sortedData: sortedOrders } = useSortedData(orders, 'createdAt', 'desc');
 
   const { data: woDetail, isLoading: detailLoading } = useQuery({
     queryKey: ['production', 'work-orders', viewId],
@@ -468,9 +484,15 @@ export function ProductionWorkOrdersView() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border/30">
-                  {['Order #', 'Product', 'Status', 'Priority', 'Progress', 'Qty', 'Planned End', 'OEE', ''].map(h => (
-                    <TableHead key={h} className="text-[11px] font-semibold">{h}</TableHead>
-                  ))}
+                  <SortableHeader column="woNumber" label="Order #" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader column="woNumber" label="Product" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader column="status" label="Status" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader column="priority" label="Priority" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader column="progress" label="Progress" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader column="plannedQty" label="Qty" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader column="plannedEnd" label="Planned End" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader column="oee" label="OEE" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -486,7 +508,7 @@ export function ProductionWorkOrdersView() {
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-12 text-muted-foreground text-sm">No work orders found</TableCell>
                   </TableRow>
-                ) : orders.map(order => {
+                ) : sortedOrders.map(order => {
                   const progress = order.progress ?? (order.plannedQty > 0 ? Math.min(Math.round((order.actualQty / order.plannedQty) * 100), 100) : 0);
                   const canEdit = !['COMPLETED', 'CANCELLED'].includes(order.status);
                   const canDelete = ['PLANNED', 'RELEASED', 'ON_HOLD', 'CANCELLED'].includes(order.status);

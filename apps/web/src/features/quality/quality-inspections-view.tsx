@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Plus, Search, Download, Filter, ChevronDown, CheckCircle2,
   XCircle, AlertCircle, MoreHorizontal, Pencil, Trash2,
@@ -21,6 +21,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
 
 const RESULT_CONFIG = {
   PASS:        { label: 'Pass',        color: 'text-green-400',  icon: CheckCircle2 },

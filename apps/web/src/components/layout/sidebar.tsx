@@ -47,6 +47,10 @@ import {
   Workflow,
   GitMerge,
   Monitor,
+  Cog,
+  BookOpen,
+  SlidersHorizontal,
+  GitPullRequest,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
@@ -73,86 +77,151 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  // ── Core ────────────────────────────────────────────────────
-  {
-    label: 'Dashboard',
-    href: '/dashboard',
-    icon: LayoutDashboard,
-  },
+  // ── 1. Dashboard ────────────────────────────────────────────
+  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
 
-  // ── Operations ──────────────────────────────────────────────
+  // ── 2. Production (Planning & Reporting) ────────────────────
   {
     label: 'Production',
     icon: Factory,
     children: [
-      { label: 'Overview',           href: '/production',                       icon: Gauge         },
-      { label: 'Prod. Orders (PO)',  href: '/production/production-orders',     icon: GitCommit,     badge: 'ISA-95', badgeVariant: 'outline'      },
-      { label: 'Work Orders',        href: '/production/orders',                icon: ClipboardList, dynamicKey: 'workOrders',   badgeVariant: 'secondary'    },
-      { label: 'Dispatch List (JO)', href: '/production/job-orders',            icon: Layers,        badge: 'ISA-95',             badgeVariant: 'outline'      },
-      { label: 'Shop Floor',         href: '/shop-floor',                       icon: Monitor,       badge: 'Live',               badgeVariant: 'secondary',   openNewTab: true },
-      { label: 'Scrap Log',          href: '/production/scrap-log',             icon: AlertTriangle, badge: 'Audit',              badgeVariant: 'outline'      },
-      { label: 'Batches & Lots',     href: '/production/batches',               icon: Boxes         },
-      { label: 'Scheduling',         href: '/production/scheduling',            icon: Calendar      },
-      { label: 'OEE Analytics',      href: '/production/oee',                   icon: TrendingUp    },
-      { label: 'Downtime',           href: '/production/downtime',              icon: AlertTriangle, dynamicKey: 'openDowntime',  badgeVariant: 'destructive'  },
-      { label: 'Recipes',            href: '/production/recipes',               icon: FileText      },
-      { label: 'Mfg. Processes',     href: '/production/processes',             icon: Workflow      },
+      { label: 'Overview',               href: '/production',                      icon: Gauge         },
+      { label: 'Prod. Orders (PO)',      href: '/production/production-orders',    icon: GitCommit,    badge: 'ISA-95', badgeVariant: 'outline' },
+      { label: 'Production Scheduling',  href: '/production/scheduling',           icon: Calendar      },
+      { label: 'Scrap Log Audit',        href: '/production/scrap-log',            icon: AlertTriangle, badge: 'Audit',  badgeVariant: 'outline' },
+      { label: 'Batches & Lots',         href: '/production/batches',              icon: Boxes         },
+      {
+        label: 'KPI Analytics',
+        icon: TrendingUp,
+        children: [
+          { label: 'Overview',           href: '/production/kpi',                  icon: Gauge         },
+          { label: 'OEE Analytics',      href: '/production/oee',                  icon: LineChart     },
+          { label: 'Downtime Analytics', href: '/production/downtime',             icon: AlertTriangle },
+        ],
+      },
+      { label: 'Reports & Analytics',    href: '/production/reports',              icon: BarChart3     },
     ],
   },
+
+  // ── 3. Manufacturing (MRP / Execution) ──────────────────────
   {
-    label: 'Quality',
-    icon: ShieldCheck,
+    label: 'Manufacturing',
+    icon: Cog,
+    badge: 'MRP',
+    badgeVariant: 'outline',
     children: [
-      { label: 'Overview',          href: '/quality',             icon: Activity       },
-      { label: 'Quality Plans',     href: '/quality/plans',       icon: ClipboardList  },
-      { label: 'Inspections',       href: '/quality/inspections', icon: ClipboardCheck },
-      { label: 'Non-Conformance',   href: '/quality/ncr',         icon: AlertTriangle,  dynamicKey: 'openNcr',       badgeVariant: 'destructive'  },
-      { label: 'CAPA',              href: '/quality/capa',        icon: ShieldCheck    },
-      { label: 'SPC Charts',        href: '/quality/spc',         icon: LineChart      },
+      { label: 'Overview',               href: '/manufacturing',                   icon: Gauge         },
+      {
+        label: 'KPI Analytics',
+        icon: TrendingUp,
+        children: [
+          { label: 'Overview',           href: '/manufacturing/kpi',               icon: Gauge         },
+          { label: 'OEE Analytics',      href: '/manufacturing/oee',               icon: LineChart     },
+          { label: 'Downtime Analytics', href: '/production/downtime',             icon: AlertTriangle },
+        ],
+      },
+      { label: 'Mfg. Scheduling',        href: '/production/scheduling',           icon: Calendar      },
+      { label: 'Work Orders',            href: '/production/orders',               icon: ClipboardList, dynamicKey: 'workOrders', badgeVariant: 'secondary' },
+      { label: 'Dispatch List (JO)',     href: '/production/job-orders',           icon: Layers,        badge: 'ISA-95', badgeVariant: 'outline' },
+      { label: 'Shopfloor Live',         href: '/shop-floor',                      icon: Monitor,       badge: 'Live',   badgeVariant: 'secondary', openNewTab: true },
+      { label: 'Control Panel',          href: '/manufacturing/control',           icon: SlidersHorizontal },
+      { label: 'Downtime',               href: '/production/downtime',             icon: AlertTriangle, dynamicKey: 'openDowntime', badgeVariant: 'destructive' },
+      { label: 'Recipes',                href: '/production/recipes',              icon: FlaskConical  },
+      { label: 'Mfg. Processes',         href: '/production/processes',            icon: Workflow      },
+      { label: 'Reports & Analytics',    href: '/manufacturing/reports',           icon: BarChart3     },
     ],
   },
+
+  // ── 4. Maintenance ──────────────────────────────────────────
   {
     label: 'Maintenance',
     icon: Wrench,
     children: [
-      { label: 'Overview',               href: '/maintenance',             icon: Gauge         },
-      { label: 'Maintenance Orders',      href: '/maintenance/work-orders', icon: ClipboardList, dynamicKey: 'openMaintenance', badgeVariant: 'secondary'  },
-      { label: 'Assets & Equipment',     href: '/maintenance/assets',      icon: Cpu           },
-      { label: 'Preventive Maintenance', href: '/maintenance/preventive',  icon: Calendar      },
-      { label: 'Spare Parts',            href: '/maintenance/spare-parts', icon: PackageSearch },
+      { label: 'Overview',               href: '/maintenance',                     icon: Gauge         },
+      { label: 'Maint. Scheduling',      href: '/maintenance/scheduling',          icon: Calendar      },
+      { label: 'Maintenance Orders',     href: '/maintenance/work-orders',         icon: ClipboardList, dynamicKey: 'openMaintenance', badgeVariant: 'secondary' },
+      { label: 'Preventive Maint.',      href: '/maintenance/preventive',          icon: Calendar      },
+      { label: 'Spare Parts',            href: '/maintenance/spare-parts',         icon: PackageSearch },
+      { label: 'Assets & Equipment',     href: '/maintenance/assets',              icon: Cpu           },
+      { label: 'Reports & Analytics',    href: '/maintenance/reports',             icon: BarChart3     },
     ],
   },
 
-  // ── Resources ───────────────────────────────────────────────
+  // ── 5. Quality ───────────────────────────────────────────────
+  {
+    label: 'Quality',
+    icon: ShieldCheck,
+    children: [
+      { label: 'Overview',               href: '/quality',                         icon: Activity      },
+      { label: 'Quality Plans',          href: '/quality/plans',                   icon: ClipboardList },
+      { label: 'Quality Records',        href: '/quality/records',                 icon: ClipboardCheck },
+      { label: 'Inspections',            href: '/quality/inspections',             icon: ClipboardCheck },
+      { label: 'Non-Conformance',        href: '/quality/ncr',                     icon: AlertTriangle, dynamicKey: 'openNcr', badgeVariant: 'destructive' },
+      { label: 'CAPA',                   href: '/quality/capa',                    icon: ShieldCheck   },
+      { label: 'SPC Charts',             href: '/quality/spc',                     icon: LineChart     },
+      { label: 'Reports & Analytics',    href: '/quality/reports',                 icon: BarChart3     },
+    ],
+  },
+
+  // ── 6. PLM ───────────────────────────────────────────────────
+  {
+    label: 'PLM',
+    icon: BookOpen,
+    children: [
+      { label: 'Overview',               href: '/plm',                             icon: Gauge         },
+      { label: 'Products (SKUs)',        href: '/inventory/products',              icon: BoxesIcon     },
+      {
+        label: 'Mfg. Design',
+        icon: Workflow,
+        children: [
+          { label: 'Overview',           href: '/plm/design',                      icon: Gauge         },
+          { label: 'Change Request',     href: '/plm/change-requests',             icon: GitPullRequest },
+          { label: 'Mfg. Processes',     href: '/production/processes',            icon: Workflow      },
+          { label: 'Bill of Materials',  href: '/inventory/bom',                   icon: GitMerge      },
+          { label: 'Recipes',            href: '/production/recipes',              icon: FlaskConical  },
+        ],
+      },
+      { label: 'Reports & Analytics',    href: '/plm/reports',                     icon: BarChart3     },
+    ],
+  },
+
+  // ── 7. Inventory ─────────────────────────────────────────────
   {
     label: 'Inventory',
     icon: Package,
     children: [
-      { label: 'Overview',            href: '/inventory',                     icon: Boxes        },
-      { label: 'Spare Parts',         href: '/inventory/spare-parts',         icon: PackageSearch },
-      { label: 'Spare Part Requests', href: '/inventory/spare-requests',      icon: Truck        },
-      { label: 'Raw Materials',       href: '/inventory/raw-materials',       icon: FlaskConical },
-      { label: 'Products (SKUs)',     href: '/inventory/products',            icon: BoxesIcon    },
-      { label: 'Material Lots',       href: '/inventory/materials',           icon: Layers3      },
-      { label: 'Bill of Materials',   href: '/inventory/bom',                 icon: GitMerge     },
-      { label: 'Storage Locations',   href: '/inventory/storage-locations',   icon: MapPin       },
+      { label: 'Overview',               href: '/inventory',                       icon: Boxes         },
+      { label: 'Storage Locations',      href: '/inventory/storage-locations',     icon: MapPin        },
+      { label: 'Products (SKUs)',        href: '/inventory/products',              icon: BoxesIcon     },
+      {
+        label: 'Materials',
+        icon: FlaskConical,
+        children: [
+          { label: 'Raw Materials',      href: '/inventory/raw-materials',         icon: FlaskConical  },
+          { label: 'Material Lots',      href: '/inventory/materials',             icon: Layers3       },
+          { label: 'Spare Parts',        href: '/inventory/spare-parts',           icon: PackageSearch },
+          { label: 'Spare Part Req.',    href: '/inventory/spare-requests',        icon: Truck         },
+        ],
+      },
+      { label: 'Reports & Analytics',    href: '/inventory/reports',               icon: BarChart3     },
     ],
   },
+
+  // ── 8. Energy ────────────────────────────────────────────────
   {
     label: 'Energy',
     icon: Zap,
     children: [
-      { label: 'Overview', href: '/energy',        icon: Activity },
-      { label: 'Meters',   href: '/energy/meters', icon: Gauge    },
+      { label: 'Overview',               href: '/energy',                          icon: Activity      },
+      { label: 'Reports & Analytics',    href: '/energy/reports',                  icon: BarChart3     },
+      { label: 'Meters',                 href: '/energy/meters',                   icon: Gauge         },
     ],
   },
 
-  // ── Infrastructure ───────────────────────────────────────────
-  {
-    label: 'Plant Hierarchy',
-    href: '/hierarchy',
-    icon: GitBranch,
-  },
+  // ── 9. Plant Hierarchy ───────────────────────────────────────
+  { label: 'Plant Hierarchy', href: '/hierarchy', icon: GitBranch },
+
+  // ── 10. IIoT & Connectivity ──────────────────────────────────
   {
     label: 'IIoT & Connectivity',
     icon: Radio,
@@ -164,40 +233,27 @@ const navItems: NavItem[] = [
     ],
   },
 
-  // ── Traceability ──────────────────────────────────────────────
-  {
-    label: 'Traceability',
-    href: '/traceability',
-    icon: GitCommit,
-  },
+  // ── 11. Traceability ─────────────────────────────────────────
+  { label: 'Traceability', href: '/traceability', icon: GitCommit },
 
-  // ── Analytics & AI ───────────────────────────────────────────
+  // ── 12. Reports & Analytics ──────────────────────────────────
   {
     label: 'Reports & Analytics',
     icon: BarChart3,
     children: [
-      { label: 'Report Builder',      href: '/reports',             icon: FileText    },
-      { label: 'Production Reports',  href: '/reports/production',  icon: Factory     },
-      { label: 'Quality Reports',     href: '/reports/quality',     icon: ShieldCheck },
-      { label: 'Maintenance Reports', href: '/reports/maintenance', icon: Wrench      },
+      { label: 'Overview',               href: '/reports',                         icon: Gauge         },
+      { label: 'Report Builder',         href: '/reports/builder',                 icon: FileText      },
+      { label: 'Production Reports',     href: '/reports/production',              icon: Factory       },
+      { label: 'Quality Reports',        href: '/reports/quality',                 icon: ShieldCheck   },
+      { label: 'Maintenance Reports',    href: '/reports/maintenance',             icon: Wrench        },
     ],
   },
-  {
-    label: 'AI Intelligence',
-    href: '/ai',
-    icon: Sparkles,
-    badge: 'New',
-    badgeVariant: 'default',
-  },
 
-  // ── System ──────────────────────────────────────────────────
-  {
-    label: 'Notifications',
-    href: '/notifications',
-    icon: Bell,
-    badgeDynamic: true,
-    badgeVariant: 'destructive',
-  },
+  // ── 13. AI Intelligence ──────────────────────────────────────
+  { label: 'AI Intelligence', href: '/ai', icon: Sparkles, badge: 'New', badgeVariant: 'default' },
+
+  // ── 14. Notifications ────────────────────────────────────────
+  { label: 'Notifications', href: '/notifications', icon: Bell, badgeDynamic: true, badgeVariant: 'destructive' },
 ];
 
 const bottomNavItems: NavItem[] = [
@@ -240,16 +296,21 @@ interface SidebarItemProps {
   countsMap?: Record<string, number>;
 }
 
+function hasActiveDescendant(item: NavItem, pathname: string): boolean {
+  if (item.href) return item.href !== '/dashboard' && pathname.startsWith(item.href);
+  return item.children?.some(c => hasActiveDescendant(c, pathname)) ?? false;
+}
+
 function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge, countsMap }: SidebarItemProps) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(() => {
     if (!item.children) return false;
-    return item.children.some((c) => c.href && pathname.startsWith(c.href));
+    return hasActiveDescendant(item, pathname);
   });
 
   const isActive = item.href
     ? pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
-    : item.children?.some((c) => c.href && pathname.startsWith(c.href));
+    : hasActiveDescendant(item, pathname);
 
   const Icon = item.icon;
 

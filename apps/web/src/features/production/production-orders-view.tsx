@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Plus, Search, ChevronRight, ArrowRight, AlertCircle,
   CheckCircle2, Clock, Package, Cpu, SendHorizonal,
@@ -26,6 +26,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -1246,14 +1249,36 @@ export function ProductionOrdersView() {
   const [completeFor, setCompleteFor]   = useState<ProductionOrder | null>(null);
   const [resumeFor,   setResumeFor]     = useState<ProductionOrder | null>(null);
 
+  const [page, setPage] = useState(1);
+  const LIMIT = 20;
+
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['production-orders', search, statusFilter],
     queryFn: () => api.get('/production/production-orders', {
-      params: { search: search || undefined, status: statusFilter === 'all' ? undefined : statusFilter, limit: 100 },
+      params: {
+        search: search || undefined,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        limit: 100,
+      },
     }),
     staleTime: 30_000,
   });
   const orders: ProductionOrder[] = (data as any)?.data ?? (data as any) ?? [];
+
+  const { sortedData, sortCol, sortDir, handleSort: _handleSort } = useSortedData(orders, 'createdAt', 'desc');
+
+  function handleSort(col: string) {
+    _handleSort(col);
+    setPage(1);
+  }
+
+  useEffect(() => { setPage(1); }, [sortCol, sortDir]);
+  useEffect(() => { setPage(1); }, [search, statusFilter]);
+
+  const pageData = useMemo(
+    () => sortedData.slice((page - 1) * LIMIT, page * LIMIT),
+    [sortedData, page],
+  );
 
   // ── Mutations ──────────────────────────────────────────────
 
@@ -1401,9 +1426,17 @@ export function ProductionOrdersView() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              {['PO Number', 'Product', 'Priority', 'Customer', 'Target Qty', 'Progress', 'Status', 'Planned Start', 'Planned End', 'WOs', ''].map(h => (
-                <th key={h} className="text-left p-3 text-muted-foreground font-medium text-xs">{h}</th>
-              ))}
+              <SortableHeader column="orderNumber" label="PO Number" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+              <SortableHeader column="orderNumber" label="Product" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+              <SortableHeader column="priority" label="Priority" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+              <SortableHeader column="customer" label="Customer" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+              <SortableHeader column="targetQty" label="Target Qty" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</th>
+              <SortableHeader column="status" label="Status" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+              <SortableHeader column="plannedStart" label="Planned Start" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+              <SortableHeader column="plannedEnd" label="Planned End" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">WOs</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1423,11 +1456,12 @@ export function ProductionOrdersView() {
                   </td>
                 </tr>
               )
-              : orders.map((po, i) => (
+              : pageData.map((po, i) => (
                   <PORow key={po.id} po={po} idx={i} onSelect={() => openDetail(po)} actions={actionsFor(po)} />
                 ))}
           </tbody>
         </table>
+        <TablePagination page={page} total={sortedData.length} limit={LIMIT} onPageChange={setPage} isLoading={isLoading} />
       </div>
 
       {/* ── Dialogs ── */}

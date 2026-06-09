@@ -21,6 +21,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { WorkCenterPicker, WorkCenterNode } from '@/components/ui/workcenter-picker';
 import { api } from '@/services/api.client';
 import { cn, formatDateTime } from '@/lib/utils';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1531,11 +1534,23 @@ function LiveTab({ machines, reasonTree }: { machines: Machine[]; reasonTree: Re
 function HistoryTab({ machines }: { machines: Machine[] }) {
   const [filters, setFilters] = useState({ machineId: '', dateFrom: '', dateTo: '', search: '' });
   const [page, setPage] = useState(1);
+  const LIMIT = 30;
+
+  const [sortCol, setSortCol] = useState('createdAt');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const handleSort = useCallback((col: string) => {
+    if (col === sortCol) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortCol(col);
+      setSortDir('desc');
+    }
+  }, [sortCol]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['downtime-history', filters, page],
+    queryKey: ['downtime-history', filters, page, sortCol, sortDir],
     queryFn: () => {
-      const p = new URLSearchParams({ isOpen: 'false', limit: '30', page: String(page) });
+      const p = new URLSearchParams({ isOpen: 'false', limit: String(LIMIT), page: String(page), sortBy: sortCol, sortOrder: sortDir });
       if (filters.machineId) p.set('machineId', filters.machineId);
       if (filters.dateFrom) p.set('dateFrom', filters.dateFrom);
       if (filters.dateTo) p.set('dateTo', filters.dateTo);
@@ -1546,11 +1561,16 @@ function HistoryTab({ machines }: { machines: Machine[] }) {
   const events: DowntimeEvent[] = (data as any)?.data ?? (Array.isArray(data) ? data : []);
   const total: number = (data as any)?.total ?? events.length;
 
+  const { sortedData } = useSortedData(events, 'createdAt', 'desc');
+
   const filtered = filters.search
-    ? events.filter(e => e.machine?.name.toLowerCase().includes(filters.search.toLowerCase())
+    ? sortedData.filter(e => e.machine?.name.toLowerCase().includes(filters.search.toLowerCase())
         || e.cause?.name.toLowerCase().includes(filters.search.toLowerCase())
         || e.reason?.toLowerCase().includes(filters.search.toLowerCase()))
-    : events;
+    : sortedData;
+
+  useEffect(() => { setPage(1); }, [sortCol, sortDir]);
+  useEffect(() => { setPage(1); }, [filters.search, filters.machineId, filters.dateFrom, filters.dateTo]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -1589,9 +1609,14 @@ function HistoryTab({ machines }: { machines: Machine[] }) {
             <thead className="bg-muted/30">
               <tr className="text-muted-foreground text-[11px]">
                 <th className="w-6" />
-                {['Reason Code', 'Cause', 'Machine', 'Work Center', 'Start / End', 'Duration', 'OEE Impact', 'Status'].map(h => (
-                  <th key={h} className="px-2 py-2 text-left font-medium">{h}</th>
-                ))}
+                <SortableHeader column="reasonCode" label="Reason Code" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="reason" label="Cause" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="machine" label="Machine" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-2 py-2 text-left font-medium">Work Center</th>
+                <SortableHeader column="startTime" label="Start / End" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="durationMinutes" label="Duration" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-2 py-2 text-left font-medium">OEE Impact</th>
+                <th className="px-2 py-2 text-left font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -1602,13 +1627,7 @@ function HistoryTab({ machines }: { machines: Machine[] }) {
       )}
 
       {/* Pagination */}
-      {total > 30 && (
-        <div className="flex items-center justify-end gap-2 text-xs">
-          <Button variant="outline" size="sm" className="h-7" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
-          <span className="text-muted-foreground">Page {page} / {Math.ceil(total / 30)}</span>
-          <Button variant="outline" size="sm" className="h-7" disabled={page >= Math.ceil(total / 30)} onClick={() => setPage(p => p + 1)}>Next</Button>
-        </div>
-      )}
+      <TablePagination page={page} total={total} limit={LIMIT} onPageChange={setPage} isLoading={isLoading} />
     </div>
   );
 }

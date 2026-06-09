@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Plus, Search, ChevronRight, Download, MoreHorizontal, CheckCircle2, ShieldCheck, Pencil, Trash2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -16,6 +16,8 @@ import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
 
 type CapaType = 'CORRECTIVE' | 'PREVENTIVE';
 type CapaStatus = 'OPEN' | 'IN_PROGRESS' | 'VERIFICATION' | 'CLOSED';

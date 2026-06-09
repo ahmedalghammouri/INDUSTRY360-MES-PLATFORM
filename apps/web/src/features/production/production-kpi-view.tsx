@@ -1,0 +1,726 @@
+'use client';
+
+import React, { useMemo, useState } from 'react';
+import {
+  TrendingUp,
+  TrendingDown,
+  Target,
+  Award,
+  CheckCircle2,
+  Factory,
+  BarChart3,
+  Gauge,
+} from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  ReferenceLine,
+} from 'recharts';
+
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { api } from '@/services/api.client';
+import { cn } from '@/lib/utils';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface DashboardKpis {
+  oee: number;
+  availability: number;
+  performance: number;
+  quality: number;
+  totalOutput: number;
+  activeAlarms: number;
+  oeeTrend: number;
+  availabilityTrend: number;
+  performanceTrend: number;
+  qualityTrend: number;
+  outputTrend: number;
+  alarmTrend: number;
+}
+
+interface OeeRecord {
+  id: string;
+  oee: number;
+  availability: number;
+  performance: number;
+  quality: number;
+  totalOutput: number;
+  recordDate: string;
+  machineId: string;
+  machine: { name: string };
+}
+
+interface WorkOrderItem {
+  id: string;
+  woNumber: string;
+  status: string;
+  plannedQty: number;
+  goodQty: number;
+  scrapQty: number;
+  completedAt: string | null;
+  progress: number;
+}
+
+interface WorkOrdersResponse {
+  data: WorkOrderItem[];
+  total: number;
+}
+
+type Timeframe = 'today' | 'week' | 'month';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function trendColor(trend: number) {
+  if (trend > 0) return 'text-emerald-400';
+  if (trend < 0) return 'text-rose-400';
+  return 'text-slate-400';
+}
+
+function TrendIcon({ trend }: { trend: number }) {
+  if (trend > 0) return <TrendingUp size={14} className="text-emerald-400" />;
+  if (trend < 0) return <TrendingDown size={14} className="text-rose-400" />;
+  return null;
+}
+
+function oeeColor(value: number): string {
+  if (value >= 85) return 'text-emerald-400';
+  if (value >= 65) return 'text-brand-400';
+  if (value >= 45) return 'text-amber-400';
+  return 'text-rose-400';
+}
+
+function statusChip(gap: number) {
+  if (gap >= 0)
+    return (
+      <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">
+        On Target
+      </Badge>
+    );
+  if (gap >= -5)
+    return (
+      <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs">
+        Near Target
+      </Badge>
+    );
+  return (
+    <Badge className="bg-rose-500/20 text-rose-400 border-rose-500/30 text-xs">
+      Below Target
+    </Badge>
+  );
+}
+
+function getISOWeek(date: Date): string {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `W${weekNo}`;
+}
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+interface PrimaryKpiCardProps {
+  title: string;
+  value: number;
+  unit: string;
+  trend: number;
+  target: number;
+  icon: React.ReactNode;
+  benchmarkNote: string;
+}
+
+function PrimaryKpiCard({
+  title,
+  value,
+  unit,
+  trend,
+  target,
+  icon,
+  benchmarkNote,
+}: PrimaryKpiCardProps) {
+  const pct = Math.min(100, (value / target) * 100);
+  const gap = value - target;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-card border border-border/50 rounded-xl p-5 flex flex-col gap-3"
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          {title}
+        </span>
+        <span className="text-muted-foreground/60">{icon}</span>
+      </div>
+
+      <div className="flex items-end gap-2">
+        <span className={cn('text-3xl font-bold tabular-nums', oeeColor(value))}>
+          {value.toFixed(1)}
+        </span>
+        <span className="text-sm text-muted-foreground mb-1">{unit}</span>
+        <div className={cn('flex items-center gap-0.5 ml-auto text-xs font-medium', trendColor(trend))}>
+          <TrendIcon trend={trend} />
+          {trend > 0 ? '+' : ''}
+          {trend.toFixed(1)}%
+        </div>
+      </div>
+
+      {/* Target progress bar */}
+      <div className="space-y-1">
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>vs Target {target}{unit}</span>
+          <span className={cn('font-medium', gap >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+            {gap >= 0 ? '+' : ''}
+            {gap.toFixed(1)}{unit}
+          </span>
+        </div>
+        <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+          <div
+            className={cn(
+              'h-full rounded-full transition-all duration-700',
+              pct >= 100 ? 'bg-emerald-500' : pct >= 80 ? 'bg-amber-500' : 'bg-rose-500',
+            )}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+
+      <p className="text-[10px] text-muted-foreground/60">{benchmarkNote}</p>
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export default function ProductionKpiView() {
+  const [timeframe, setTimeframe] = useState<Timeframe>('month');
+
+  // --- Queries ---
+  const { data: kpis, isLoading: kpisLoading } = useQuery({
+    queryKey: ['dashboard', 'kpis'],
+    queryFn: () => api.get<DashboardKpis>('/dashboard/kpis'),
+    refetchInterval: 60_000,
+  });
+
+  const { data: oeeRecords, isLoading: recordsLoading } = useQuery({
+    queryKey: ['production', 'oee-records', 90],
+    queryFn: () => api.get<OeeRecord[]>('/production/oee-records?limit=90'),
+    refetchInterval: 60_000,
+  });
+
+  const { data: workOrdersResp, isLoading: woLoading } = useQuery({
+    queryKey: ['production', 'work-orders', 200],
+    queryFn: () => api.get<WorkOrdersResponse>('/production/work-orders?limit=200'),
+    refetchInterval: 60_000,
+  });
+
+  // --- Derived metrics ---
+  const workOrders = workOrdersResp?.data ?? [];
+  const totalWOs = workOrdersResp?.total ?? workOrders.length;
+
+  const completedWOs = useMemo(
+    () => workOrders.filter((w) => w.status === 'COMPLETED'),
+    [workOrders],
+  );
+
+  const firstPassYield = useMemo(() => {
+    if (completedWOs.length === 0) return 0;
+    const sum = completedWOs.reduce((acc, w) => {
+      const pq = w.plannedQty > 0 ? (w.goodQty / w.plannedQty) * 100 : 0;
+      return acc + pq;
+    }, 0);
+    return sum / completedWOs.length;
+  }, [completedWOs]);
+
+  const completionRate = totalWOs > 0 ? (completedWOs.length / totalWOs) * 100 : 0;
+
+  const totalScrap = useMemo(
+    () => workOrders.reduce((acc, w) => acc + (w.scrapQty ?? 0), 0),
+    [workOrders],
+  );
+
+  // --- Radar data ---
+  const radarData = useMemo(
+    () => [
+      {
+        subject: 'Availability',
+        Actual: kpis?.availability ?? 0,
+        'World Class': 90,
+      },
+      {
+        subject: 'Performance',
+        Actual: kpis?.performance ?? 0,
+        'World Class': 95,
+      },
+      {
+        subject: 'Quality',
+        Actual: kpis?.quality ?? 0,
+        'World Class': 99,
+      },
+    ],
+    [kpis],
+  );
+
+  // --- KPI target table rows ---
+  const plannedOutput = kpis?.totalOutput ? Math.ceil(kpis.totalOutput * 1.1) : 1000;
+  const kpiRows = useMemo(
+    () => [
+      {
+        metric: 'OEE',
+        actual: kpis?.oee ?? 0,
+        target: 85,
+        unit: '%',
+      },
+      {
+        metric: 'First Pass Yield',
+        actual: firstPassYield,
+        target: 99,
+        unit: '%',
+      },
+      {
+        metric: 'Output',
+        actual: kpis?.totalOutput ?? 0,
+        target: plannedOutput,
+        unit: ' units',
+      },
+      {
+        metric: 'Completion Rate',
+        actual: completionRate,
+        target: 95,
+        unit: '%',
+      },
+    ],
+    [kpis, firstPassYield, completionRate, plannedOutput],
+  );
+
+  // --- Production volume by week (BarChart) ---
+  const volumeByWeek = useMemo(() => {
+    const map: Record<string, { week: string; planned: number; actual: number }> = {};
+    completedWOs.forEach((w) => {
+      const d = w.completedAt ? new Date(w.completedAt) : new Date();
+      const key = getISOWeek(d);
+      if (!map[key]) map[key] = { week: key, planned: 0, actual: 0 };
+      map[key].planned += w.plannedQty ?? 0;
+      map[key].actual += w.goodQty ?? 0;
+    });
+    return Object.values(map)
+      .sort((a, b) => a.week.localeCompare(b.week))
+      .slice(-12);
+  }, [completedWOs]);
+
+  // --- Quality trend from OEE records ---
+  const qualityTrend = useMemo(() => {
+    if (!oeeRecords) return [];
+    return [...oeeRecords]
+      .sort((a, b) => new Date(a.recordDate).getTime() - new Date(b.recordDate).getTime())
+      .map((r) => ({
+        date: new Date(r.recordDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        quality: Number(r.quality.toFixed(1)),
+      }));
+  }, [oeeRecords]);
+
+  // --- Top 10 WOs by FPY ---
+  const topWOs = useMemo(() => {
+    return [...workOrders]
+      .filter((w) => w.plannedQty > 0)
+      .map((w) => ({
+        ...w,
+        fpy: (w.goodQty / w.plannedQty) * 100,
+        oeeValue: w.progress, // use progress as proxy if oee not on this endpoint
+      }))
+      .sort((a, b) => b.fpy - a.fpy)
+      .slice(0, 10);
+  }, [workOrders]);
+
+  const isLoading = kpisLoading || recordsLoading || woLoading;
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-brand-500/10">
+            <TrendingUp size={18} className="text-brand-400" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold">Production KPI Analytics</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              ISA-95 MES — real-time KPI monitoring &amp; benchmarking
+            </p>
+          </div>
+        </div>
+
+        <Tabs
+          value={timeframe}
+          onValueChange={(v) => setTimeframe(v as Timeframe)}
+        >
+          <TabsList className="h-8">
+            <TabsTrigger value="today" className="text-xs px-3 h-7">
+              Today
+            </TabsTrigger>
+            <TabsTrigger value="week" className="text-xs px-3 h-7">
+              This Week
+            </TabsTrigger>
+            <TabsTrigger value="month" className="text-xs px-3 h-7">
+              This Month
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      {/* Scrollable body */}
+      <div className="flex-1 overflow-auto p-6 space-y-6">
+
+        {/* 1. Primary KPI row */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <PrimaryKpiCard
+            title="OEE"
+            value={kpis?.oee ?? 0}
+            unit="%"
+            trend={kpis?.oeeTrend ?? 0}
+            target={85}
+            icon={<Gauge size={16} />}
+            benchmarkNote="World-class benchmark: 85%"
+          />
+          <PrimaryKpiCard
+            title="First Pass Yield"
+            value={firstPassYield}
+            unit="%"
+            trend={kpis?.qualityTrend ?? 0}
+            target={99}
+            icon={<Award size={16} />}
+            benchmarkNote="Six Sigma benchmark: 99%"
+          />
+          <PrimaryKpiCard
+            title="Total Output"
+            value={kpis?.totalOutput ?? 0}
+            unit=" units"
+            trend={kpis?.outputTrend ?? 0}
+            target={plannedOutput}
+            icon={<Factory size={16} />}
+            benchmarkNote={`Scrap: ${totalScrap.toLocaleString()} units`}
+          />
+          <PrimaryKpiCard
+            title="Order Completion"
+            value={completionRate}
+            unit="%"
+            trend={0}
+            target={95}
+            icon={<CheckCircle2 size={16} />}
+            benchmarkNote={`${completedWOs.length} / ${totalWOs} work orders`}
+          />
+        </div>
+
+        {/* 2. OEE Components — Radar + Target table */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Radar chart — col-span-2 */}
+          <div className="lg:col-span-2 bg-card border border-border/50 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <BarChart3 size={15} className="text-brand-400" />
+              <h2 className="text-sm font-semibold">OEE Components vs World Class</h2>
+            </div>
+            <ResponsiveContainer width="100%" height={280}>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="hsl(var(--border))" />
+                <PolarAngleAxis
+                  dataKey="subject"
+                  tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                />
+                <Radar
+                  name="Actual"
+                  dataKey="Actual"
+                  stroke="#6366f1"
+                  fill="#6366f1"
+                  fillOpacity={0.3}
+                  dot={{ r: 3, fill: '#6366f1' }}
+                />
+                <Radar
+                  name="World Class"
+                  dataKey="World Class"
+                  stroke="#10b981"
+                  fill="#10b981"
+                  fillOpacity={0.1}
+                  strokeDasharray="4 2"
+                  dot={{ r: 3, fill: '#10b981' }}
+                />
+                <Legend
+                  wrapperStyle={{ fontSize: 11, color: 'hsl(var(--muted-foreground))' }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: 'hsl(var(--card))',
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: 8,
+                    fontSize: 12,
+                  }}
+                  formatter={(val: number) => [`${val.toFixed(1)}%`]}
+                />
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* KPI Target table — col-span-1 */}
+          <div className="bg-card border border-border/50 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Target size={15} className="text-brand-400" />
+              <h2 className="text-sm font-semibold">KPI Targets</h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border/50">
+                    {['Metric', 'Actual', 'Target', 'Gap', 'Status'].map((h) => (
+                      <th
+                        key={h}
+                        className="text-left pb-2 font-medium text-muted-foreground pr-2 last:pr-0"
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/30">
+                  {kpiRows.map((row) => {
+                    const gap = row.actual - row.target;
+                    return (
+                      <tr key={row.metric} className="h-10">
+                        <td className="pr-2 font-medium text-foreground/80">{row.metric}</td>
+                        <td className={cn('pr-2 tabular-nums font-bold', oeeColor(row.actual))}>
+                          {row.actual.toFixed(1)}{row.unit}
+                        </td>
+                        <td className="pr-2 text-muted-foreground tabular-nums">
+                          {row.target}{row.unit}
+                        </td>
+                        <td
+                          className={cn(
+                            'pr-2 tabular-nums font-medium',
+                            gap >= 0 ? 'text-emerald-400' : 'text-rose-400',
+                          )}
+                        >
+                          {gap >= 0 ? '+' : ''}
+                          {gap.toFixed(1)}{row.unit}
+                        </td>
+                        <td>{statusChip(gap)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Production Volume BarChart */}
+        <div className="bg-card border border-border/50 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 size={15} className="text-brand-400" />
+            <h2 className="text-sm font-semibold">Production Volume by Week</h2>
+            <span className="ml-auto text-xs text-muted-foreground">Planned vs Actual Output</span>
+          </div>
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={volumeByWeek} barGap={4} barCategoryGap="25%">
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="hsl(var(--border))"
+                vertical={false}
+              />
+              <XAxis
+                dataKey="week"
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                width={48}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11, color: 'hsl(var(--muted-foreground))' }} />
+              <Bar dataKey="planned" name="Planned" fill="#6366f1" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="actual" name="Actual" fill="#10b981" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* 4. Quality Trend LineChart */}
+        <div className="bg-card border border-border/50 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp size={15} className="text-brand-400" />
+            <h2 className="text-sm font-semibold">Quality Trend (OEE Records)</h2>
+            <span className="ml-auto text-xs text-muted-foreground">Last 90 records</span>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={qualityTrend}>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="hsl(var(--border))"
+                vertical={false}
+              />
+              <XAxis
+                dataKey="date"
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                domain={[0, 100]}
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                width={36}
+                unit="%"
+              />
+              <Tooltip
+                contentStyle={{
+                  background: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+                formatter={(val: number) => [`${val.toFixed(1)}%`, 'Quality']}
+              />
+              <ReferenceLine y={99} stroke="#10b981" strokeDasharray="4 2" label={{ value: 'Target', fontSize: 10, fill: '#10b981' }} />
+              <Line
+                type="monotone"
+                dataKey="quality"
+                name="Quality"
+                stroke="#6366f1"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4, fill: '#6366f1' }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* 5. Top Performing Work Orders table */}
+        <div className="bg-card border border-border/50 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Award size={15} className="text-brand-400" />
+            <h2 className="text-sm font-semibold">Top Performing Work Orders</h2>
+            <span className="ml-auto text-xs text-muted-foreground">Top 10 by First Pass Yield</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border/50">
+                  {['WO #', 'Product (SKU)', 'Planned', 'Output', 'FPY', 'Status'].map((h) => (
+                    <th
+                      key={h}
+                      className="text-left pb-2 font-medium text-muted-foreground pr-3 last:pr-0"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/30">
+                {topWOs.map((w, idx) => (
+                  <motion.tr
+                    key={w.id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.03 }}
+                    className="h-10 hover:bg-accent/30 transition-colors"
+                  >
+                    <td className="pr-3 font-mono font-medium text-foreground/90">
+                      {w.woNumber}
+                    </td>
+                    <td className="pr-3 text-muted-foreground">
+                      SKU-{w.id.slice(-6).toUpperCase()}
+                    </td>
+                    <td className="pr-3 tabular-nums text-muted-foreground">
+                      {(w.plannedQty ?? 0).toLocaleString()}
+                    </td>
+                    <td className="pr-3 tabular-nums font-medium text-foreground/80">
+                      {(w.goodQty ?? 0).toLocaleString()}
+                    </td>
+                    <td className="pr-3">
+                      <span
+                        className={cn(
+                          'inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border',
+                          w.fpy >= 99
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            : w.fpy >= 95
+                            ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                            : 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+                        )}
+                      >
+                        {w.fpy.toFixed(1)}%
+                      </span>
+                    </td>
+                    <td>
+                      <Badge
+                        variant={
+                          w.status === 'COMPLETED'
+                            ? 'default'
+                            : w.status === 'IN_PROGRESS'
+                            ? 'default'
+                            : 'secondary'
+                        }
+                        className={cn(
+                          'text-[10px]',
+                          w.status === 'COMPLETED' && 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+                          w.status === 'IN_PROGRESS' && 'bg-brand-500/20 text-brand-400 border-brand-500/30',
+                        )}
+                      >
+                        {w.status.replace('_', ' ')}
+                      </Badge>
+                    </td>
+                  </motion.tr>
+                ))}
+                {topWOs.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="text-center py-8 text-muted-foreground">
+                      {isLoading ? 'Loading work orders…' : 'No work orders found'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}

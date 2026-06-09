@@ -21,6 +21,8 @@ import { TableRowActions } from '@/components/ui/table-row-actions';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { MachineTreePicker } from '@/components/ui/machine-tree-picker';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
 
@@ -144,9 +146,9 @@ export function MaintenanceWorkOrdersView() {
   // ── Queries ─────────────────────────────────────────────────
 
   const { data, isLoading } = useQuery({
-    queryKey: ['maintenance', 'work-orders', { search, status: statusFilter, page }],
+    queryKey: ['maintenance', 'work-orders', { search, status: statusFilter, page, sortBy: 'createdAt', sortOrder: 'desc' }],
     queryFn: () => api.get('/maintenance/work-orders', {
-      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page },
+      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page, sortBy: 'createdAt', sortOrder: 'desc' },
     }),
     staleTime: 15_000,
   });

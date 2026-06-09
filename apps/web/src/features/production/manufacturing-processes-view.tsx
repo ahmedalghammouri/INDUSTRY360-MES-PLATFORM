@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { useSortedData } from '@/lib/use-sorted-data';
 import { WorkCenterPicker } from '@/components/ui/workcenter-picker';
 
 // ── Types ─────────────────────────────────────────────────────
@@ -644,9 +645,21 @@ export function ManufacturingProcessesView() {
   // Revert to draft confirm
   const [revertTarget, setRevertTarget] = useState<ManufacturingProcess | null>(null);
 
+  const [sortCol, setSortCol] = useState('createdAt');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (col: string) => {
+    if (col === sortCol) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortCol(col);
+      setSortDir('desc');
+    }
+  };
+
   const { data: processData, isLoading } = useQuery({
-    queryKey: ['manufacturing-processes', page],
-    queryFn: () => api.get(`/inventory/manufacturing-processes?page=${page}&limit=20`),
+    queryKey: ['manufacturing-processes', page, sortCol, sortDir],
+    queryFn: () => api.get(`/inventory/manufacturing-processes?page=${page}&limit=20&sortBy=${sortCol}&sortOrder=${sortDir}`),
   });
 
   const { data: skusData } = useQuery({
@@ -658,6 +671,8 @@ export function ManufacturingProcessesView() {
   const processes: ManufacturingProcess[] = (processData as any)?.data ?? [];
   const total: number = (processData as any)?.total ?? 0;
   const skus: any[] = (skusData as any)?.data ?? [];
+
+  const { sortedData } = useSortedData(processes, sortCol, sortDir);
 
   const resetCreate = () => {
     setNewProcess({ skuId: '', version: '1.0', name: '', description: '' });
@@ -690,7 +705,10 @@ export function ManufacturingProcessesView() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['manufacturing-processes'] }); setRevertTarget(null); },
   });
 
-  const filteredProcesses = processes.filter(p =>
+  useEffect(() => { setPage(1); }, [sortCol, sortDir]);
+  useEffect(() => { setPage(1); }, [search]);
+
+  const filteredProcesses = sortedData.filter(p =>
     !search || p.sku.name.toLowerCase().includes(search.toLowerCase()) || p.name.toLowerCase().includes(search.toLowerCase()),
   );
 

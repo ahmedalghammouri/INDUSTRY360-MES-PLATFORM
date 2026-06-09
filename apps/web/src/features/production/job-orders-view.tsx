@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Layers, Search, Play, Pause, CheckSquare, Circle,
   Clock, Cpu, ChevronRight, RefreshCw,
@@ -18,6 +18,8 @@ import {
 } from '@/components/ui/select';
 import { api } from '@/services/api.client';
 import { formatDate, formatDateTime } from '@/lib/utils';
+import { useSortedData } from '@/lib/use-sorted-data';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 // ─────────────────────────────────────────────────────────────
 // Types & constants
@@ -577,10 +579,25 @@ export function JobOrdersView() {
   const [statusFilter, setStatus]  = useState<string>('ALL');
   const [page,         setPage]    = useState(1);
 
+  // Sorting state — declared before useQuery so sortCol/sortDir are in queryKey
+  const { sortedData: _sortedForKey, sortCol, sortDir, handleSort } = useSortedData(
+    [] as JobOrder[],
+    'createdAt',
+    'desc',
+  );
+
+  // Reset to page 1 whenever sort, search, or status filter changes
+  useEffect(() => { setPage(1); }, [sortCol, sortDir]);
+  useEffect(() => { setPage(1); }, [search, statusFilter]);
+
   const { data: rawData, isLoading } = useQuery({
-    queryKey: ['job-orders', statusFilter],
+    queryKey: ['job-orders', statusFilter, sortCol, sortDir],
     queryFn: () => api.get('/production/job-orders', {
-      params: { status: statusFilter === 'ALL' ? undefined : statusFilter },
+      params: {
+        status: statusFilter === 'ALL' ? undefined : statusFilter,
+        sortBy: sortCol,
+        sortOrder: sortDir,
+      },
     }),
     refetchInterval: 15_000,
   });
@@ -592,7 +609,8 @@ export function JobOrdersView() {
   });
   const users: Operator[] = (((usersData as any)?.data) ?? []).map((u: any) => ({ id: u.id, name: u.name, nameAr: u.nameAr }));
 
-  const jobOrders: JobOrder[] = (rawData as any) ?? [];
+  const jobOrdersRaw: JobOrder[] = (rawData as any) ?? [];
+  const { sortedData: jobOrders } = useSortedData(jobOrdersRaw, 'createdAt', 'desc');
 
   const transitionMut = useMutation({
     mutationFn: ({ id, status, qty }: { id: string; status: JOStatus; qty?: number }) =>
@@ -796,7 +814,13 @@ export function JobOrdersView() {
               {' '}·{' '}
               <span className="font-medium text-foreground">{filtered.length}</span> job orders total
             </p>
-            <Pagination page={page} total={totalPages} onChange={setPage} />
+            <TablePagination
+              page={page}
+              total={entries.length}
+              limit={PAGE_SIZE}
+              onPageChange={setPage}
+              isLoading={isLoading}
+            />
           </div>
         </>
       )}

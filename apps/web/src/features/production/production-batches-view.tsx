@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Plus, Search, Download, Filter, FlaskConical, Clock, CheckCircle2, AlertTriangle, Edit3, Trash2, Hash, Package, Eye } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -18,6 +18,8 @@ import { TableRowActions } from '@/components/ui/table-row-actions';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
 
 type BatchStatus = 'ACTIVE' | 'COMPLETED' | 'RELEASED' | 'REJECTED' | 'ON_HOLD' | 'QUARANTINE';
 
@@ -64,10 +66,22 @@ export function ProductionBatchesView() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const [sortCol, setSortCol] = useState('createdAt');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const handleSort = (col: string) => {
+    if (col === sortCol) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortCol(col);
+      setSortDir('desc');
+    }
+    setPage(1);
+  };
+
   const { data, isLoading } = useQuery({
-    queryKey: ['production', 'batches', { search, status: statusFilter, page }],
+    queryKey: ['production', 'batches', { search, status: statusFilter, page, sortCol, sortDir }],
     queryFn: () => api.get('/production/batches', {
-      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page },
+      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page, sortBy: sortCol, sortOrder: sortDir },
     }),
     staleTime: 15_000,
   });
@@ -89,6 +103,8 @@ export function ProductionBatchesView() {
   const total: number = (data as any)?.total ?? 0;
   const skus: SKU[] = (skusData as any)?.data ?? [];
   const workOrders: WorkOrder[] = (workOrdersData as any)?.data ?? [];
+
+  const { sortedData } = useSortedData(batches, 'createdAt', 'desc');
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/production/batches', dto),
@@ -213,9 +229,16 @@ export function ProductionBatchesView() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent border-border/30">
-                {['Batch #', 'Product', 'Status', 'Quantity', 'Work Order', 'Lot #', 'Created', 'Yield', 'Scrap', ''].map(h => (
-                  <TableHead key={h} className="text-[11px]">{h}</TableHead>
-                ))}
+                <SortableHeader column="batchNumber" label="Batch #" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="sku" label="Product" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="status" label="Status" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader column="quantity" label="Quantity" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-4 py-3 text-left text-[11px]">Work Order</th>
+                <th className="px-4 py-3 text-left text-[11px]">Lot #</th>
+                <SortableHeader column="createdAt" label="Created" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-4 py-3 text-left text-[11px]">Yield</th>
+                <th className="px-4 py-3 text-left text-[11px]">Scrap</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -227,12 +250,12 @@ export function ProductionBatchesView() {
                     ))}
                   </TableRow>
                 ))
-              ) : batches.length === 0 ? (
+              ) : sortedData.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">No batches found</TableCell>
                 </TableRow>
               ) : (
-                batches.map(batch => {
+                sortedData.map(batch => {
                   const cfg = STATUS_CONFIG[batch.status] ?? { label: batch.status, variant: 'outline' as const };
                   const yieldPct = batch.yieldPct ?? (batch.quantity > 0 ? Math.round((batch.goodQuantity / batch.quantity) * 100) : 0);
                   const scrapPct = batch.scrapPct ?? (batch.quantity > 0 ? Math.round((batch.scrapQuantity / batch.quantity) * 100) : 0);

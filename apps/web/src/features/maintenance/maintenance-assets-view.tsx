@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Plus, Search, Factory, Cpu, Activity, Layers, Shield, Calendar, Link2, Unlink } from 'lucide-react';
@@ -15,6 +15,9 @@ import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
+import { SortableHeader } from '@/components/ui/sortable-header';
+import { useSortedData } from '@/lib/use-sorted-data';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 interface Area { id: string; name: string; code: string }
 interface Line { id: string; name: string; code: string; areaId: string }
