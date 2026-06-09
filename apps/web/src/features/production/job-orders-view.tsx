@@ -7,6 +7,7 @@ import {
   AlertCircle, XCircle, Loader2, ClipboardList,
   Filter, ChevronLeft, GitMerge, ArrowDownCircle,
   GitBranch, Shuffle, Check, X, Package, Box, Boxes,
+  User, BarChart2, Monitor, AlertTriangle,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -25,6 +26,8 @@ import { formatDate, formatDateTime } from '@/lib/utils';
 type JOStatus = 'SCHEDULED' | 'READY' | 'EXECUTING' | 'PAUSED' | 'COMPLETE' | 'CANCELLED';
 type DepType  = 'FINISH_TO_START' | 'START_TO_START' | 'START_TO_FINISH' | 'FINISH_TO_FINISH' | null;
 
+interface Operator { id: string; name: string; nameAr?: string }
+
 interface JobOrder {
   id: string;
   sequenceOrder: number;
@@ -40,6 +43,9 @@ interface JobOrder {
   outputUnit?: string;
   actualQtyGood: number;
   actualQtyRejected: number;
+  scrapReason?: string;
+  operatorId?: string;
+  operator?: Operator;
   notes?: string;
   workOrder?: {
     id: string;
@@ -55,6 +61,10 @@ interface JobOrder {
     status: JOStatus;
     actualStart?: string;
   };
+  joQuality?: number;
+  joPerformance?: number;
+  joAvailability?: number;
+  joOEE?: number;
 }
 
 const JO_STATUS: Record<JOStatus, { label: string; color: string; dot: string }> = {
@@ -134,20 +144,37 @@ function UnitBadge({ unit }: { unit: string | undefined }) {
 }
 
 function WOCard({
-  wo, jobs, onTransition, pending,
+  wo, jobs, onTransition, onCount, onAssignOperator, users, pending,
 }: {
   wo: JobOrder['workOrder'];
   jobs: JobOrder[];
   onTransition: (id: string, status: JOStatus, qty?: number) => void;
+  onCount: (id: string, good: number, scrap: number, reason: string, category?: string) => void;
+  onAssignOperator: (id: string, operatorId: string | null) => void;
+  users: Operator[];
   pending: boolean;
 }) {
-  const [completingId, setCompletingId] = useState<string | null>(null);
-  const [completeQty, setCompleteQty]   = useState<string>('');
+  const [completingId,   setCompletingId]   = useState<string | null>(null);
+  const [completeQty,    setCompleteQty]    = useState<string>('');
+  const [loggingId,      setLoggingId]      = useState<string | null>(null);
+  const [logGood,        setLogGood]        = useState<string>('');
+  const [logScrap,       setLogScrap]       = useState<string>('');
+  const [logReason,      setLogReason]      = useState<string>('');
+  const [logCategory,    setLogCategory]    = useState<string>('OTHER');
+  const [assigningOpId,  setAssigningOpId]  = useState<string | null>(null);
 
   const sorted   = [...jobs].sort((a, b) => a.sequenceOrder - b.sequenceOrder);
   const done     = jobs.filter((j) => j.status === 'COMPLETE').length;
   const running  = jobs.filter((j) => j.status === 'EXECUTING').length;
   const progress = jobs.length > 0 ? Math.round((done / jobs.length) * 100) : 0;
+
+  const openLog = (jo: JobOrder) => {
+    setLoggingId(jo.id);
+    setLogGood(String(jo.actualQtyGood || ''));
+    setLogScrap(String(jo.actualQtyRejected || ''));
+    setLogReason(jo.scrapReason || '');
+    setCompletingId(null);
+  };
 
   return (
     <div className="glass-card rounded-2xl overflow-hidden flex flex-col">
@@ -184,137 +211,273 @@ function WOCard({
       {/* Job order rows */}
       <div className="divide-y divide-border/20 flex-1">
         {sorted.map((jo, idx) => {
-          const next = VALID_NEXT[jo.status] ?? [];
+          const next      = VALID_NEXT[jo.status] ?? [];
           const isBlocked = jo.status === 'SCHEDULED';
           const isActive  = jo.status === 'EXECUTING';
+          const canLog    = ['EXECUTING', 'PAUSED'].includes(jo.status);
 
           return (
-            <div
-              key={jo.id}
-              className={`px-4 py-2.5 flex items-center gap-2 transition-colors
-                ${isActive ? 'bg-green-500/5' : ''}
-                ${isBlocked ? 'opacity-60' : ''}
-              `}
-            >
-              {/* Sequence + dep connector */}
-              <div className="flex flex-col items-center w-8 shrink-0">
-                {idx > 0 && <DepBadge type={jo.depType} />}
-                <span className="text-[10px] font-mono text-brand-400 mt-0.5">{jo.sequenceOrder}</span>
-              </div>
-
-              {/* Operation + machine + qty */}
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium truncate">{jo.operationName}</p>
-                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                  {jo.machine ? (
-                    <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
-                      <Cpu className="w-2.5 h-2.5" />{jo.machine.name}
-                    </span>
-                  ) : jo.workCenter ? (
-                    <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
-                      <Layers className="w-2.5 h-2.5" />{jo.workCenter.name}
-                    </span>
-                  ) : null}
-                  {isBlocked && jo.predecessor && (
-                    <span className="text-[10px] text-amber-400/70 ml-1">
-                      ⏳ {jo.predecessor.operationName}
-                    </span>
-                  )}
+            <div key={jo.id}>
+              {/* Main row */}
+              <div
+                className={`px-4 py-2.5 flex items-center gap-2 transition-colors
+                  ${isActive ? 'bg-green-500/5' : ''}
+                  ${isBlocked ? 'opacity-60' : ''}
+                `}
+              >
+                {/* Sequence + dep connector */}
+                <div className="flex flex-col items-center w-8 shrink-0">
+                  {idx > 0 && <DepBadge type={jo.depType} />}
+                  <span className="text-[10px] font-mono text-brand-400 mt-0.5">{jo.sequenceOrder}</span>
                 </div>
-                {/* Qty progress row */}
-                {(jo.plannedQtyOut ?? 0) > 0 && (
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <div className="w-14 h-0.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${jo.status === 'COMPLETE' ? 'bg-emerald-500' : 'bg-brand-500'}`}
-                        style={{ width: `${Math.min(100, ((jo.actualQtyGood) / (jo.plannedQtyOut ?? 1)) * 100)}%` }}
-                      />
-                    </div>
-                    <span className="text-[10px] tabular-nums text-muted-foreground whitespace-nowrap">
-                      {jo.actualQtyGood} / {jo.plannedQtyOut}
-                    </span>
-                    <UnitBadge unit={jo.outputUnit} />
+
+                {/* Operation + machine + qty + operator */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">{jo.operationName}</p>
+                  <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                    {jo.machine ? (
+                      <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                        <Cpu className="w-2.5 h-2.5" />{jo.machine.name}
+                      </span>
+                    ) : jo.workCenter ? (
+                      <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                        <Layers className="w-2.5 h-2.5" />{jo.workCenter.name}
+                      </span>
+                    ) : null}
+                    {isBlocked && jo.predecessor && (
+                      <span className="text-[10px] text-amber-400/70 ml-1">
+                        ⏳ {jo.predecessor.operationName}
+                      </span>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Status */}
-              <StatusBadge status={jo.status} />
+                  {/* Qty progress */}
+                  {(jo.plannedQtyOut ?? 0) > 0 && (
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <div className="w-14 h-0.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${jo.status === 'COMPLETE' ? 'bg-emerald-500' : 'bg-brand-500'}`}
+                          style={{ width: `${Math.min(100, (jo.actualQtyGood / (jo.plannedQtyOut ?? 1)) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] tabular-nums text-muted-foreground whitespace-nowrap">
+                        {jo.actualQtyGood}
+                        {jo.actualQtyRejected > 0 && (
+                          <span className="text-red-400/70"> +{jo.actualQtyRejected}✗</span>
+                        )}
+                        {' / '}{jo.plannedQtyOut}
+                      </span>
+                      <UnitBadge unit={jo.outputUnit} />
+                      {jo.joOEE != null && (
+                        <span className={`text-[9px] font-bold px-1 py-0.5 rounded border tabular-nums ${
+                          jo.joOEE >= 85
+                            ? 'text-green-400 bg-green-400/10 border-green-400/30'
+                            : jo.joOEE >= 60
+                            ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30'
+                            : 'text-red-400 bg-red-400/10 border-red-400/30'
+                        }`}>
+                          OEE {Math.round(jo.joOEE)}%
+                        </span>
+                      )}
+                    </div>
+                  )}
 
-              {/* Action buttons */}
-              <div className="flex items-center gap-0.5 shrink-0">
-                {next.includes('EXECUTING') && (
-                  <button
-                    disabled={pending}
-                    onClick={() => onTransition(jo.id, 'EXECUTING')}
-                    title="Start"
-                    className="w-5 h-5 rounded flex items-center justify-center text-green-400 hover:bg-green-400/15 disabled:opacity-40 transition-colors"
-                  >
-                    <Play className="w-3 h-3 fill-current" />
-                  </button>
-                )}
-                {next.includes('PAUSED') && (
-                  <button
-                    disabled={pending}
-                    onClick={() => onTransition(jo.id, 'PAUSED')}
-                    title="Pause"
-                    className="w-5 h-5 rounded flex items-center justify-center text-amber-400 hover:bg-amber-400/15 disabled:opacity-40 transition-colors"
-                  >
-                    <Pause className="w-3 h-3" />
-                  </button>
-                )}
-                {/* Complete: inline qty input → confirm */}
-                {next.includes('COMPLETE') && completingId === jo.id ? (
-                  <>
-                    <input
-                      type="number"
-                      autoFocus
-                      min={0}
-                      value={completeQty}
-                      placeholder={String(Math.round(jo.plannedQtyOut ?? 0) || '')}
-                      onChange={(e) => setCompleteQty(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
+                  {/* Operator chip */}
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <User className="w-2.5 h-2.5 text-muted-foreground/50 shrink-0" />
+                    {assigningOpId === jo.id ? (
+                      <select
+                        autoFocus
+                        defaultValue={jo.operatorId ?? ''}
+                        onChange={(e) => {
+                          onAssignOperator(jo.id, e.target.value || null);
+                          setAssigningOpId(null);
+                        }}
+                        onBlur={() => setAssigningOpId(null)}
+                        className="text-[10px] bg-background border border-brand-400/40 rounded px-1 py-0.5 focus:outline-none max-w-[140px]"
+                      >
+                        <option value="">— Unassign —</option>
+                        {users.map((u) => (
+                          <option key={u.id} value={u.id}>{u.name}</option>
+                        ))}
+                      </select>
+                    ) : jo.operator ? (
+                      <button
+                        onClick={() => setAssigningOpId(jo.id)}
+                        className="text-[10px] text-muted-foreground hover:text-brand-400 transition-colors truncate max-w-[120px]"
+                        title="Click to change operator"
+                      >
+                        {jo.operator.name}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setAssigningOpId(jo.id)}
+                        className="text-[10px] text-muted-foreground/40 hover:text-brand-400 transition-colors italic"
+                      >
+                        assign operator
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Status */}
+                <StatusBadge status={jo.status} />
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-0.5 shrink-0">
+                  {/* Log count button */}
+                  {canLog && (
+                    <button
+                      onClick={() => loggingId === jo.id ? setLoggingId(null) : openLog(jo)}
+                      title="Log good / scrap count"
+                      className={`w-5 h-5 rounded flex items-center justify-center transition-colors
+                        ${loggingId === jo.id ? 'text-brand-400 bg-brand-400/15' : 'text-muted-foreground hover:text-brand-400 hover:bg-brand-400/10'}`}
+                    >
+                      <BarChart2 className="w-3 h-3" />
+                    </button>
+                  )}
+                  {next.includes('EXECUTING') && (
+                    <button
+                      disabled={pending}
+                      onClick={() => onTransition(jo.id, 'EXECUTING')}
+                      title="Start"
+                      className="w-5 h-5 rounded flex items-center justify-center text-green-400 hover:bg-green-400/15 disabled:opacity-40 transition-colors"
+                    >
+                      <Play className="w-3 h-3 fill-current" />
+                    </button>
+                  )}
+                  {next.includes('PAUSED') && (
+                    <button
+                      disabled={pending}
+                      onClick={() => onTransition(jo.id, 'PAUSED')}
+                      title="Pause"
+                      className="w-5 h-5 rounded flex items-center justify-center text-amber-400 hover:bg-amber-400/15 disabled:opacity-40 transition-colors"
+                    >
+                      <Pause className="w-3 h-3" />
+                    </button>
+                  )}
+                  {/* Complete: inline qty input → confirm */}
+                  {next.includes('COMPLETE') && completingId === jo.id ? (
+                    <>
+                      <input
+                        type="number"
+                        autoFocus
+                        min={0}
+                        value={completeQty}
+                        placeholder={String(Math.round(jo.plannedQtyOut ?? 0) || '')}
+                        onChange={(e) => setCompleteQty(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const qty = parseFloat(completeQty) || jo.plannedQtyOut || 0;
+                            onTransition(jo.id, 'COMPLETE', qty);
+                            setCompletingId(null); setCompleteQty('');
+                          }
+                          if (e.key === 'Escape') { setCompletingId(null); setCompleteQty(''); }
+                        }}
+                        className="w-14 h-5 text-[10px] bg-background/60 border border-border rounded px-1 text-center focus:outline-none focus:border-brand-400"
+                      />
+                      <button
+                        disabled={pending}
+                        onClick={() => {
                           const qty = parseFloat(completeQty) || jo.plannedQtyOut || 0;
                           onTransition(jo.id, 'COMPLETE', qty);
                           setCompletingId(null); setCompleteQty('');
-                        }
-                        if (e.key === 'Escape') { setCompletingId(null); setCompleteQty(''); }
-                      }}
-                      className="w-14 h-5 text-[10px] bg-background/60 border border-border rounded px-1 text-center focus:outline-none focus:border-brand-400"
-                    />
+                        }}
+                        className="w-5 h-5 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-400/15 disabled:opacity-40"
+                      >
+                        <Check className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => { setCompletingId(null); setCompleteQty(''); }}
+                        className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:bg-slate-400/15"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </>
+                  ) : next.includes('COMPLETE') ? (
                     <button
                       disabled={pending}
                       onClick={() => {
-                        const qty = parseFloat(completeQty) || jo.plannedQtyOut || 0;
-                        onTransition(jo.id, 'COMPLETE', qty);
-                        setCompletingId(null); setCompleteQty('');
+                        setCompletingId(jo.id);
+                        setCompleteQty(String(Math.round(jo.plannedQtyOut ?? jo.plannedQtyIn ?? 0) || ''));
+                        setLoggingId(null);
                       }}
-                      className="w-5 h-5 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-400/15 disabled:opacity-40"
+                      title={`Complete — enter actual output qty (${jo.outputUnit ?? ''})`}
+                      className="w-5 h-5 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-400/15 disabled:opacity-40 transition-colors"
                     >
-                      <Check className="w-3 h-3" />
+                      <CheckSquare className="w-3 h-3" />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* Inline count log form */}
+              {loggingId === jo.id && (
+                <div className="px-4 py-3 bg-brand-500/5 border-t border-brand-400/20 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 space-y-1">
+                      <label className="text-[10px] text-green-400 font-medium flex items-center gap-0.5">
+                        <Check className="w-2.5 h-2.5" />Good count
+                      </label>
+                      <input
+                        type="number" min={0}
+                        value={logGood}
+                        onChange={(e) => setLogGood(e.target.value)}
+                        className="w-full h-7 text-xs bg-background/60 border border-green-500/30 rounded px-2 focus:outline-none focus:border-green-400 text-center tabular-nums"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <label className="text-[10px] text-red-400 font-medium flex items-center gap-0.5">
+                        <X className="w-2.5 h-2.5" />Scrap count
+                      </label>
+                      <input
+                        type="number" min={0}
+                        value={logScrap}
+                        onChange={(e) => setLogScrap(e.target.value)}
+                        className="w-full h-7 text-xs bg-background/60 border border-red-500/30 rounded px-2 focus:outline-none focus:border-red-400 text-center tabular-nums"
+                      />
+                    </div>
+                  </div>
+                  {parseFloat(logScrap) > 0 && (
+                    <div className="space-y-1.5">
+                      <select
+                        value={logCategory}
+                        onChange={(e) => setLogCategory(e.target.value)}
+                        className="w-full h-7 text-xs bg-background/60 border border-border rounded px-2 focus:outline-none focus:border-red-400 text-muted-foreground"
+                      >
+                        {['QUALITY','SETUP','DAMAGE','OVERRUN','MATERIAL','MACHINE','OPERATOR','OTHER'].map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Scrap reason…"
+                        value={logReason}
+                        onChange={(e) => setLogReason(e.target.value)}
+                        className="w-full h-7 text-xs bg-background/60 border border-border rounded px-2 focus:outline-none focus:border-brand-400 placeholder:text-muted-foreground/40"
+                      />
+                    </div>
+                  )}
+                  <div className="flex gap-1.5">
+                    <button
+                      disabled={pending}
+                      onClick={() => {
+                        onCount(jo.id, parseFloat(logGood) || 0, parseFloat(logScrap) || 0, logReason, logCategory);
+                        setLoggingId(null);
+                      }}
+                      className="flex-1 h-7 text-xs font-medium rounded bg-brand-500/20 hover:bg-brand-500/30 border border-brand-400/30 text-brand-400 flex items-center justify-center gap-1 disabled:opacity-40 transition-colors"
+                    >
+                      <Check className="w-3 h-3" />Save
                     </button>
                     <button
-                      onClick={() => { setCompletingId(null); setCompleteQty(''); }}
-                      className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:bg-slate-400/15"
+                      onClick={() => setLoggingId(null)}
+                      className="h-7 px-3 text-xs text-muted-foreground hover:text-foreground rounded border border-border transition-colors"
                     >
                       <X className="w-3 h-3" />
                     </button>
-                  </>
-                ) : next.includes('COMPLETE') ? (
-                  <button
-                    disabled={pending}
-                    onClick={() => {
-                      setCompletingId(jo.id);
-                      setCompleteQty(String(Math.round(jo.plannedQtyOut ?? jo.plannedQtyIn ?? 0) || ''));
-                    }}
-                    title={`Complete — enter actual output qty (${jo.outputUnit ?? ''})`}
-                    className="w-5 h-5 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-400/15 disabled:opacity-40 transition-colors"
-                  >
-                    <CheckSquare className="w-3 h-3" />
-                  </button>
-                ) : null}
-              </div>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -422,6 +585,13 @@ export function JobOrdersView() {
     refetchInterval: 15_000,
   });
 
+  const { data: usersData } = useQuery({
+    queryKey: ['users-list'],
+    queryFn: () => api.get('/users', { params: { limit: 200 } }),
+    staleTime: 300_000,
+  });
+  const users: Operator[] = (((usersData as any)?.data) ?? []).map((u: any) => ({ id: u.id, name: u.name, nameAr: u.nameAr }));
+
   const jobOrders: JobOrder[] = (rawData as any) ?? [];
 
   const transitionMut = useMutation({
@@ -441,6 +611,39 @@ export function JobOrdersView() {
       description: e?.response?.data?.message ?? 'Dependency constraint not met',
     }),
   });
+
+  const countMut = useMutation({
+    mutationFn: ({ id, good, scrap, reason, category }: { id: string; good: number; scrap: number; reason: string; category?: string }) =>
+      api.patch(`/production/job-orders/${id}/output`, {
+        actualQtyGood: good,
+        actualQtyRejected: scrap,
+        scrapReason: reason,
+        scrapCategory: category ?? 'OTHER',
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['job-orders'] });
+      qc.invalidateQueries({ queryKey: ['work-orders'] });
+      toast({ title: 'Count saved' });
+    },
+    onError: (e: any) => toast({
+      variant: 'destructive',
+      title: 'Failed to save count',
+      description: e?.response?.data?.message,
+    }),
+  });
+
+  const operatorMut = useMutation({
+    mutationFn: ({ id, operatorId }: { id: string; operatorId: string | null }) =>
+      api.patch(`/production/job-orders/${id}/operator`, { operatorId }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['job-orders'] }),
+    onError: (e: any) => toast({
+      variant: 'destructive',
+      title: 'Failed to assign operator',
+      description: e?.response?.data?.message,
+    }),
+  });
+
+  const isPending = transitionMut.isPending || countMut.isPending || operatorMut.isPending;
 
   // Filter
   const filtered = jobOrders.filter((jo) => {
@@ -485,9 +688,29 @@ export function JobOrdersView() {
             ISA-95 Job Orders — shop floor execution tracking
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['job-orders'] })}>
-          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.open('/shop-floor', '_blank')}
+            className="text-brand-400 border-brand-400/30 hover:bg-brand-400/10"
+          >
+            <Monitor className="w-3.5 h-3.5 mr-1.5" />Shop Floor
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+            className="text-red-400 border-red-400/30 hover:bg-red-400/10"
+          >
+            <a href="/production/scrap-log">
+              <AlertTriangle className="w-3.5 h-3.5 mr-1.5" />Scrap Log
+            </a>
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['job-orders'] })}>
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />Refresh
+          </Button>
+        </div>
       </div>
 
       {/* KPI strip */}
@@ -556,8 +779,11 @@ export function JobOrdersView() {
                 key={woId}
                 wo={wo}
                 jobs={jobs}
+                users={users}
                 onTransition={(id, status, qty) => transitionMut.mutate({ id, status, qty })}
-                pending={transitionMut.isPending}
+                onCount={(id, good, scrap, reason, category) => countMut.mutate({ id, good, scrap, reason, category })}
+                onAssignOperator={(id, operatorId) => operatorMut.mutate({ id, operatorId })}
+                pending={isPending}
               />
             ))}
           </div>

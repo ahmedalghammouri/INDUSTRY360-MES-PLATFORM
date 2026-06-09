@@ -401,16 +401,9 @@ function CreateWODialog({ po, open, onClose }: CreateWODialogProps) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [form, setForm] = useState({
-    machineId: '', plannedQty: String(po.targetQty), priority: po.priority,
-    plannedStart: '', plannedEnd: '', operatorId: '', notes: '',
+    plannedQty: String(po.targetQty), priority: po.priority,
+    plannedStart: '', plannedEnd: '', notes: '',
   });
-
-  const { data: machineData } = useQuery({
-    queryKey: ['machines-for-wo'],
-    queryFn: () => api.get('/hierarchy/machines', { params: { limit: 200 } }),
-    enabled: open, staleTime: 60_000,
-  });
-  const machines: any[] = (machineData as any)?.data ?? (machineData as any) ?? [];
 
   const mut = useMutation({
     mutationFn: (dto: any) => api.post(`/production/production-orders/${po.id}/work-orders`, dto),
@@ -424,11 +417,11 @@ function CreateWODialog({ po, open, onClose }: CreateWODialogProps) {
   });
 
   function handleSubmit() {
-    if (!form.machineId || !form.plannedQty || !form.plannedStart || !form.plannedEnd) {
+    if (!form.plannedQty || !form.plannedStart || !form.plannedEnd) {
       toast({ variant: 'destructive', title: 'Required fields missing' }); return;
     }
     mut.mutate({
-      machineId: form.machineId, plannedQty: parseInt(form.plannedQty, 10),
+      plannedQty: parseInt(form.plannedQty, 10),
       priority: form.priority,
       plannedStart: new Date(form.plannedStart).toISOString(),
       plannedEnd:   new Date(form.plannedEnd).toISOString(),
@@ -446,13 +439,6 @@ function CreateWODialog({ po, open, onClose }: CreateWODialogProps) {
           <DialogDescription>{po.sku?.name} · Target: {po.targetQty.toLocaleString()} {po.unit}</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-4 py-2">
-          <div className="col-span-2 space-y-1.5">
-            <Label>Machine *</Label>
-            <Select value={form.machineId} onValueChange={v => set('machineId', v)}>
-              <SelectTrigger><SelectValue placeholder="Select machine…" /></SelectTrigger>
-              <SelectContent>{machines.map((m: any) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
           <div className="space-y-1.5">
             <Label>Planned Qty *</Label>
             <Input type="number" min={1} value={form.plannedQty} onChange={e => set('plannedQty', e.target.value)} />
@@ -816,11 +802,6 @@ function WOsWithDispatch({ po, actions }: WOsWithDispatchProps) {
                     <span className={cn('text-[10px] font-medium', wcfg.color)}>{wcfg.label}</span>
                   </div>
                   <div className="flex items-center gap-3 text-[10px] text-muted-foreground mb-1.5 pl-5">
-                    {wo.machine && (
-                      <span className="flex items-center gap-1">
-                        <Cpu className="w-3 h-3" />{wo.machine.name}
-                      </span>
-                    )}
                     <span>{wo.plannedQty.toLocaleString()} units</span>
                     <span className="flex items-center gap-1 text-brand-400/60">
                       <Layers className="w-3 h-3" />Dispatch List

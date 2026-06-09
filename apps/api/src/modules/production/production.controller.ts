@@ -523,13 +523,52 @@ export class ProductionController {
   @Patch('job-orders/:id/output')
   @RequirePermissions('production:execute')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Report actual output quantities for an executing/complete job order (no status change)' })
+  @ApiOperation({ summary: 'Report actual output quantities for an executing/paused/complete job order (no status change)' })
   async reportJobOrderOutput(
     @CurrentUser() user: RequestUser,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { actualQtyGood: number; actualQtyRejected?: number },
+    @Body() body: { actualQtyGood: number; actualQtyRejected?: number; scrapReason?: string; scrapCategory?: string },
   ) {
     return this.productionService.reportJobOrderOutput(user.factoryId, id, body);
+  }
+
+  @Get('scrap-logs')
+  @ApiOperation({ summary: 'List scrap log entries with optional filters' })
+  @ApiQuery({ name: 'workOrderId', required: false })
+  @ApiQuery({ name: 'jobOrderId', required: false })
+  @ApiQuery({ name: 'category', required: false })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async listScrapLogs(
+    @CurrentUser() user: RequestUser,
+    @Query('workOrderId') workOrderId?: string,
+    @Query('jobOrderId') jobOrderId?: string,
+    @Query('category') category?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.productionService.listScrapLogs(user.factoryId, {
+      workOrderId,
+      jobOrderId,
+      category,
+      from,
+      to,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @Patch('job-orders/:id/operator')
+  @RequirePermissions('production:execute')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Assign or unassign an operator to a job order' })
+  async assignJobOrderOperator(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { operatorId: string | null },
+  ) {
+    return this.productionService.assignJobOrderOperator(user.factoryId, id, body.operatorId);
   }
 
   @Patch('job-orders/:id/status')

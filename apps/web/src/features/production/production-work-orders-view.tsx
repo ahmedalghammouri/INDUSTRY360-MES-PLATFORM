@@ -5,7 +5,8 @@ import {
   Plus, Download, Filter, Search, Play, Pause,
   CheckCircle, Pencil, Trash2, XCircle, ChevronDown,
   Factory, Cpu, User, Clock, BarChart3, Package,
-  ClipboardCheck, CheckCircle2, AlertCircle,
+  ClipboardCheck, CheckCircle2, AlertCircle, Layers,
+  CheckSquare, Circle, GitBranch,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -21,7 +22,6 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { TableRowActions } from '@/components/ui/table-row-actions';
-import { MachineTreePicker } from '@/components/ui/machine-tree-picker';
 import { api } from '@/services/api.client';
 import { cn, formatDate, formatPercent } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
@@ -59,7 +59,7 @@ interface WorkOrderDetail extends WorkOrder {
 }
 
 const EMPTY_FORM = {
-  skuId: '__none__', machineId: '', machineName: '', operatorId: '__none__',
+  skuId: '__none__', operatorId: '__none__',
   plannedQty: '', plannedStart: '', plannedEnd: '', priority: 'MEDIUM', notes: '',
 };
 
@@ -312,6 +312,7 @@ export function ProductionWorkOrdersView() {
       params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page },
     }),
     staleTime: 15_000,
+    refetchInterval: 30_000,
   });
   const orders: WorkOrder[] = (workOrdersData as any)?.data ?? [];
   const total: number = (workOrdersData as any)?.total ?? 0;
@@ -320,7 +321,8 @@ export function ProductionWorkOrdersView() {
     queryKey: ['production', 'work-orders', viewId],
     queryFn: () => api.get(`/production/work-orders/${viewId}`),
     enabled: !!viewId,
-    staleTime: 30_000,
+    staleTime: 15_000,
+    refetchInterval: viewId ? 15_000 : false,
   });
   const detail = woDetail as WorkOrderDetail | undefined;
 
@@ -407,9 +409,9 @@ export function ProductionWorkOrdersView() {
   });
 
   const handleCreate = () => {
-    if (form.skuId === '__none__' || !form.machineId || !form.plannedQty) return;
+    if (form.skuId === '__none__' || !form.plannedQty) return;
     createMutation.mutate({
-      skuId: form.skuId, machineId: form.machineId,
+      skuId: form.skuId,
       operatorId: form.operatorId !== '__none__' ? form.operatorId : undefined,
       plannedQty: parseInt(form.plannedQty, 10), priority: form.priority,
       plannedStart: form.plannedStart ? new Date(form.plannedStart).toISOString() : new Date().toISOString(),
@@ -466,7 +468,7 @@ export function ProductionWorkOrdersView() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border/30">
-                  {['Order #', 'Product', 'Status', 'Priority', 'Progress', 'Qty', 'Machine', 'Planned End', 'OEE', ''].map(h => (
+                  {['Order #', 'Product', 'Status', 'Priority', 'Progress', 'Qty', 'Planned End', 'OEE', ''].map(h => (
                     <TableHead key={h} className="text-[11px] font-semibold">{h}</TableHead>
                   ))}
                 </TableRow>
@@ -475,14 +477,14 @@ export function ProductionWorkOrdersView() {
                 {isLoading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <TableRow key={i} className="border-border/20">
-                      {Array.from({ length: 10 }).map((_, j) => (
+                      {Array.from({ length: 9 }).map((_, j) => (
                         <TableCell key={j}><div className="shimmer h-3.5 rounded w-20" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : orders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-12 text-muted-foreground text-sm">No work orders found</TableCell>
+                    <TableCell colSpan={9} className="text-center py-12 text-muted-foreground text-sm">No work orders found</TableCell>
                   </TableRow>
                 ) : orders.map(order => {
                   const progress = order.progress ?? (order.plannedQty > 0 ? Math.min(Math.round((order.actualQty / order.plannedQty) * 100), 100) : 0);
@@ -506,20 +508,24 @@ export function ProductionWorkOrdersView() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2 min-w-[80px]">
+                        <div className="flex items-center gap-2 min-w-[90px]">
                           <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
                             <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${progress}%` }} />
                           </div>
                           <span className="text-[10px] text-muted-foreground whitespace-nowrap">{progress}%</span>
                         </div>
+                        {(order as any).totalSteps > 0 && (
+                          <div className="text-[9px] text-muted-foreground mt-0.5">
+                            {(order as any).completedSteps}/{(order as any).totalSteps} steps
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs">
-                        <span className="font-semibold">{order.actualQty}</span>
+                        <span className="font-semibold">{(order as any).goodQty ?? order.actualQty}</span>
                         <span className="text-muted-foreground">/{order.plannedQty}</span>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        <div>{order.machine || '—'}</div>
-                        {order.machineCode && <div className="text-[10px]">{order.machineCode}</div>}
+                        {(order as any).scrapQty > 0 && (
+                          <span className="text-red-400 text-[10px] ml-1">+{(order as any).scrapQty}✗</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {order.plannedEnd ? formatDate(order.plannedEnd) : '—'}
@@ -632,36 +638,163 @@ export function ProductionWorkOrdersView() {
                   </div>
                 )}
 
-                {/* Progress Bar */}
-                <div>
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Production Progress</p>
-                  <div className="industrial-card rounded-lg p-3 space-y-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary rounded-full transition-all"
-                          style={{ width: `${Math.min(Math.round(((detail as any).actualQty / (detail as any).plannedQty) * 100), 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-xs font-semibold tabular-nums">
-                        {Math.min(Math.round(((detail as any).actualQty / (detail as any).plannedQty) * 100), 100)}%
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-4 gap-2 text-center">
-                      {[
-                        { label: 'Planned', value: (detail as any).plannedQty },
-                        { label: 'Actual', value: (detail as any).actualQty },
-                        { label: 'Good', value: (detail as any).goodQty, color: 'text-green-400' },
-                        { label: 'Scrap', value: (detail as any).scrapQty, color: 'text-red-400' },
-                      ].map(m => (
-                        <div key={m.label}>
-                          <div className={cn('text-base font-bold tabular-nums', m.color)}>{m.value ?? 0}</div>
-                          <div className="text-[10px] text-muted-foreground">{m.label}</div>
+                {/* Production Progress — ISA-95 correct */}
+                {(() => {
+                  const d = detail as any;
+                  const completedSteps = d.completedSteps ?? 0;
+                  const totalSteps     = d.totalSteps     ?? d.jobOrders?.length ?? 0;
+                  const stepPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+                  const good   = d.liveGoodQty  ?? d.goodQty  ?? 0;
+                  const scrap  = d.liveScrapQty ?? d.scrapQty ?? 0;
+                  const actual = d.liveActualQty ?? d.actualQty ?? 0;
+                  // Qty-based % for the final output vs WO planned
+                  const qtyPct = d.plannedQty > 0 ? Math.min(Math.round((good / d.plannedQty) * 100), 100) : 0;
+                  // Unit of the last JO = WO output unit
+                  const lastJO = d.jobOrders?.[d.jobOrders.length - 1];
+                  const unit = lastJO?.outputUnit ?? '';
+                  return (
+                    <div>
+                      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Production Progress</p>
+                      <div className="industrial-card rounded-lg p-3 space-y-3">
+                        {/* Step completion bar */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] text-muted-foreground">Steps completed</span>
+                            <span className="text-[10px] font-semibold">{completedSteps} / {totalSteps}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                              <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${stepPct}%` }} />
+                            </div>
+                            <span className="text-xs font-bold tabular-nums w-10 text-right">{stepPct}%</span>
+                          </div>
                         </div>
-                      ))}
+                        {/* Output qty bar (final step vs WO planned) */}
+                        {d.plannedQty > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[10px] text-muted-foreground">Final output vs planned</span>
+                              <span className="text-[10px] font-semibold">{good} / {d.plannedQty} {unit}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                                <div className="h-full bg-green-500/70 rounded-full transition-all" style={{ width: `${qtyPct}%` }} />
+                              </div>
+                              <span className="text-xs font-semibold tabular-nums text-green-400 w-10 text-right">{qtyPct}%</span>
+                            </div>
+                          </div>
+                        )}
+                        {/* KPIs */}
+                        <div className="grid grid-cols-4 gap-2 text-center pt-1 border-t border-border/30">
+                          {[
+                            { label: 'Planned',       value: `${d.plannedQty}`,       sub: unit },
+                            { label: 'Output (last)', value: `${actual}`,              sub: unit,  color: 'text-foreground' },
+                            { label: 'Good',          value: `${good}`,               sub: unit,  color: 'text-green-400' },
+                            { label: 'Total Scrap',   value: `${scrap}`,              sub: 'all steps', color: scrap > 0 ? 'text-red-400' : '' },
+                          ].map(m => (
+                            <div key={m.label}>
+                              <div className={cn('text-base font-bold tabular-nums', (m as any).color)}>{m.value}</div>
+                              <div className="text-[10px] text-muted-foreground">{m.label}</div>
+                              {(m as any).sub && <div className="text-[9px] text-muted-foreground/60">{(m as any).sub}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Dispatch List (Job Orders) */}
+                {((detail as any).jobOrders?.length > 0) && (
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <Layers className="w-3 h-3" />Dispatch List (ISA-95)
+                    </p>
+                    <div className="space-y-1.5">
+                      {(detail as any).jobOrders.map((jo: any) => {
+                        const joProgress = jo.plannedQty > 0 ? Math.min(Math.round((jo.actualQtyGood / jo.plannedQty) * 100), 100) : 0;
+                        const statusColor: Record<string, string> = {
+                          EXECUTING: 'text-green-400', COMPLETE: 'text-blue-400',
+                          PAUSED: 'text-yellow-400', READY: 'text-muted-foreground',
+                          PENDING: 'text-muted-foreground/60',
+                        };
+                        const statusIcon: Record<string, React.ReactNode> = {
+                          EXECUTING: <Circle className="w-2 h-2 fill-green-400 text-green-400" />,
+                          COMPLETE:  <CheckSquare className="w-2.5 h-2.5 text-blue-400" />,
+                          PAUSED:    <Circle className="w-2 h-2 fill-yellow-400 text-yellow-400" />,
+                          READY:     <Circle className="w-2 h-2 text-muted-foreground" />,
+                        };
+                        return (
+                          <div key={jo.id} className="industrial-card rounded-lg px-3 py-2.5">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-[10px] font-mono text-muted-foreground shrink-0">#{jo.sequenceOrder}</span>
+                                {jo.stepType === 'SS' && (
+                                  <span className="text-[9px] font-bold bg-blue-500/20 text-blue-400 border border-blue-400/30 rounded px-1">SS</span>
+                                )}
+                                <span className="text-xs font-semibold truncate">{jo.operationName}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {statusIcon[jo.status] ?? <Circle className="w-2 h-2 text-muted-foreground/40" />}
+                                <span className={cn('text-[10px] font-medium', statusColor[jo.status] ?? 'text-muted-foreground')}>
+                                  {jo.status}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+                                <div className="h-full bg-primary/70 rounded-full transition-all" style={{ width: `${joProgress}%` }} />
+                              </div>
+                              <span className="text-[10px] tabular-nums text-muted-foreground">
+                                <span className="text-foreground font-medium">{jo.actualQtyGood}</span>
+                                {jo.actualQtyRejected > 0 && (
+                                  <span className="text-red-400"> +{jo.actualQtyRejected}✗</span>
+                                )}
+                                <span> / {jo.plannedQty} {jo.outputUnit}</span>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                              {jo.machine && (
+                                <span className="flex items-center gap-1">
+                                  <Cpu className="w-2.5 h-2.5" />{jo.machine.name}
+                                </span>
+                              )}
+                              {jo.operator && (
+                                <span className="flex items-center gap-1">
+                                  <User className="w-2.5 h-2.5" />{jo.operator.name}
+                                </span>
+                              )}
+                            </div>
+                            {(jo.joOEE != null || jo.joQuality != null || jo.joPerformance != null || jo.joAvailability != null) && (
+                              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                {jo.joQuality != null && (
+                                  <span className="text-[9px] font-bold px-1 py-0.5 rounded border text-green-400 bg-green-400/10 border-green-400/30 tabular-nums">
+                                    Q: {jo.joQuality.toFixed(1)}%
+                                  </span>
+                                )}
+                                {jo.joPerformance != null && (
+                                  <span className="text-[9px] font-bold px-1 py-0.5 rounded border text-blue-400 bg-blue-400/10 border-blue-400/30 tabular-nums">
+                                    P: {jo.joPerformance.toFixed(1)}%
+                                  </span>
+                                )}
+                                {jo.joAvailability != null && (
+                                  <span className="text-[9px] font-bold px-1 py-0.5 rounded border text-yellow-400 bg-yellow-400/10 border-yellow-400/30 tabular-nums">
+                                    A: {jo.joAvailability.toFixed(1)}%
+                                  </span>
+                                )}
+                                {jo.joOEE != null && (
+                                  <span className={cn('text-[9px] font-bold px-1 py-0.5 rounded border tabular-nums', jo.joOEE >= 85 ? 'text-green-400 bg-green-400/10 border-green-400/30' : jo.joOEE >= 60 ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30' : 'text-red-400 bg-red-400/10 border-red-400/30')}>
+                                    OEE: {jo.joOEE.toFixed(1)}%
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                </div>
+                )}
 
                 {/* Details */}
                 <div>
@@ -670,13 +803,7 @@ export function ProductionWorkOrdersView() {
                     <DetailRow label="Product" value={(detail as any).sku?.name ?? (detail as any).productName} />
                     <DetailRow label="SKU Code" value={(detail as any).sku?.code ?? (detail as any).productCode} />
                     <DetailRow label="Item #" value={(detail as any).sku?.itemNumber} />
-                    <DetailRow label="Machine" value={
-                      (detail as any).machine?.name
-                        ? `${(detail as any).machine.name} (${(detail as any).machine.code})`
-                        : (detail as any).machine
-                    } />
                     <DetailRow label="Production Line" value={(detail as any).line?.name ?? (detail as any).line} />
-                    <DetailRow label="Area" value={(detail as any).machine?.area?.name} />
                     <DetailRow label="Operator" value={(detail as any).operator?.name ?? (detail as any).operator} />
                     <DetailRow label="Supervisor" value={(detail as any).supervisor?.name ?? (detail as any).supervisor} />
                   </div>
@@ -758,7 +885,7 @@ export function ProductionWorkOrdersView() {
       {/* ══ Create Form ══ */}
       <FormDialog open={formOpen} onClose={() => setFormOpen(false)} title="Create Work Order"
         onSubmit={handleCreate} isSubmitting={createMutation.isPending}
-        isValid={form.skuId !== '__none__' && !!form.machineId && !!form.plannedQty}>
+        isValid={form.skuId !== '__none__' && !!form.plannedQty}>
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
             <Label>Product (SKU) *</Label>
@@ -769,18 +896,6 @@ export function ProductionWorkOrdersView() {
                 {skus.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name} ({s.code ?? s.sku ?? ''})</SelectItem>)}
               </SelectContent>
             </Select>
-          </div>
-          <div className="col-span-2">
-            <Label>Machine *</Label>
-            <div className="mt-1">
-              <MachineTreePicker
-                value={form.machineId}
-                valueName={form.machineName}
-                placeholder="Browse hierarchy to select machine…"
-                onSelect={(id, _type, name) => setForm(f => ({ ...f, machineId: id, machineName: name }))}
-                onClear={() => setForm(f => ({ ...f, machineId: '', machineName: '' }))}
-              />
-            </div>
           </div>
           <div className="col-span-2">
             <Label>Operator</Label>

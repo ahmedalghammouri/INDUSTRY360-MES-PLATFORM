@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth-store';
 import { authService } from '@/services/auth.service';
@@ -17,7 +17,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const refreshAttempted = useRef(false);
 
+  // Wait for Zustand persist to finish hydrating from localStorage before
+  // running the route guard. Without this, opening a new tab briefly sees
+  // isAuthenticated=false (pre-hydration default), triggers a redirect to /,
+  // and the / guard then bounces to /dashboard.
+  // NOTE: useState initializer runs on the server (SSR) where localStorage /
+  // persist API don't exist — keep it false and check inside useEffect only.
+  const [storeHydrated, setStoreHydrated] = useState(false);
   useEffect(() => {
+    const p = useAuthStore.persist;
+    if (!p) { setStoreHydrated(true); return; }
+    if (p.hasHydrated()) { setStoreHydrated(true); return; }
+    const unsub = p.onFinishHydration(() => setStoreHydrated(true));
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!storeHydrated) return;
+
     const isPublic = isPublicRoute(pathname);
 
     if (isAuthenticated && isPublic) {
@@ -45,7 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         router.replace('/');
       }
     }
-  }, [isAuthenticated, pathname, router, setAuth, logout, refreshToken]);
+  }, [isAuthenticated, pathname, router, setAuth, logout, refreshToken, storeHydrated]);
 
   useEffect(() => {
     if (!accessToken || !refreshToken) return;

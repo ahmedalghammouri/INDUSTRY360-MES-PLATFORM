@@ -39,13 +39,15 @@ export class ProductionService {
   async createWorkOrder(factoryId: string | null, userId: string, dto: CreateWorkOrderDto) {
     const factoryFilter = factoryId ? { factoryId } : {};
 
-    const [sku, machine] = await Promise.all([
-      this.prisma.sKU.findFirst({ where: { id: dto.skuId, ...factoryFilter } }),
-      this.prisma.machine.findFirst({ where: { id: dto.machineId, ...factoryFilter } }),
-    ]);
-
+    const sku = await this.prisma.sKU.findFirst({ where: { id: dto.skuId, ...factoryFilter } });
     if (!sku) throw new NotFoundException('SKU not found or not in your factory');
-    if (!machine) throw new NotFoundException('Machine not found or not in your factory');
+
+    // Machine is now optional at WO level (assigned per job order in ISA-95 dispatch)
+    let machine: { factoryId: string; lineId: string | null; code: string } | null = null;
+    if (dto.machineId) {
+      machine = await this.prisma.machine.findFirst({ where: { id: dto.machineId, ...factoryFilter } });
+      if (!machine) throw new NotFoundException('Machine not found or not in your factory');
+    }
 
     if (dto.productionOrderId) {
       const po = await this.prisma.productionOrder.findFirst({
@@ -54,29 +56,31 @@ export class ProductionService {
       if (!po) throw new NotFoundException('Production order not found');
     }
 
-    // Warn if another IN_PROGRESS WO exists for this machine
-    const activeWO = await this.prisma.workOrder.findFirst({
-      where: { machineId: dto.machineId, status: 'IN_PROGRESS', deletedAt: null },
-    });
-    if (activeWO) {
-      this.logger.warn(`Machine ${machine.code} already has an active WO: ${activeWO.orderNumber}`);
+    if (dto.machineId && machine) {
+      const activeWO = await this.prisma.workOrder.findFirst({
+        where: { machineId: dto.machineId, status: 'IN_PROGRESS', deletedAt: null },
+      });
+      if (activeWO) {
+        this.logger.warn(`Machine ${machine.code} already has an active WO: ${activeWO.orderNumber}`);
+      }
     }
 
-    const resolvedFactoryId = factoryId ?? machine.factoryId;
+    const resolvedFactoryId = factoryId ?? machine?.factoryId ?? sku.factoryId;
     const orderNumber = await this.generateOrderNumber(resolvedFactoryId);
 
-    // Look up ideal cycle time for performance calculation
-    const cycleTime = await this.prisma.machineCycleTime.findFirst({
-      where: { machineId: dto.machineId, skuId: dto.skuId, isActive: true },
-    });
+    const cycleTime = dto.machineId
+      ? await this.prisma.machineCycleTime.findFirst({
+          where: { machineId: dto.machineId, skuId: dto.skuId, isActive: true },
+        })
+      : null;
 
     const workOrder = await this.prisma.workOrder.create({
       data: {
         factoryId: resolvedFactoryId,
         orderNumber,
         skuId: dto.skuId,
-        machineId: dto.machineId,
-        lineId: dto.lineId ?? machine.lineId,
+        machineId: dto.machineId ?? null,
+        lineId: dto.lineId ?? machine?.lineId ?? null,
         productionOrderId: dto.productionOrderId,
         status: 'PLANNED',
         priority: dto.priority,
@@ -98,7 +102,7 @@ export class ProductionService {
     });
 
     this.eventEmitter.emit('production.work-order.created', { workOrder, factoryId: resolvedFactoryId });
-    this.logger.log(`Work order ${orderNumber} created for machine ${machine.code}`);
+    this.logger.log(`Work order ${orderNumber} created`);
 
     return workOrder;
   }
@@ -151,6 +155,11 @@ export class ProductionService {
           line: { select: { name: true, code: true } },
           operator: { select: { name: true } },
           supervisor: { select: { name: true } },
+          _count: { select: { jobOrders: true } },
+          jobOrders: {
+            select: { status: true, actualQtyGood: true, actualQtyRejected: true, sequenceOrder: true },
+            orderBy: { sequenceOrder: 'asc' },
+          },
         },
         orderBy: [{ priority: 'desc' }, { plannedStart: 'asc' }],
         skip: (page - 1) * limit,
@@ -159,7 +168,22 @@ export class ProductionService {
     ]);
 
     return {
-      data: data.map((wo) => this.mapWorkOrder(wo)),
+      data: data.map((wo) => {
+        const mapped = this.mapWorkOrder(wo);
+        const totalSteps = wo.jobOrders.length;
+        const completedSteps = wo.jobOrders.filter(j => j.status === 'COMPLETE').length;
+        const lastJO = wo.jobOrders[totalSteps - 1];
+        return {
+          ...mapped,
+          completedSteps,
+          totalSteps,
+          // Step-based progress — unit-safe
+          progress: totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : mapped.progress,
+          // Final output qty from last JO
+          goodQty:  lastJO?.actualQtyGood     ?? mapped.goodQty,
+          scrapQty: wo.jobOrders.reduce((s, j) => s + j.actualQtyRejected, 0),
+        };
+      }),
       total,
       page,
       limit,
@@ -186,10 +210,44 @@ export class ProductionService {
           where: { endTime: null },
           select: { id: true, startTime: true, category: true, reason: true },
         },
+        jobOrders: {
+          orderBy: { sequenceOrder: 'asc' },
+          include: {
+            machine:  { select: { id: true, name: true, code: true } },
+            operator: { select: { id: true, name: true } },
+          },
+        },
       },
     });
     if (!wo) throw new NotFoundException('Work order not found');
-    return wo;
+
+    // ISA-95: each JO can have a different outputUnit (PIECE → CARTON → PALLET).
+    // Summing across all JOs is meaningless. Correct approach:
+    //   • liveGoodQty / liveActualQty  = last JO output (the WO's final product unit)
+    //   • liveScrapQty                 = total scrap events across ALL steps (quality KPI)
+    //   • liveProgress (qty-based)     = last JO good qty vs WO plannedQty
+    //   • liveStepProgress             = % of JO steps completed (always meaningful)
+    const lastJO  = wo.jobOrders[wo.jobOrders.length - 1] ?? null;
+    const liveGood  = lastJO?.actualQtyGood     ?? 0;
+    const liveScrap = wo.jobOrders.reduce((s, j) => s + j.actualQtyRejected, 0);
+    const liveActual = liveGood + (lastJO?.actualQtyRejected ?? 0);
+    const completedSteps = wo.jobOrders.filter(j => j.status === 'COMPLETE').length;
+    const totalSteps     = wo.jobOrders.length;
+
+    return {
+      ...wo,
+      liveGoodQty:    liveGood,
+      liveScrapQty:   liveScrap,
+      liveActualQty:  liveActual,
+      // Step-based progress: how many routing steps are done (always unit-safe)
+      liveProgress:   totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0,
+      completedSteps,
+      totalSteps,
+      jobOrders: wo.jobOrders.map((jo) => ({
+        ...jo,
+        ...this.calcJobOrderOEE(jo),
+      })),
+    };
   }
 
   async updateWorkOrder(factoryId: string | null, id: string, dto: UpdateWorkOrderDto) {
@@ -1485,13 +1543,15 @@ export class ProductionService {
             productionOrder: { select: { orderNumber: true } },
           },
         },
+        operator: { select: { id: true, name: true, nameAr: true } },
         predecessor: {
           select: { id: true, operationName: true, status: true, routingStepId: true, actualStart: true },
         },
       },
     });
 
-    return this.attachDepTypes(jos);
+    const withDep = await this.attachDepTypes(jos);
+    return withDep.map((jo) => ({ ...jo, ...this.calcJobOrderOEE(jo) }));
   }
 
   /** Bulk-attach depType to a list of job orders without N+1 queries */
@@ -1531,6 +1591,7 @@ export class ProductionService {
         workCenter: { select: { name: true, code: true } },
         routingStep: { select: { stepNumber: true, operationName: true } },
         materials: true,
+        operator: { select: { id: true, name: true, nameAr: true } },
         predecessor: {
           select: { id: true, operationName: true, status: true, routingStepId: true, actualStart: true },
         },
@@ -1539,7 +1600,8 @@ export class ProductionService {
       orderBy: { sequenceOrder: 'asc' },
     });
 
-    return this.attachDepTypes(jos);
+    const withDep = await this.attachDepTypes(jos);
+    return withDep.map((jo) => ({ ...jo, ...this.calcJobOrderOEE(jo) }));
   }
 
   async generateJobOrders(
@@ -1808,23 +1870,164 @@ export class ProductionService {
   async reportJobOrderOutput(
     factoryId: string | null,
     jobOrderId: string,
-    dto: { actualQtyGood: number; actualQtyRejected?: number },
+    dto: {
+      actualQtyGood: number;
+      actualQtyRejected?: number;
+      scrapReason?: string;
+      scrapCategory?: string;
+    },
   ) {
     const factoryFilter = factoryId ? { factoryId } : {};
     const jo = await this.prisma.jobOrder.findFirst({ where: { id: jobOrderId, ...factoryFilter } });
     if (!jo) throw new NotFoundException('Job order not found');
-    if (!['EXECUTING', 'COMPLETE'].includes(jo.status)) {
+    if (!['EXECUTING', 'PAUSED', 'COMPLETE'].includes(jo.status)) {
       throw new BadRequestException(
-        `Can only report output for EXECUTING or COMPLETE job orders (current: ${jo.status})`,
+        `Can only report output for EXECUTING, PAUSED, or COMPLETE job orders (current: ${jo.status})`,
       );
     }
-    return this.prisma.jobOrder.update({
+
+    const newRejected = dto.actualQtyRejected ?? jo.actualQtyRejected;
+    const delta = Math.max(0, newRejected - jo.actualQtyRejected);
+
+    const updated = await this.prisma.jobOrder.update({
       where: { id: jobOrderId },
       data: {
         actualQtyGood: dto.actualQtyGood,
-        ...(dto.actualQtyRejected !== undefined && { actualQtyRejected: dto.actualQtyRejected }),
+        actualQtyRejected: newRejected,
+        ...(dto.scrapReason !== undefined && { scrapReason: dto.scrapReason }),
       },
     });
+
+    // Create audit trail entry whenever new scrap is added
+    if (delta > 0) {
+      const validCategories = ['QUALITY','SETUP','DAMAGE','OVERRUN','MATERIAL','MACHINE','OPERATOR','OTHER'];
+      const category = (validCategories.includes(dto.scrapCategory ?? '') ? dto.scrapCategory : 'OTHER') as any;
+      await this.prisma.scrapLog.create({
+        data: {
+          factoryId: jo.factoryId,
+          workOrderId: jo.workOrderId,
+          jobOrderId: jo.id,
+          operatorId: jo.operatorId ?? null,
+          qty: delta,
+          reason: dto.scrapReason || 'Not specified',
+          category,
+        },
+      });
+    }
+
+    return updated;
+  }
+
+  async listScrapLogs(
+    factoryId: string | null,
+    filters: { workOrderId?: string; jobOrderId?: string; category?: string; from?: string; to?: string; limit?: number },
+  ) {
+    const where: any = {
+      ...(factoryId ? { factoryId } : {}),
+      ...(filters.workOrderId ? { workOrderId: filters.workOrderId } : {}),
+      ...(filters.jobOrderId  ? { jobOrderId: filters.jobOrderId }   : {}),
+      ...(filters.category    ? { category: filters.category }        : {}),
+      ...((filters.from || filters.to) ? {
+        createdAt: {
+          ...(filters.from ? { gte: new Date(filters.from) } : {}),
+          ...(filters.to   ? { lte: new Date(filters.to)   } : {}),
+        },
+      } : {}),
+    };
+
+    return this.prisma.scrapLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(filters.limit ?? 200, 500),
+      include: {
+        jobOrder:  { select: { operationName: true, sequenceOrder: true, outputUnit: true } },
+        workOrder: { select: { orderNumber: true, sku: { select: { name: true, code: true } } } },
+        operator:  { select: { name: true } },
+      },
+    });
+  }
+
+  async assignJobOrderOperator(
+    factoryId: string | null,
+    jobOrderId: string,
+    operatorId: string | null,
+  ) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const jo = await this.prisma.jobOrder.findFirst({ where: { id: jobOrderId, ...factoryFilter } });
+    if (!jo) throw new NotFoundException('Job order not found');
+
+    if (operatorId) {
+      const user = await this.prisma.user.findUnique({ where: { id: operatorId } });
+      if (!user) throw new NotFoundException('Operator not found');
+    }
+
+    return this.prisma.jobOrder.update({
+      where: { id: jobOrderId },
+      data: { operatorId },
+      include: { operator: { select: { id: true, name: true, nameAr: true } } },
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // OEE PER JOB ORDER
+  // ────────────────────────────────────────────────────────────
+
+  private calcJobOrderOEE(jo: any): {
+    joQuality: number | null;
+    joPerformance: number | null;
+    joAvailability: number | null;
+    joOEE: number | null;
+  } {
+    const totalProduced = (jo.actualQtyGood ?? 0) + (jo.actualQtyRejected ?? 0);
+
+    // Quality
+    const joQuality: number | null =
+      totalProduced > 0
+        ? parseFloat(((jo.actualQtyGood / totalProduced) * 100).toFixed(1))
+        : null;
+
+    // Operating time in seconds
+    let operatingTimeSec: number | null = null;
+    if (jo.actualStart) {
+      const startMs = new Date(jo.actualStart).getTime();
+      const endMs   = jo.actualEnd ? new Date(jo.actualEnd).getTime() : Date.now();
+      operatingTimeSec = (endMs - startMs) / 1000;
+    }
+
+    // Performance: only if idealCycleTimeSec > 0 and operatingTimeSec > 0
+    let joPerformance: number | null = null;
+    if (
+      jo.idealCycleTimeSec != null &&
+      jo.idealCycleTimeSec > 0 &&
+      operatingTimeSec != null &&
+      operatingTimeSec > 0
+    ) {
+      const raw = ((jo.idealCycleTimeSec * totalProduced) / operatingTimeSec) * 100;
+      joPerformance = parseFloat(Math.min(100, raw).toFixed(1));
+    }
+
+    // Availability: only if plannedStart and plannedEnd exist
+    let joAvailability: number | null = null;
+    if (jo.plannedStart && jo.plannedEnd && operatingTimeSec != null) {
+      const plannedDurationSec =
+        (new Date(jo.plannedEnd).getTime() - new Date(jo.plannedStart).getTime()) / 1000;
+      if (plannedDurationSec > 0) {
+        const raw = (operatingTimeSec / plannedDurationSec) * 100;
+        joAvailability = parseFloat(Math.min(100, raw).toFixed(1));
+      }
+    }
+
+    // OEE
+    let joOEE: number | null = null;
+    if (joAvailability != null && joPerformance != null && joQuality != null) {
+      joOEE = parseFloat(
+        ((joAvailability / 100) * (joPerformance / 100) * (joQuality / 100) * 100).toFixed(1),
+      );
+    } else if (joQuality != null) {
+      joOEE = joQuality;
+    }
+
+    return { joQuality, joPerformance, joAvailability, joOEE };
   }
 
   async deleteJobOrders(factoryId: string | null, workOrderId: string) {

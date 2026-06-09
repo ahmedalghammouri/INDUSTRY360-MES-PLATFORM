@@ -46,6 +46,7 @@ import {
   MapPin,
   Workflow,
   GitMerge,
+  Monitor,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
@@ -68,6 +69,7 @@ interface NavItem {
   dynamicKey?: string;
   children?: NavItem[];
   permission?: string;
+  openNewTab?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -87,6 +89,8 @@ const navItems: NavItem[] = [
       { label: 'Prod. Orders (PO)',  href: '/production/production-orders',     icon: GitCommit,     badge: 'ISA-95', badgeVariant: 'outline'      },
       { label: 'Work Orders',        href: '/production/orders',                icon: ClipboardList, dynamicKey: 'workOrders',   badgeVariant: 'secondary'    },
       { label: 'Dispatch List (JO)', href: '/production/job-orders',            icon: Layers,        badge: 'ISA-95',             badgeVariant: 'outline'      },
+      { label: 'Shop Floor',         href: '/shop-floor',                       icon: Monitor,       badge: 'Live',               badgeVariant: 'secondary',   openNewTab: true },
+      { label: 'Scrap Log',          href: '/production/scrap-log',             icon: AlertTriangle, badge: 'Audit',              badgeVariant: 'outline'      },
       { label: 'Batches & Lots',     href: '/production/batches',               icon: Boxes         },
       { label: 'Scheduling',         href: '/production/scheduling',            icon: Calendar      },
       { label: 'OEE Analytics',      href: '/production/oee',                   icon: TrendingUp    },
@@ -318,6 +322,8 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge, countsMap }: 
   const content = (
     <Link
       href={item.href!}
+      target={item.openNewTab ? '_blank' : undefined}
+      rel={item.openNewTab ? 'noopener noreferrer' : undefined}
       className={cn(
         'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 group',
         isActive

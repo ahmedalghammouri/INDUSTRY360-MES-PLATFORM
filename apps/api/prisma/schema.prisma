@@ -109,6 +109,7 @@ model Factory {
   energyWOSummaries      EnergyWOSummary[]
   traceabilityLinks      TraceabilityLink[]
   jobOrders              JobOrder[]
+  scrapLogs              ScrapLog[]
 
   @@map("factories")
 }
@@ -546,6 +547,7 @@ model WorkOrder {
   energyWOSummary      EnergyWOSummary?
   maintenanceOrders    MaintenanceWO[]       @relation("MaintLinkedProdWO")
   jobOrders            JobOrder[]
+  scrapLogs            ScrapLog[]
 
   @@map("work_orders")
   @@index([factoryId, status])
@@ -1781,6 +1783,8 @@ model User {
   approvedRecipes     Recipe[]           @relation("RecipeApprovedBy")
   // Downtime operator relation
   operatedDowntimes   DowntimeEvent[]    @relation("DowntimeOperator")
+  jobOrdersAsOperator JobOrder[]         @relation("JOOperator")
+  scrapLogsAsOperator ScrapLog[]         @relation("ScrapLogOperator")
 
   @@map("users")
   @@index([enterpriseId])
@@ -2380,6 +2384,9 @@ model JobOrder {
   // OEE denominator — stamped from MachineCycleTime at JO creation
   idealCycleTimeSec Float?
 
+  operatorId        String?        // assigned shop floor operator
+  scrapReason       String?        // reason for actualQtyRejected
+
   notes             String?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
@@ -2392,11 +2399,48 @@ model JobOrder {
   predecessor  JobOrder?       @relation("JOChain", fields: [predecessorId], references: [id])
   successors   JobOrder[]      @relation("JOChain")
   materials    JobOrderMaterial[]
+  operator     User?           @relation("JOOperator", fields: [operatorId], references: [id])
+  scrapLogs    ScrapLog[]
 
   @@map("job_orders")
   @@index([workOrderId])
   @@index([factoryId, status])
   @@index([machineId])
+}
+
+// Per-step scrap / rejection log — every increment of actualQtyRejected creates one entry
+model ScrapLog {
+  id          String        @id @default(uuid())
+  factoryId   String
+  workOrderId String
+  jobOrderId  String
+  operatorId  String?
+  qty         Float
+  reason      String
+  category    ScrapCategory @default(OTHER)
+  notes       String?
+  createdAt   DateTime      @default(now())
+
+  factory   Factory   @relation(fields: [factoryId], references: [id])
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
+  jobOrder  JobOrder  @relation(fields: [jobOrderId], references: [id])
+  operator  User?     @relation("ScrapLogOperator", fields: [operatorId], references: [id])
+
+  @@map("scrap_logs")
+  @@index([factoryId, createdAt])
+  @@index([jobOrderId])
+  @@index([workOrderId])
+}
+
+enum ScrapCategory {
+  QUALITY      // Failed quality / spec out-of-range
+  SETUP        // Machine setup / startup waste
+  DAMAGE       // Physical handling damage
+  OVERRUN      // Weight / fill overrun
+  MATERIAL     // Raw material defect
+  MACHINE      // Machine malfunction
+  OPERATOR     // Operator error
+  OTHER
 }
 
 // Per-step material specification: inputs consumed and outputs produced

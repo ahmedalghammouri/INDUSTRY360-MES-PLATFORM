@@ -17,9 +17,10 @@ export class CreateWorkOrderDto {
   @IsUUID()
   skuId!: string;
 
-  @ApiProperty({ example: 'uuid-machine-id' })
+  @ApiPropertyOptional({ example: 'uuid-machine-id', description: 'Optional — machine is assigned per job order in ISA-95 dispatch' })
+  @IsOptional()
   @IsUUID()
-  machineId!: string;
+  machineId?: string;
 
   @ApiPropertyOptional({ example: 'uuid-line-id' })
   @IsOptional()
