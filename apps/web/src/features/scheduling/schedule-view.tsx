@@ -5,7 +5,8 @@ import { ChevronLeft, ChevronRight, CalendarRange, Layers, Boxes } from 'lucide-
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { GanttChart, type GanttZoom } from '@/components/charts/gantt-chart';
+import type { GanttZoom } from '@/components/charts/gantt-chart';
+import { SvarGantt } from '@/components/charts/svar-gantt';
 import { useUnifiedSchedule } from './use-schedule';
 
 const WINDOW_DAYS: Record<GanttZoom, number> = { day: 4, week: 14, month: 35 };
@@ -143,7 +144,7 @@ export function ScheduleView({
           {Array.from({ length: 6 }).map((_, i) => <div key={i} className="shimmer h-7 rounded" />)}
         </div>
       ) : (
-        <GanttChart
+        <SvarGantt
           items={filteredItems}
           rangeFrom={dateFrom}
           rangeTo={dateTo}

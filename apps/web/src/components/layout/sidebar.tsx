@@ -70,7 +70,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 interface NavItem {
   label: string;
   href?: string;
-  icon: React.ElementType;
+  icon?: React.ElementType;
   badge?: string | number;
   badgeVariant?: 'default' | 'destructive' | 'secondary' | 'outline';
   badgeDynamic?: boolean;
@@ -78,16 +78,18 @@ interface NavItem {
   children?: NavItem[];
   permission?: string;
   openNewTab?: boolean;
+  /** When set, this entry renders as a section divider/label (not a link). */
+  section?: string;
 }
 
 const navItems: NavItem[] = [
-  // ── 1. Dashboard ────────────────────────────────────────────
+  // ═══════════════ OVERVIEW ═══════════════
+  { section: 'Overview', label: 'Overview' },
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-
-  // ── 1b. Dashboard Center (catalog & launcher) ───────────────
   { label: 'Dashboard Center', href: '/dashboard-center', icon: LayoutGrid, badge: 'New', badgeVariant: 'default' },
 
-  // ── 1c. Planning & Scheduling (smart Gantt) ─────────────────
+  // ═══════════════ PLANNING & EXECUTION ═══════════════
+  { section: 'Planning & Execution', label: 'Planning & Execution' },
   {
     label: 'Planning & Scheduling',
     icon: CalendarRange,
@@ -98,8 +100,6 @@ const navItems: NavItem[] = [
       { label: 'Shift Configuration',    href: '/production/shifts',               icon: Clock,         badge: 'NCC', badgeVariant: 'outline' },
     ],
   },
-
-  // ── 2. Production (Planning & Reporting) ────────────────────
   {
     label: 'Production',
     icon: Factory,
@@ -121,8 +121,6 @@ const navItems: NavItem[] = [
       { label: 'Reports & Analytics',    href: '/production/reports',              icon: BarChart3     },
     ],
   },
-
-  // ── 3. Manufacturing (MRP / Execution) ──────────────────────
   {
     label: 'Manufacturing',
     icon: Cog,
@@ -151,7 +149,8 @@ const navItems: NavItem[] = [
     ],
   },
 
-  // ── 4. Maintenance ──────────────────────────────────────────
+  // ═══════════════ ASSET & QUALITY ═══════════════
+  { section: 'Asset & Quality', label: 'Asset & Quality' },
   {
     label: 'Maintenance',
     icon: Wrench,
@@ -165,8 +164,6 @@ const navItems: NavItem[] = [
       { label: 'Reports & Analytics',    href: '/maintenance/reports',             icon: BarChart3     },
     ],
   },
-
-  // ── 5. Quality ───────────────────────────────────────────────
   {
     label: 'Quality',
     icon: ShieldCheck,
@@ -182,7 +179,28 @@ const navItems: NavItem[] = [
     ],
   },
 
-  // ── 6. PLM ───────────────────────────────────────────────────
+  // ═══════════════ MATERIALS & PRODUCTS ═══════════════
+  { section: 'Materials & Products', label: 'Materials & Products' },
+  {
+    label: 'Inventory',
+    icon: Package,
+    children: [
+      { label: 'Overview',               href: '/inventory',                       icon: Boxes         },
+      { label: 'Storage Locations',      href: '/inventory/storage-locations',     icon: MapPin        },
+      { label: 'Products (SKUs)',        href: '/inventory/products',              icon: BoxesIcon     },
+      {
+        label: 'Materials',
+        icon: FlaskConical,
+        children: [
+          { label: 'Raw Materials',      href: '/inventory/raw-materials',         icon: FlaskConical  },
+          { label: 'Material Lots',      href: '/inventory/materials',             icon: Layers3       },
+          { label: 'Spare Parts',        href: '/inventory/spare-parts',           icon: PackageSearch },
+          { label: 'Spare Part Req.',    href: '/inventory/spare-requests',        icon: Truck         },
+        ],
+      },
+      { label: 'Reports & Analytics',    href: '/inventory/reports',               icon: BarChart3     },
+    ],
+  },
   {
     label: 'PLM',
     icon: BookOpen,
@@ -204,29 +222,8 @@ const navItems: NavItem[] = [
     ],
   },
 
-  // ── 7. Inventory ─────────────────────────────────────────────
-  {
-    label: 'Inventory',
-    icon: Package,
-    children: [
-      { label: 'Overview',               href: '/inventory',                       icon: Boxes         },
-      { label: 'Storage Locations',      href: '/inventory/storage-locations',     icon: MapPin        },
-      { label: 'Products (SKUs)',        href: '/inventory/products',              icon: BoxesIcon     },
-      {
-        label: 'Materials',
-        icon: FlaskConical,
-        children: [
-          { label: 'Raw Materials',      href: '/inventory/raw-materials',         icon: FlaskConical  },
-          { label: 'Material Lots',      href: '/inventory/materials',             icon: Layers3       },
-          { label: 'Spare Parts',        href: '/inventory/spare-parts',           icon: PackageSearch },
-          { label: 'Spare Part Req.',    href: '/inventory/spare-requests',        icon: Truck         },
-        ],
-      },
-      { label: 'Reports & Analytics',    href: '/inventory/reports',               icon: BarChart3     },
-    ],
-  },
-
-  // ── 8. Energy ────────────────────────────────────────────────
+  // ═══════════════ PLANT & CONNECTIVITY ═══════════════
+  { section: 'Plant & Connectivity', label: 'Plant & Connectivity' },
   {
     label: 'Energy',
     icon: Zap,
@@ -236,11 +233,6 @@ const navItems: NavItem[] = [
       { label: 'Meters',                 href: '/energy/meters',                   icon: Gauge         },
     ],
   },
-
-  // ── 9. Plant Hierarchy ───────────────────────────────────────
-  { label: 'Plant Hierarchy', href: '/hierarchy', icon: GitBranch },
-
-  // ── 10. IIoT & Connectivity ──────────────────────────────────
   {
     label: 'IIoT & Connectivity',
     icon: Radio,
@@ -251,11 +243,11 @@ const navItems: NavItem[] = [
       { label: 'Data Streams', href: '/iot/streams',  icon: Activity },
     ],
   },
-
-  // ── 11. Traceability ─────────────────────────────────────────
+  { label: 'Plant Hierarchy', href: '/hierarchy', icon: GitBranch },
   { label: 'Traceability', href: '/traceability', icon: GitCommit },
 
-  // ── 12. Reports & Analytics ──────────────────────────────────
+  // ═══════════════ INSIGHTS ═══════════════
+  { section: 'Insights', label: 'Insights' },
   {
     label: 'Reports & Analytics',
     icon: BarChart3,
@@ -267,11 +259,7 @@ const navItems: NavItem[] = [
       { label: 'Maintenance Reports',    href: '/reports/maintenance',             icon: Wrench        },
     ],
   },
-
-  // ── 13. AI Intelligence ──────────────────────────────────────
   { label: 'AI Intelligence', href: '/ai', icon: Sparkles, badge: 'New', badgeVariant: 'default' },
-
-  // ── 14. Notifications ────────────────────────────────────────
   { label: 'Notifications', href: '/notifications', icon: Bell, badgeDynamic: true, badgeVariant: 'destructive' },
 ];
 
@@ -364,7 +352,7 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge, countsMap }: 
           )}
         >
           <span className="relative shrink-0">
-            <Icon className={cn(isActive && 'text-sidebar-primary')} size={18} />
+            {Icon && <Icon className={cn(isActive && 'text-sidebar-primary')} size={18} />}
             {childHasAlert && (
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-destructive ring-2 ring-sidebar" />
             )}
@@ -413,10 +401,12 @@ function SidebarItem({ item, isCollapsed, depth = 0, dynamicBadge, countsMap }: 
         depth > 0 && 'py-2 text-xs',
       )}
     >
-      <Icon
-        size={depth > 0 ? 15 : 18}
-        className={cn('shrink-0', isActive && 'text-sidebar-primary')}
-      />
+      {Icon && (
+        <Icon
+          size={depth > 0 ? 15 : 18}
+          className={cn('shrink-0', isActive && 'text-sidebar-primary')}
+        />
+      )}
       {!isCollapsed && (
         <>
           <span className="flex-1 overflow-hidden whitespace-nowrap">
@@ -574,15 +564,28 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 space-y-0.5 no-scrollbar">
-        {navItems.map((item) => (
-          <SidebarItem
-            key={item.href || item.label}
-            item={item}
-            isCollapsed={isCollapsed}
-            dynamicBadge={item.badgeDynamic ? unreadCount : undefined}
-            countsMap={countsMap}
-          />
-        ))}
+        {navItems.map((item) =>
+          item.section ? (
+            isCollapsed ? (
+              <div key={`sec:${item.section}`} className="my-2 mx-2 border-t border-sidebar-border/60" />
+            ) : (
+              <div
+                key={`sec:${item.section}`}
+                className="px-3 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/35 select-none"
+              >
+                {item.section}
+              </div>
+            )
+          ) : (
+            <SidebarItem
+              key={item.href || item.label}
+              item={item}
+              isCollapsed={isCollapsed}
+              dynamicBadge={item.badgeDynamic ? unreadCount : undefined}
+              countsMap={countsMap}
+            />
+          ),
+        )}
       </nav>
 
       {/* Back to Map */}
