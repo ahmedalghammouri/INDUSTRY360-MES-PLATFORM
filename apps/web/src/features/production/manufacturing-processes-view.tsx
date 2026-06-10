@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { useSortedData } from '@/lib/use-sorted-data';
 import { WorkCenterPicker } from '@/components/ui/workcenter-picker';
+import { useProductMasterData } from '@/components/ui/master-data-select';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -36,11 +37,29 @@ interface StepForm {
   operationName: string;
   workCenterId: string;
   workCenterName: string;
-  cycleTimeMins: string;
+  cycleTimeSec: string;   // seconds — THE reference for JO cycle/duration
   setupTimeMins: string;
   description: string;
   isOptional: boolean;
 }
+
+type ProcessScope = 'PRODUCT' | 'CATEGORY' | 'BASE_WEIGHT' | 'PRODUCT_LIST';
+
+interface ProcHeader {
+  scopeType: ProcessScope;
+  skuId: string;
+  categoryId: string;
+  baseWeightId: string;
+  skuIds: string[];
+  version: string;
+  name: string;
+  description: string;
+}
+
+const EMPTY_HEADER: ProcHeader = {
+  scopeType: 'PRODUCT', skuId: '', categoryId: '', baseWeightId: '', skuIds: [],
+  version: '1.0', name: '', description: '',
+};
 
 interface PredecessorLink {
   fromStep: { id: string; stepNumber: number; operationName: string };
@@ -55,6 +74,7 @@ interface RoutingStep {
   workCenter?: string;
   workCenterId?: string;
   workCenterRef?: { id: string; code: string; name: string; level: string };
+  cycleTimeSec?: number;
   cycleTimeMins?: number;
   setupTimeMins?: number;
   description?: string;
@@ -65,15 +85,29 @@ interface RoutingStep {
 
 interface ManufacturingProcess {
   id: string;
-  skuId: string;
+  skuId: string | null;
+  scopeType?: ProcessScope;
   version: string;
   name: string;
   description?: string;
   totalCycleTimeMins?: number;
   isActive: boolean;
   approvedAt?: string;
-  sku: { id: string; code: string; name: string; itemNumber: string };
+  sku: { id: string; code: string; name: string; itemNumber: string } | null;
+  categoryRef?: { id: string; name: string } | null;
+  baseWeightRef?: { id: string; value: number; unit: string; label: string | null } | null;
+  skuLinks?: Array<{ sku: { id: string; code: string; name: string } }>;
   routingSteps: RoutingStep[];
+}
+
+/** Human label for what a process applies to. */
+function processScopeLabel(p: ManufacturingProcess): string {
+  switch (p.scopeType) {
+    case 'CATEGORY': return `Category: ${p.categoryRef?.name ?? '—'}`;
+    case 'BASE_WEIGHT': return `Weight: ${p.baseWeightRef?.label ?? `${p.baseWeightRef?.value ?? '—'} ${p.baseWeightRef?.unit ?? ''}`}`;
+    case 'PRODUCT_LIST': return `${p.skuLinks?.length ?? 0} products`;
+    default: return p.sku?.name ?? '—';
+  }
 }
 
 // ── Constants ─────────────────────────────────────────────────
@@ -97,7 +131,7 @@ const EMPTY_STEP = (): StepForm => ({
   operationName: '',
   workCenterId: '',
   workCenterName: '',
-  cycleTimeMins: '',
+  cycleTimeSec: '',
   setupTimeMins: '',
   description: '',
   isOptional: false,
@@ -287,8 +321,11 @@ function PdmDiagram({ steps }: { steps: RoutingStep[] }) {
               )}
               {/* Cycle / setup time */}
               <text x={pos.x + 10} y={pos.y + 64} fontSize="9" fill="#64748b" fontFamily="sans-serif">
-                {step.cycleTimeMins != null ? `⏱ ${step.cycleTimeMins}m cycle` : ''}
-                {step.cycleTimeMins != null && step.setupTimeMins != null ? '  ' : ''}
+                {(() => {
+                  const sec = step.cycleTimeSec ?? (step.cycleTimeMins != null ? step.cycleTimeMins * 60 : null);
+                  return sec != null ? `⏱ ${sec}s cycle` : '';
+                })()}
+                {(step.cycleTimeSec != null || step.cycleTimeMins != null) && step.setupTimeMins != null ? '  ' : ''}
                 {step.setupTimeMins != null && step.setupTimeMins > 0 ? `⚙ ${step.setupTimeMins}m setup` : ''}
               </text>
               {/* Optional badge */}
@@ -339,8 +376,8 @@ function ProcessForm({
 }: {
   title: string;
   skus: any[];
-  newProcess: { skuId: string; version: string; name: string; description: string };
-  setNewProcess: React.Dispatch<React.SetStateAction<{ skuId: string; version: string; name: string; description: string }>>;
+  newProcess: ProcHeader;
+  setNewProcess: React.Dispatch<React.SetStateAction<ProcHeader>>;
   steps: StepForm[];
   setSteps: React.Dispatch<React.SetStateAction<StepForm[]>>;
   deps: StepDependency[];
@@ -351,7 +388,8 @@ function ProcessForm({
   submitLabel: string;
   lockSku?: boolean;
 }) {
-  const totalCycle = steps.reduce((s, st) => s + (parseFloat(st.cycleTimeMins || '0') || 0), 0);
+  const totalCycleSec = steps.reduce((s, st) => s + (parseFloat(st.cycleTimeSec || '0') || 0), 0);
+  const { data: masterData } = useProductMasterData();
 
   // Drag state
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -412,7 +450,18 @@ function ProcessForm({
   const updateDep = (i: number, patch: Partial<StepDependency>) =>
     setDeps(prev => prev.map((d, idx) => idx === i ? { ...d, ...patch } : d));
 
-  const canSubmit = newProcess.skuId && newProcess.name && steps.every(s => s.operationName);
+  const scopeValid =
+    newProcess.scopeType === 'PRODUCT' ? !!newProcess.skuId :
+    newProcess.scopeType === 'CATEGORY' ? !!newProcess.categoryId :
+    newProcess.scopeType === 'BASE_WEIGHT' ? !!newProcess.baseWeightId :
+    newProcess.skuIds.length > 0;
+  const canSubmit = scopeValid && newProcess.name && steps.every(s => s.operationName);
+
+  const toggleListSku = (id: string) =>
+    setNewProcess(p => ({
+      ...p,
+      skuIds: p.skuIds.includes(id) ? p.skuIds.filter(x => x !== id) : [...p.skuIds, id],
+    }));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -430,23 +479,97 @@ function ProcessForm({
         </div>
 
         <div className="p-5 flex flex-col gap-5">
-          {/* Header fields */}
+          {/* Scope — which products this routing applies to */}
+          <div className="flex flex-col gap-2">
+            <Label>Applies To *</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                { v: 'PRODUCT', label: 'Single product' },
+                { v: 'CATEGORY', label: 'Category' },
+                { v: 'BASE_WEIGHT', label: 'Base weight' },
+                { v: 'PRODUCT_LIST', label: 'Product list' },
+              ] as Array<{ v: ProcessScope; label: string }>).map(o => (
+                <button
+                  key={o.v}
+                  type="button"
+                  disabled={lockSku}
+                  onClick={() => setNewProcess(p => ({ ...p, scopeType: o.v }))}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    newProcess.scopeType === o.v
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  } ${lockSku ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label>Product (SKU) *</Label>
-              {lockSku ? (
-                <div className="h-8 text-sm flex items-center px-3 rounded-md border bg-muted text-muted-foreground">
-                  {skus.find(s => s.id === newProcess.skuId)?.name ?? newProcess.skuId}
-                </div>
-              ) : (
-                <Select value={newProcess.skuId} onValueChange={v => setNewProcess(p => ({ ...p, skuId: v }))}>
-                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select product..." /></SelectTrigger>
-                  <SelectContent>
+              {newProcess.scopeType === 'PRODUCT' && (
+                <>
+                  <Label>Product (SKU) *</Label>
+                  {lockSku ? (
+                    <div className="h-8 text-sm flex items-center px-3 rounded-md border bg-muted text-muted-foreground">
+                      {skus.find(s => s.id === newProcess.skuId)?.name ?? newProcess.skuId}
+                    </div>
+                  ) : (
+                    <Select value={newProcess.skuId} onValueChange={v => setNewProcess(p => ({ ...p, skuId: v }))}>
+                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select product..." /></SelectTrigger>
+                      <SelectContent>
+                        {skus.map((s: any) => (
+                          <SelectItem key={s.id} value={s.id}>{s.itemNumber} — {s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </>
+              )}
+              {newProcess.scopeType === 'CATEGORY' && (
+                <>
+                  <Label>Category * <span className="text-[10px] text-muted-foreground font-normal">(all products in it)</span></Label>
+                  <Select value={newProcess.categoryId} onValueChange={v => setNewProcess(p => ({ ...p, categoryId: v }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select category..." /></SelectTrigger>
+                    <SelectContent>
+                      {(masterData?.categories ?? []).filter(c => c.isActive).map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
+              {newProcess.scopeType === 'BASE_WEIGHT' && (
+                <>
+                  <Label>Base Weight * <span className="text-[10px] text-muted-foreground font-normal">(all products with it)</span></Label>
+                  <Select value={newProcess.baseWeightId} onValueChange={v => setNewProcess(p => ({ ...p, baseWeightId: v }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select base weight..." /></SelectTrigger>
+                    <SelectContent>
+                      {(masterData?.baseWeights ?? []).filter(w => w.isActive).map(w => (
+                        <SelectItem key={w.id} value={w.id}>{w.label ?? `${w.value} ${w.unit}`}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
+              {newProcess.scopeType === 'PRODUCT_LIST' && (
+                <>
+                  <Label>Products * <span className="text-[10px] text-muted-foreground font-normal">({newProcess.skuIds.length} selected)</span></Label>
+                  <div className="max-h-36 overflow-y-auto rounded-md border border-input bg-background p-1.5 space-y-0.5">
                     {skus.map((s: any) => (
-                      <SelectItem key={s.id} value={s.id}>{s.itemNumber} — {s.name}</SelectItem>
+                      <label key={s.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/50 cursor-pointer text-xs">
+                        <input
+                          type="checkbox"
+                          checked={newProcess.skuIds.includes(s.id)}
+                          onChange={() => toggleListSku(s.id)}
+                          className="accent-[hsl(var(--primary))]"
+                        />
+                        <span className="truncate">{s.itemNumber} — {s.name}</span>
+                      </label>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </div>
+                </>
               )}
             </div>
             <div className="flex flex-col gap-1.5">
@@ -517,8 +640,8 @@ function ProcessForm({
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="flex flex-col gap-1">
-                      <span className="text-[10px] text-muted-foreground">Cycle time (min)</span>
-                      <Input type="number" min="0" step="0.5" value={step.cycleTimeMins} onChange={e => updateStep(i, { cycleTimeMins: e.target.value })} className="h-7 text-xs" placeholder="0" />
+                      <span className="text-[10px] text-muted-foreground">Cycle time (sec)</span>
+                      <Input type="number" min="0" step="1" value={step.cycleTimeSec} onChange={e => updateStep(i, { cycleTimeSec: e.target.value })} className="h-7 text-xs" placeholder="0" />
                     </div>
                     <div className="flex flex-col gap-1">
                       <span className="text-[10px] text-muted-foreground">Setup time (min)</span>
@@ -537,10 +660,11 @@ function ProcessForm({
                 </p>
               )}
             </div>
-            {totalCycle > 0 && (
+            {totalCycleSec > 0 && (
               <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <Timer size={12} />
-                Total cycle time: <strong>{totalCycle.toFixed(1)} min</strong>
+                Total cycle time: <strong>{totalCycleSec.toFixed(0)} sec</strong>
+                <span className="text-muted-foreground/60">(≈ {(totalCycleSec / 60).toFixed(1)} min)</span>
               </div>
             )}
           </div>
@@ -630,13 +754,13 @@ export function ManufacturingProcessesView() {
 
   // Create form
   const [createOpen, setCreateOpen] = useState(false);
-  const [newProcess, setNewProcess] = useState({ skuId: '', version: '1.0', name: '', description: '' });
+  const [newProcess, setNewProcess] = useState<ProcHeader>(EMPTY_HEADER);
   const [steps, setSteps] = useState<StepForm[]>([{ ...EMPTY_STEP(), stepNumber: 1 }]);
   const [deps, setDeps] = useState<StepDependency[]>([]);
 
   // Edit form
   const [editProc, setEditProc] = useState<ManufacturingProcess | null>(null);
-  const [editProcess, setEditProcess] = useState({ skuId: '', version: '1.0', name: '', description: '' });
+  const [editProcess, setEditProcess] = useState<ProcHeader>(EMPTY_HEADER);
   const [editSteps, setEditSteps] = useState<StepForm[]>([]);
   const [editDeps, setEditDeps] = useState<StepDependency[]>([]);
 
@@ -675,7 +799,7 @@ export function ManufacturingProcessesView() {
   const { sortedData } = useSortedData(processes, sortCol, sortDir);
 
   const resetCreate = () => {
-    setNewProcess({ skuId: '', version: '1.0', name: '', description: '' });
+    setNewProcess(EMPTY_HEADER);
     setSteps([{ ...EMPTY_STEP(), stepNumber: 1 }]);
     setDeps([]);
   };
@@ -709,18 +833,25 @@ export function ManufacturingProcessesView() {
   useEffect(() => { setPage(1); }, [search]);
 
   const filteredProcesses = sortedData.filter(p =>
-    !search || p.sku.name.toLowerCase().includes(search.toLowerCase()) || p.name.toLowerCase().includes(search.toLowerCase()),
+    !search || processScopeLabel(p).toLowerCase().includes(search.toLowerCase()) || p.name.toLowerCase().includes(search.toLowerCase()),
   );
 
   const openEdit = (proc: ManufacturingProcess) => {
     setEditProc(proc);
-    setEditProcess({ skuId: proc.skuId, version: proc.version, name: proc.name, description: proc.description ?? '' });
+    setEditProcess({
+      scopeType: proc.scopeType ?? 'PRODUCT',
+      skuId: proc.skuId ?? '',
+      categoryId: proc.categoryRef?.id ?? '',
+      baseWeightId: proc.baseWeightRef?.id ?? '',
+      skuIds: (proc.skuLinks ?? []).map(l => l.sku.id),
+      version: proc.version, name: proc.name, description: proc.description ?? '',
+    });
     setEditSteps(proc.routingSteps.map(s => ({
       stepNumber: s.stepNumber,
       operationName: s.operationName,
       workCenterId: s.workCenterId ?? s.workCenterRef?.id ?? '',
       workCenterName: s.workCenterRef?.name ?? s.workCenter ?? '',
-      cycleTimeMins: String(s.cycleTimeMins ?? ''),
+      cycleTimeSec: String(s.cycleTimeSec ?? (s.cycleTimeMins != null ? s.cycleTimeMins * 60 : '')),
       setupTimeMins: String(s.setupTimeMins ?? ''),
       description: s.description ?? '',
       isOptional: s.isOptional,
@@ -736,56 +867,54 @@ export function ManufacturingProcessesView() {
     setEditDeps(newDeps);
   };
 
+  const stepsPayload = (list: StepForm[], depList: StepDependency[]) =>
+    list.map((s, i) => ({
+      stepNumber: s.stepNumber,
+      operationName: s.operationName,
+      workCenterId: s.workCenterId || undefined,
+      workCenter: s.workCenterName || undefined,
+      cycleTimeSec: parseFloat(s.cycleTimeSec || '0') || undefined,
+      setupTimeMins: parseFloat(s.setupTimeMins || '0') || undefined,
+      description: s.description || undefined,
+      isOptional: s.isOptional,
+      dependencies: depList.filter(d => d.toStepIndex === i).map(d => ({
+        fromStepNumber: list[d.fromStepIndex].stepNumber,
+        type: d.type,
+        lagMins: d.lagMins,
+      })),
+    }));
+
+  const scopePayload = (h: ProcHeader) => ({
+    scopeType: h.scopeType,
+    skuId: h.scopeType === 'PRODUCT' ? h.skuId : undefined,
+    categoryId: h.scopeType === 'CATEGORY' ? h.categoryId : undefined,
+    baseWeightId: h.scopeType === 'BASE_WEIGHT' ? h.baseWeightId : undefined,
+    skuIds: h.scopeType === 'PRODUCT_LIST' ? h.skuIds : undefined,
+  });
+
   const handleCreate = () => {
-    const totalCycle = steps.reduce((s, st) => s + (parseFloat(st.cycleTimeMins || '0') || 0), 0);
+    const totalSec = steps.reduce((s, st) => s + (parseFloat(st.cycleTimeSec || '0') || 0), 0);
     createMutation.mutate({
-      skuId: newProcess.skuId,
+      ...scopePayload(newProcess),
       version: newProcess.version,
       name: newProcess.name,
       description: newProcess.description || undefined,
-      totalCycleTimeMins: totalCycle || undefined,
-      steps: steps.map((s, i) => ({
-        stepNumber: s.stepNumber,
-        operationName: s.operationName,
-        workCenterId: s.workCenterId || undefined,
-        workCenter: s.workCenterName || undefined,
-        cycleTimeMins: parseFloat(s.cycleTimeMins || '0') || undefined,
-        setupTimeMins: parseFloat(s.setupTimeMins || '0') || undefined,
-        description: s.description || undefined,
-        isOptional: s.isOptional,
-        dependencies: deps.filter(d => d.toStepIndex === i).map(d => ({
-          fromStepNumber: steps[d.fromStepIndex].stepNumber,
-          type: d.type,
-          lagMins: d.lagMins,
-        })),
-      })),
+      totalCycleTimeMins: totalSec ? totalSec / 60 : undefined,
+      steps: stepsPayload(steps, deps),
     });
   };
 
   const handleEdit = () => {
     if (!editProc) return;
-    const totalCycle = editSteps.reduce((s, st) => s + (parseFloat(st.cycleTimeMins || '0') || 0), 0);
+    const totalSec = editSteps.reduce((s, st) => s + (parseFloat(st.cycleTimeSec || '0') || 0), 0);
     updateMutation.mutate({
       id: editProc.id,
       dto: {
+        ...scopePayload(editProcess),
         name: editProcess.name,
         description: editProcess.description || undefined,
-        totalCycleTimeMins: totalCycle || undefined,
-        steps: editSteps.map((s, i) => ({
-          stepNumber: s.stepNumber,
-          operationName: s.operationName,
-          workCenterId: s.workCenterId || undefined,
-          workCenter: s.workCenterName || undefined,
-          cycleTimeMins: parseFloat(s.cycleTimeMins || '0') || undefined,
-          setupTimeMins: parseFloat(s.setupTimeMins || '0') || undefined,
-          description: s.description || undefined,
-          isOptional: s.isOptional,
-          dependencies: editDeps.filter(d => d.toStepIndex === i).map(d => ({
-            fromStepNumber: editSteps[d.fromStepIndex].stepNumber,
-            type: d.type,
-            lagMins: d.lagMins,
-          })),
-        })),
+        totalCycleTimeMins: totalSec ? totalSec / 60 : undefined,
+        steps: stepsPayload(editSteps, editDeps),
       },
     });
   };
@@ -970,7 +1099,8 @@ function ProcessCard({ process, isExpanded, onToggle, onApprove, onEdit, onDelet
   onDelete: () => void;
   onRevert: () => void;
 }) {
-  const totalCycle = process.routingSteps.reduce((s, r) => s + (r.cycleTimeMins ?? 0), 0);
+  const totalCycleSec = process.routingSteps.reduce(
+    (s, r) => s + (r.cycleTimeSec ?? (r.cycleTimeMins != null ? r.cycleTimeMins * 60 : 0)), 0);
   const totalSetup = process.routingSteps.reduce((s, r) => s + (r.setupTimeMins ?? 0), 0);
   const hasParallel = process.routingSteps.some(s =>
     s.predecessors?.some(p => p.type === 'START_TO_START' || p.type === 'FINISH_TO_FINISH'),
@@ -984,8 +1114,13 @@ function ProcessCard({ process, isExpanded, onToggle, onApprove, onEdit, onDelet
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-sm">{process.sku.itemNumber}</span>
-            <span className="text-xs text-muted-foreground">— {process.sku.name}</span>
+            <span className="font-semibold text-sm">{process.sku?.itemNumber ?? processScopeLabel(process)}</span>
+            {process.sku && <span className="text-xs text-muted-foreground">— {process.sku.name}</span>}
+            {process.scopeType && process.scopeType !== 'PRODUCT' && (
+              <Badge variant="outline" className="text-[10px] h-4 text-sky-400 border-sky-500/30">
+                {process.scopeType === 'CATEGORY' ? 'Category scope' : process.scopeType === 'BASE_WEIGHT' ? 'Weight scope' : 'Product list'}
+              </Badge>
+            )}
             <Badge variant="outline" className="text-[10px] h-4">v{process.version}</Badge>
             {process.approvedAt ? (
               <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
@@ -1000,7 +1135,7 @@ function ProcessCard({ process, isExpanded, onToggle, onApprove, onEdit, onDelet
           </div>
           <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
             <span>{process.routingSteps.length} steps</span>
-            {totalCycle > 0 && <span><Clock size={10} className="inline mr-0.5" />{totalCycle.toFixed(0)} min cycle</span>}
+            {totalCycleSec > 0 && <span><Clock size={10} className="inline mr-0.5" />{totalCycleSec.toFixed(0)} sec cycle</span>}
             {totalSetup > 0 && <span>{totalSetup.toFixed(0)} min setup</span>}
           </div>
         </div>

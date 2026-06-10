@@ -199,6 +199,48 @@ export class InventoryController {
   }
 
   // ────────────────────────────────────────────────────────────
+  // PRODUCT MASTER DATA (categories / brands / packaging-types / base-units / base-weights)
+  // ────────────────────────────────────────────────────────────
+
+  @Get('master')
+  @ApiOperation({ summary: 'All product master-data lookups (category, brand, packaging, base unit, base weight)' })
+  async getProductMasterData(@CurrentUser() user: RequestUser) {
+    return this.inventoryService.getProductMasterData(user.factoryId);
+  }
+
+  @Post('master/:entity')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a master-data item (entity: categories|brands|packaging-types|base-units|base-weights)' })
+  async createMasterItem(
+    @CurrentUser() user: RequestUser,
+    @Param('entity') entity: string,
+    @Body() dto: any,
+  ) {
+    return this.inventoryService.createMasterItem(user.factoryId, entity, dto);
+  }
+
+  @Patch('master/:entity/:id')
+  @ApiOperation({ summary: 'Update a master-data item' })
+  async updateMasterItem(
+    @CurrentUser() user: RequestUser,
+    @Param('entity') entity: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: any,
+  ) {
+    return this.inventoryService.updateMasterItem(user.factoryId, entity, id, dto);
+  }
+
+  @Delete('master/:entity/:id')
+  @ApiOperation({ summary: 'Delete a master-data item (soft-disables when in use)' })
+  async deleteMasterItem(
+    @CurrentUser() user: RequestUser,
+    @Param('entity') entity: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.deleteMasterItem(user.factoryId, entity, id);
+  }
+
+  // ────────────────────────────────────────────────────────────
   // RAW MATERIALS
   // ────────────────────────────────────────────────────────────
 

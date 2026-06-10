@@ -1642,22 +1642,39 @@ export class ProductionService {
     if (!wo) throw new NotFoundException('Work order not found');
     if (!wo.skuId) throw new BadRequestException('Work order has no product (SKU) assigned');
 
-    // Resolve manufacturing process for this SKU
-    const process = await this.prisma.manufacturingProcess.findFirst({
-      where: { skuId: wo.skuId, isActive: true },
-      include: {
-        routingSteps: {
-          include: {
-            machine: { select: { id: true, name: true, code: true } },
-            workCenterRef: { select: { id: true, name: true, code: true } },
-            // Typed routing relations (FS/SS/SF/FF + lag) — copied onto job orders
-            predecessors: { select: { fromStepId: true, type: true, lagMins: true } },
-          },
-          orderBy: { stepNumber: 'asc' },
+    // Resolve manufacturing process for this SKU by scope priority:
+    // 1) PRODUCT (direct)  2) PRODUCT_LIST (membership)
+    // 3) CATEGORY (same category)  4) BASE_WEIGHT (same base weight)
+    const stepsInclude = {
+      routingSteps: {
+        include: {
+          machine: { select: { id: true, name: true, code: true } },
+          workCenterRef: { select: { id: true, name: true, code: true } },
+          // Typed routing relations (FS/SS/SF/FF + lag) — copied onto job orders
+          predecessors: { select: { fromStepId: true, type: true, lagMins: true } },
         },
+        orderBy: { stepNumber: 'asc' as const },
       },
-      orderBy: { version: 'desc' },
+    };
+    const skuInfo = await this.prisma.sKU.findUnique({
+      where: { id: wo.skuId },
+      select: { categoryId: true, baseWeightId: true },
     });
+    const scopeQueries: Prisma.ManufacturingProcessWhereInput[] = [
+      { scopeType: 'PRODUCT', skuId: wo.skuId },
+      { scopeType: 'PRODUCT_LIST', skuLinks: { some: { skuId: wo.skuId } } },
+      ...(skuInfo?.categoryId ? [{ scopeType: 'CATEGORY' as const, categoryId: skuInfo.categoryId }] : []),
+      ...(skuInfo?.baseWeightId ? [{ scopeType: 'BASE_WEIGHT' as const, baseWeightId: skuInfo.baseWeightId }] : []),
+    ];
+    let process: (Prisma.ManufacturingProcessGetPayload<{ include: typeof stepsInclude }>) | null = null;
+    for (const scopeWhere of scopeQueries) {
+      process = await this.prisma.manufacturingProcess.findFirst({
+        where: { ...scopeWhere, isActive: true },
+        include: stepsInclude,
+        orderBy: { version: 'desc' },
+      });
+      if (process) break;
+    }
 
     if (!process || process.routingSteps.length === 0) {
       throw new BadRequestException(
@@ -1732,7 +1749,10 @@ export class ProductionService {
       const jPlannedStart = new Date(startMs + i * slotMs);
       const jPlannedEnd = new Date(startMs + (i + 1) * slotMs);
 
-      const idealCycleTimeSec: number | null = cycleTime?.cycleTimeSeconds
+      // Routing step seconds are THE reference for JO cycle/duration;
+      // machine×SKU cycle table is the fallback, legacy minutes last.
+      const idealCycleTimeSec: number | null = step.cycleTimeSec
+        ?? cycleTime?.cycleTimeSeconds
         ?? (step.cycleTimeMins != null ? step.cycleTimeMins * 60 : null);
 
       // Packaging-aware unit/qty per step

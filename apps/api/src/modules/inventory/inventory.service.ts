@@ -203,6 +203,11 @@ export class InventoryService {
             select: { componentCode: true, componentName: true, quantity: true, unit: true, type: true },
           },
           storageLocationRef: { select: { id: true, code: true, name: true, zone: true } },
+          categoryRef: { select: { id: true, name: true } },
+          brandRef: { select: { id: true, name: true } },
+          packagingTypeRef: { select: { id: true, name: true } },
+          baseUnitRef: { select: { id: true, code: true, name: true } },
+          baseWeightRef: { select: { id: true, value: true, unit: true, label: true } },
         },
         orderBy: [{ category: 'asc' }, { name: 'asc' }],
         skip: (page - 1) * limit,
@@ -337,6 +342,8 @@ export class InventoryService {
 
   async createProduct(factoryId: string | null, dto: {
     code: string; name: string; itemNumber?: string; category?: string; brand?: string;
+    categoryId?: string | null; brandId?: string | null; packagingTypeId?: string | null;
+    baseUnitId?: string | null; baseWeightId?: string | null;
     unit?: string; weight?: number; weightUnit?: string;
     length?: number; width?: number; height?: number; dimensionUnit?: string;
     packagingType?: string;
@@ -344,6 +351,7 @@ export class InventoryService {
     storageLocationId?: string;
   }) {
     const resolvedFactoryId = factoryId ?? await this.getDefaultFactoryId();
+    const refs = await this.resolveMasterRefs(resolvedFactoryId, dto);
     return this.prisma.sKU.create({
       data: {
         factoryId: resolvedFactoryId,
@@ -365,19 +373,25 @@ export class InventoryService {
         cartonsPerPallet: dto.cartonsPerPallet ?? 1,
         storageLocationId: dto.storageLocationId ?? null,
         isActive: true,
+        ...refs, // FK ids + synced legacy texts/weight (wins over raw strings)
       },
     });
   }
 
   async updateProduct(factoryId: string | null, id: string, dto: {
     name?: string; category?: string; brand?: string; unit?: string;
+    categoryId?: string | null; brandId?: string | null; packagingTypeId?: string | null;
+    baseUnitId?: string | null; baseWeightId?: string | null;
     weight?: number | null; weightUnit?: string;
     length?: number | null; width?: number | null; height?: number | null; dimensionUnit?: string;
+    unitsPerInner?: number; innersPerCarton?: number; cartonsPerPallet?: number;
+    packagingType?: string;
     storageLocationId?: string | null;
   }) {
     const factoryFilter = factoryId ? { factoryId } : {};
     const sku = await this.prisma.sKU.findFirst({ where: { id, ...factoryFilter } });
     if (!sku) throw new NotFoundException('Product not found');
+    const refs = await this.resolveMasterRefs(sku.factoryId, dto);
     return this.prisma.sKU.update({
       where: { id },
       data: {
@@ -391,7 +405,12 @@ export class InventoryService {
         ...(dto.width !== undefined && { width: dto.width }),
         ...(dto.height !== undefined && { height: dto.height }),
         ...(dto.dimensionUnit && { dimensionUnit: dto.dimensionUnit }),
+        ...(dto.unitsPerInner !== undefined && { unitsPerInner: dto.unitsPerInner }),
+        ...(dto.innersPerCarton !== undefined && { innersPerCarton: dto.innersPerCarton }),
+        ...(dto.cartonsPerPallet !== undefined && { cartonsPerPallet: dto.cartonsPerPallet }),
+        ...(dto.packagingType !== undefined && { packagingType: dto.packagingType }),
         ...(dto.storageLocationId !== undefined && { storageLocationId: dto.storageLocationId }),
+        ...refs,
       },
     });
   }
@@ -407,6 +426,171 @@ export class InventoryService {
     const factory = await this.prisma.factory.findFirst({ where: { isActive: true } });
     if (!factory) throw new NotFoundException('No active factory found');
     return factory.id;
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // PRODUCT MASTER DATA (Category / Brand / Packaging / Base Unit / Base Weight)
+  // ────────────────────────────────────────────────────────────
+
+  /** All five lookup lists in one call (powers the product form dropdowns). */
+  async getProductMasterData(factoryId: string | null) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const where = { factoryId: fid, isActive: true };
+    const order = [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }];
+    const [categories, brands, packagingTypes, baseUnits, baseWeights] = await Promise.all([
+      this.prisma.productCategory.findMany({ where, orderBy: order }),
+      this.prisma.productBrand.findMany({ where, orderBy: order }),
+      this.prisma.packagingType.findMany({ where, orderBy: order }),
+      this.prisma.baseUnit.findMany({ where, orderBy: order }),
+      this.prisma.baseWeight.findMany({ where, orderBy: [{ value: 'asc' }] }),
+    ]);
+    return { categories, brands, packagingTypes, baseUnits, baseWeights };
+  }
+
+  private masterDelegate(entity: string): { d: any; label: string } {
+    const map: Record<string, { d: any; label: string }> = {
+      'categories': { d: this.prisma.productCategory, label: 'Category' },
+      'brands': { d: this.prisma.productBrand, label: 'Brand' },
+      'packaging-types': { d: this.prisma.packagingType, label: 'Packaging type' },
+      'base-units': { d: this.prisma.baseUnit, label: 'Base unit' },
+      'base-weights': { d: this.prisma.baseWeight, label: 'Base weight' },
+    };
+    const found = map[entity];
+    if (!found) throw new BadRequestException(`Unknown master-data entity: ${entity}`);
+    return found;
+  }
+
+  async createMasterItem(factoryId: string | null, entity: string, dto: {
+    name?: string; nameAr?: string; code?: string; value?: number; unit?: string; sortOrder?: number;
+  }) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const { d, label } = this.masterDelegate(entity);
+
+    if (entity === 'base-weights') {
+      if (dto.value == null || dto.value <= 0) throw new BadRequestException('Base weight value is required');
+      const unit = dto.unit ?? 'kg';
+      return d.upsert({
+        where: { factoryId_value_unit: { factoryId: fid, value: dto.value, unit } },
+        update: { isActive: true, label: dto.name ?? `${dto.value} ${unit.toUpperCase() === 'KG' ? 'Kg' : unit}` },
+        create: { factoryId: fid, value: dto.value, unit, label: dto.name ?? `${dto.value} Kg`, sortOrder: dto.sortOrder ?? 0 },
+      });
+    }
+    if (entity === 'base-units') {
+      const code = (dto.code ?? dto.name ?? '').trim().toUpperCase();
+      if (!code) throw new BadRequestException('Base unit code is required');
+      return d.upsert({
+        where: { factoryId_code: { factoryId: fid, code } },
+        update: { isActive: true, name: dto.name ?? code },
+        create: { factoryId: fid, code, name: dto.name ?? code, sortOrder: dto.sortOrder ?? 0 },
+      });
+    }
+    const name = (dto.name ?? '').trim();
+    if (!name) throw new BadRequestException(`${label} name is required`);
+    return d.upsert({
+      where: { factoryId_name: { factoryId: fid, name } },
+      update: { isActive: true, ...(dto.nameAr !== undefined && { nameAr: dto.nameAr }) },
+      create: { factoryId: fid, name, nameAr: dto.nameAr ?? null, sortOrder: dto.sortOrder ?? 0 },
+    });
+  }
+
+  async updateMasterItem(factoryId: string | null, entity: string, id: string, dto: {
+    name?: string; nameAr?: string; code?: string; value?: number; unit?: string; sortOrder?: number; isActive?: boolean;
+  }) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const { d, label } = this.masterDelegate(entity);
+    const item = await d.findFirst({ where: { id, factoryId: fid } });
+    if (!item) throw new NotFoundException(`${label} not found`);
+    const data: Record<string, unknown> = {
+      ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
+      ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+    };
+    if (entity === 'base-weights') {
+      Object.assign(data,
+        dto.value !== undefined && { value: dto.value },
+        dto.unit && { unit: dto.unit },
+        dto.name !== undefined && { label: dto.name });
+    } else if (entity === 'base-units') {
+      Object.assign(data,
+        dto.code && { code: dto.code.trim().toUpperCase() },
+        dto.name !== undefined && { name: dto.name });
+    } else {
+      Object.assign(data,
+        dto.name && { name: dto.name.trim() },
+        dto.nameAr !== undefined && { nameAr: dto.nameAr });
+    }
+    const updated = await d.update({ where: { id }, data });
+    await this.syncLegacyProductTexts(entity, updated);
+    return updated;
+  }
+
+  async deleteMasterItem(factoryId: string | null, entity: string, id: string) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const { d, label } = this.masterDelegate(entity);
+    const item = await d.findFirst({ where: { id, factoryId: fid }, include: { _count: { select: { skus: true } } } });
+    if (!item) throw new NotFoundException(`${label} not found`);
+    if (item._count.skus > 0) {
+      // In use → soft-disable so existing products keep their reference
+      await d.update({ where: { id }, data: { isActive: false } });
+      return { id, disabled: true, usedBy: item._count.skus };
+    }
+    await d.delete({ where: { id } });
+    return { id, deleted: true };
+  }
+
+  /** Renaming a lookup keeps the SKUs' legacy text columns in sync. */
+  private async syncLegacyProductTexts(entity: string, item: any) {
+    if (entity === 'categories') {
+      await this.prisma.sKU.updateMany({ where: { categoryId: item.id }, data: { category: item.name } });
+    } else if (entity === 'brands') {
+      await this.prisma.sKU.updateMany({ where: { brandId: item.id }, data: { brand: item.name } });
+    } else if (entity === 'packaging-types') {
+      await this.prisma.sKU.updateMany({ where: { packagingTypeId: item.id }, data: { packagingType: item.name } });
+    } else if (entity === 'base-units') {
+      await this.prisma.sKU.updateMany({ where: { baseUnitId: item.id }, data: { baseUnit: item.code } });
+    } else if (entity === 'base-weights') {
+      await this.prisma.sKU.updateMany({ where: { baseWeightId: item.id }, data: { weight: item.value, weightUnit: item.unit } });
+    }
+  }
+
+  /** Resolve master FK ids → legacy text values so both stay consistent. */
+  private async resolveMasterRefs(fid: string, dto: {
+    categoryId?: string | null; brandId?: string | null; packagingTypeId?: string | null;
+    baseUnitId?: string | null; baseWeightId?: string | null;
+  }) {
+    const out: Record<string, unknown> = {};
+    if (dto.categoryId !== undefined) {
+      out.categoryId = dto.categoryId;
+      out.category = dto.categoryId
+        ? (await this.prisma.productCategory.findFirst({ where: { id: dto.categoryId, factoryId: fid } }))?.name ?? null
+        : null;
+    }
+    if (dto.brandId !== undefined) {
+      out.brandId = dto.brandId;
+      out.brand = dto.brandId
+        ? (await this.prisma.productBrand.findFirst({ where: { id: dto.brandId, factoryId: fid } }))?.name ?? null
+        : null;
+    }
+    if (dto.packagingTypeId !== undefined) {
+      out.packagingTypeId = dto.packagingTypeId;
+      out.packagingType = dto.packagingTypeId
+        ? (await this.prisma.packagingType.findFirst({ where: { id: dto.packagingTypeId, factoryId: fid } }))?.name ?? null
+        : null;
+    }
+    if (dto.baseUnitId !== undefined) {
+      out.baseUnitId = dto.baseUnitId;
+      if (dto.baseUnitId) {
+        const u = await this.prisma.baseUnit.findFirst({ where: { id: dto.baseUnitId, factoryId: fid } });
+        if (u) out.baseUnit = u.code;
+      }
+    }
+    if (dto.baseWeightId !== undefined) {
+      out.baseWeightId = dto.baseWeightId;
+      if (dto.baseWeightId) {
+        const w = await this.prisma.baseWeight.findFirst({ where: { id: dto.baseWeightId, factoryId: fid } });
+        if (w) { out.weight = w.value; out.weightUnit = w.unit; }
+      }
+    }
+    return out;
   }
 
   // ────────────────────────────────────────────────────────────
@@ -787,6 +971,9 @@ export class InventoryService {
         where,
         include: {
           sku: { select: { id: true, code: true, name: true, itemNumber: true } },
+          categoryRef: { select: { id: true, name: true } },
+          baseWeightRef: { select: { id: true, value: true, unit: true, label: true } },
+          skuLinks: { include: { sku: { select: { id: true, code: true, name: true } } } },
           routingSteps: {
             include: {
               machine: { select: { code: true, name: true } },
@@ -808,7 +995,11 @@ export class InventoryService {
   }
 
   async createProcess(factoryId: string, dto: {
-    skuId: string;
+    skuId?: string;
+    scopeType?: 'PRODUCT' | 'CATEGORY' | 'BASE_WEIGHT' | 'PRODUCT_LIST';
+    categoryId?: string;
+    baseWeightId?: string;
+    skuIds?: string[];
     version?: string;
     name: string;
     description?: string;
@@ -819,6 +1010,7 @@ export class InventoryService {
       workCenter?: string;
       workCenterId?: string;
       machineId?: string;
+      cycleTimeSec?: number;
       cycleTimeMins?: number;
       setupTimeMins?: number;
       description?: string;
@@ -828,43 +1020,66 @@ export class InventoryService {
     }>;
   }) {
     const version = dto.version ?? '1.0';
+    const scopeType = dto.scopeType ?? 'PRODUCT';
 
-    const existing = await this.prisma.manufacturingProcess.findUnique({
-      where: { skuId_version: { skuId: dto.skuId, version } },
-      select: { id: true },
-    });
-    if (existing) {
-      throw new BadRequestException(
-        `A manufacturing process version ${version} already exists for this product. Use a different version or clone the existing one.`,
-      );
+    // Scope validation
+    if (scopeType === 'PRODUCT' && !dto.skuId) throw new BadRequestException('skuId is required for PRODUCT scope');
+    if (scopeType === 'CATEGORY' && !dto.categoryId) throw new BadRequestException('categoryId is required for CATEGORY scope');
+    if (scopeType === 'BASE_WEIGHT' && !dto.baseWeightId) throw new BadRequestException('baseWeightId is required for BASE_WEIGHT scope');
+    if (scopeType === 'PRODUCT_LIST' && !dto.skuIds?.length) throw new BadRequestException('skuIds list is required for PRODUCT_LIST scope');
+
+    if (scopeType === 'PRODUCT') {
+      const existing = await this.prisma.manufacturingProcess.findUnique({
+        where: { skuId_version: { skuId: dto.skuId!, version } },
+        select: { id: true },
+      });
+      if (existing) {
+        throw new BadRequestException(
+          `A manufacturing process version ${version} already exists for this product. Use a different version or clone the existing one.`,
+        );
+      }
     }
 
     const process = await this.prisma.manufacturingProcess.create({
       data: {
         factoryId,
-        skuId: dto.skuId,
+        skuId: scopeType === 'PRODUCT' ? dto.skuId! : null,
+        scopeType: scopeType as any,
+        categoryId: scopeType === 'CATEGORY' ? dto.categoryId : null,
+        baseWeightId: scopeType === 'BASE_WEIGHT' ? dto.baseWeightId : null,
         version,
         name: dto.name,
         description: dto.description,
         totalCycleTimeMins: dto.totalCycleTimeMins,
         isActive: true,
+        ...(scopeType === 'PRODUCT_LIST' && {
+          skuLinks: { create: dto.skuIds!.map((skuId) => ({ skuId })) },
+        }),
         routingSteps: {
-          create: dto.steps.map(s => ({
-            stepNumber: s.stepNumber,
-            operationName: s.operationName,
-            workCenter: s.workCenter,
-            workCenterId: s.workCenterId ?? null,
-            machineId: s.machineId ?? null,
-            cycleTimeMins: s.cycleTimeMins,
-            setupTimeMins: s.setupTimeMins,
-            description: s.description,
-            parameters: (s.parameters as any) ?? undefined,
-            isOptional: s.isOptional ?? false,
-          })),
+          create: dto.steps.map(s => {
+            // Seconds are the canonical cycle time; legacy minutes stay derived.
+            const sec = s.cycleTimeSec ?? (s.cycleTimeMins != null ? s.cycleTimeMins * 60 : null);
+            return {
+              stepNumber: s.stepNumber,
+              operationName: s.operationName,
+              workCenter: s.workCenter,
+              workCenterId: s.workCenterId ?? null,
+              machineId: s.machineId ?? null,
+              cycleTimeSec: sec,
+              cycleTimeMins: sec != null ? sec / 60 : null,
+              setupTimeMins: s.setupTimeMins,
+              description: s.description,
+              parameters: (s.parameters as any) ?? undefined,
+              isOptional: s.isOptional ?? false,
+            };
+          }),
         },
       },
       include: {
         sku: { select: { code: true, name: true } },
+        categoryRef: { select: { id: true, name: true } },
+        baseWeightRef: { select: { id: true, value: true, unit: true, label: true } },
+        skuLinks: { include: { sku: { select: { id: true, code: true, name: true } } } },
         routingSteps: { orderBy: { stepNumber: 'asc' } },
       },
     });
@@ -896,12 +1111,18 @@ export class InventoryService {
     description?: string;
     totalCycleTimeMins?: number;
     isActive?: boolean;
+    scopeType?: 'PRODUCT' | 'CATEGORY' | 'BASE_WEIGHT' | 'PRODUCT_LIST';
+    skuId?: string | null;
+    categoryId?: string | null;
+    baseWeightId?: string | null;
+    skuIds?: string[];
     steps?: Array<{
       stepNumber: number;
       operationName: string;
       workCenter?: string;
       workCenterId?: string;
       machineId?: string;
+      cycleTimeSec?: number;
       cycleTimeMins?: number;
       setupTimeMins?: number;
       description?: string;
@@ -913,32 +1134,60 @@ export class InventoryService {
     const p = await this.prisma.manufacturingProcess.findUnique({ where: { id } });
     if (!p) throw new NotFoundException('Manufacturing process not found');
 
-    const { steps, ...headerDto } = dto;
+    const { steps, skuIds, scopeType, skuId, categoryId, baseWeightId, ...headerDto } = dto;
 
-    await this.prisma.manufacturingProcess.update({ where: { id }, data: headerDto });
+    // Scope change handling
+    const scopeData: Record<string, unknown> = {};
+    if (scopeType) {
+      scopeData.scopeType = scopeType;
+      scopeData.skuId = scopeType === 'PRODUCT' ? (skuId ?? p.skuId) : null;
+      scopeData.categoryId = scopeType === 'CATEGORY' ? (categoryId ?? p.categoryId) : null;
+      scopeData.baseWeightId = scopeType === 'BASE_WEIGHT' ? (baseWeightId ?? p.baseWeightId) : null;
+      if (scopeType === 'PRODUCT_LIST') {
+        await this.prisma.manufacturingProcessSku.deleteMany({ where: { processId: id } });
+        if (skuIds?.length) {
+          await this.prisma.manufacturingProcessSku.createMany({
+            data: skuIds.map((sid) => ({ processId: id, skuId: sid })),
+            skipDuplicates: true,
+          });
+        }
+      } else {
+        await this.prisma.manufacturingProcessSku.deleteMany({ where: { processId: id } });
+      }
+    }
+
+    await this.prisma.manufacturingProcess.update({ where: { id }, data: { ...headerDto, ...scopeData } });
 
     if (steps && steps.length > 0) {
       // Delete all existing steps (cascades to StepDependency via onDelete: Cascade)
       await this.prisma.routingStep.deleteMany({ where: { processId: id } });
 
+      // Seconds are canonical
+      const secOf = (s: { cycleTimeSec?: number; cycleTimeMins?: number }) =>
+        s.cycleTimeSec ?? (s.cycleTimeMins != null ? s.cycleTimeMins * 60 : null);
+
       // Recreate steps
       const process = await this.prisma.manufacturingProcess.update({
         where: { id },
         data: {
-          totalCycleTimeMins: steps.reduce((s, st) => s + (st.cycleTimeMins ?? 0), 0) || headerDto.totalCycleTimeMins,
+          totalCycleTimeMins: steps.reduce((s, st) => s + ((secOf(st) ?? 0) / 60), 0) || headerDto.totalCycleTimeMins,
           routingSteps: {
-            create: steps.map(s => ({
-              stepNumber: s.stepNumber,
-              operationName: s.operationName,
-              workCenter: s.workCenter,
-              workCenterId: s.workCenterId ?? null,
-              machineId: s.machineId ?? null,
-              cycleTimeMins: s.cycleTimeMins,
-              setupTimeMins: s.setupTimeMins,
-              description: s.description,
-              parameters: (s.parameters as any) ?? undefined,
-              isOptional: s.isOptional ?? false,
-            })),
+            create: steps.map(s => {
+              const sec = secOf(s);
+              return {
+                stepNumber: s.stepNumber,
+                operationName: s.operationName,
+                workCenter: s.workCenter,
+                workCenterId: s.workCenterId ?? null,
+                machineId: s.machineId ?? null,
+                cycleTimeSec: sec,
+                cycleTimeMins: sec != null ? sec / 60 : null,
+                setupTimeMins: s.setupTimeMins,
+                description: s.description,
+                parameters: (s.parameters as any) ?? undefined,
+                isOptional: s.isOptional ?? false,
+              };
+            }),
           },
         },
         include: {

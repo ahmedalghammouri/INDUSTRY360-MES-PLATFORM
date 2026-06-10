@@ -248,13 +248,21 @@ async function main() {
 
   // ============================================================
   // SIDCO — MACHINES (ISA-95 Level 2)
-  // Real NCC machine names from Prerequisites File
-  // M1=Big Betti, M2=Cartomac, M3=Checkweigher, M4=Euro-Pack Robot, M5=Uni-tech Wrapping
+  // Real NCC machine names from Prerequisites File — DB sort order:
+  // M1=Big Betti, M2=Checkweigher, M3=Cartomac, M4=Euro-Pack Robot, M5=Uni-tech Wrapping
   // ============================================================
+
+  // Migrate any legacy code assignment (old seeds had M2=Cartomac / M3=Checkweigher)
+  const legacyCartomac = await prisma.machine.findFirst({ where: { factoryId: sidco.id, code: 'M2-CARTOMAC' } });
+  if (legacyCartomac) {
+    await prisma.machine.update({ where: { id: legacyCartomac.id }, data: { code: 'TMP-M3-SWAP' } });
+    await prisma.machine.updateMany({ where: { factoryId: sidco.id, code: 'M3-CHECKWEIGHER' }, data: { code: 'M2-CHECKWEIGHER', sortOrder: 2 } });
+    await prisma.machine.update({ where: { id: legacyCartomac.id }, data: { code: 'M3-CARTOMAC', sortOrder: 3 } });
+  }
 
   const bigBetti = await prisma.machine.upsert({
     where: { factoryId_code: { factoryId: sidco.id, code: 'M1-BIG-BETTI' } },
-    update: {},
+    update: { sortOrder: 1 },
     create: {
       factoryId: sidco.id,
       areaId: sidcoPackingArea.id,
@@ -271,38 +279,38 @@ async function main() {
     },
   });
 
-  const cartomac = await prisma.machine.upsert({
-    where: { factoryId_code: { factoryId: sidco.id, code: 'M2-CARTOMAC' } },
-    update: {},
+  const checkweigher = await prisma.machine.upsert({
+    where: { factoryId_code: { factoryId: sidco.id, code: 'M2-CHECKWEIGHER' } },
+    update: { sortOrder: 2 },
     create: {
       factoryId: sidco.id,
       areaId: sidcoPackingArea.id,
       lineId: sidcoPackingLine1.id,
-      code: 'M2-CARTOMAC',
-      name: 'Cartomac',
-      nameAr: 'ماكينة كارتوماك',
+      code: 'M2-CHECKWEIGHER',
+      name: 'Checkweigher',
+      nameAr: 'جهاز فحص الوزن',
       sortOrder: 2,
-      machineType: MachineType.CARTONING_MACHINE,
-      manufacturer: 'Cartomac S.r.l.',
-      criticality: Criticality.CRITICAL,
-      designCapacity: 45 * 2 * 60,  // 45 duplex/min = 5400 cartons/hr
+      machineType: MachineType.CHECKWEIGHER,
+      criticality: Criticality.HIGH,
       downtimeThreshold: 60,
     },
   });
 
-  const checkweigher = await prisma.machine.upsert({
-    where: { factoryId_code: { factoryId: sidco.id, code: 'M3-CHECKWEIGHER' } },
-    update: {},
+  const cartomac = await prisma.machine.upsert({
+    where: { factoryId_code: { factoryId: sidco.id, code: 'M3-CARTOMAC' } },
+    update: { sortOrder: 3 },
     create: {
       factoryId: sidco.id,
       areaId: sidcoPackingArea.id,
       lineId: sidcoPackingLine1.id,
-      code: 'M3-CHECKWEIGHER',
-      name: 'Checkweigher',
-      nameAr: 'جهاز فحص الوزن',
+      code: 'M3-CARTOMAC',
+      name: 'Cartomac',
+      nameAr: 'ماكينة كارتوماك',
       sortOrder: 3,
-      machineType: MachineType.CHECKWEIGHER,
-      criticality: Criticality.HIGH,
+      machineType: MachineType.CARTONING_MACHINE,
+      manufacturer: 'Cartomac S.r.l.',
+      criticality: Criticality.CRITICAL,
+      designCapacity: 45 * 2 * 60,  // 45 duplex/min = 5400 cartons/hr
       downtimeThreshold: 60,
     },
   });
@@ -540,6 +548,90 @@ async function main() {
     skuMap[s.itemNumber] = sku.id;
   }
   console.log(`✅ SIDCO SKUs: ${skuData.length} products loaded`);
+
+  // ============================================================
+  // SIDCO — PRODUCT MASTER DATA (NCC metadata → managed lookups)
+  // Category / Brand / Packaging Type / Base Unit / Base Weight
+  // ============================================================
+
+  const masterCategory = await prisma.productCategory.upsert({
+    where: { factoryId_name: { factoryId: sidco.id, name: 'Powder Detergent' } },
+    update: {},
+    create: { factoryId: sidco.id, name: 'Powder Detergent', nameAr: 'مسحوق منظفات', sortOrder: 1 },
+  });
+
+  const brandIds: Record<string, string> = {};
+  const brandNames = Array.from(new Set(skuData.map((s) => s.brand)));
+  for (let i = 0; i < brandNames.length; i++) {
+    const b = await prisma.productBrand.upsert({
+      where: { factoryId_name: { factoryId: sidco.id, name: brandNames[i] } },
+      update: {},
+      create: { factoryId: sidco.id, name: brandNames[i], sortOrder: i + 1 },
+    });
+    brandIds[brandNames[i]] = b.id;
+  }
+
+  const packTypeIds: Record<string, string> = {};
+  const packTypes = [
+    { name: 'HF', nameAr: 'رغوة عالية' },   // High Foam
+    { name: 'LF', nameAr: 'رغوة منخفضة' },  // Low Foam
+  ];
+  for (let i = 0; i < packTypes.length; i++) {
+    const p = await prisma.packagingType.upsert({
+      where: { factoryId_name: { factoryId: sidco.id, name: packTypes[i].name } },
+      update: {},
+      create: { factoryId: sidco.id, name: packTypes[i].name, nameAr: packTypes[i].nameAr, sortOrder: i + 1 },
+    });
+    packTypeIds[packTypes[i].name] = p.id;
+  }
+
+  const baseUnitIds: Record<string, string> = {};
+  const baseUnits = [
+    { code: 'PCS', name: 'Pieces' },
+    { code: 'INNER', name: 'Inner Bag' },
+    { code: 'CARTON', name: 'Carton' },
+    { code: 'PALLET', name: 'Pallet' },
+  ];
+  for (let i = 0; i < baseUnits.length; i++) {
+    const u = await prisma.baseUnit.upsert({
+      where: { factoryId_code: { factoryId: sidco.id, code: baseUnits[i].code } },
+      update: {},
+      create: { factoryId: sidco.id, code: baseUnits[i].code, name: baseUnits[i].name, sortOrder: i + 1 },
+    });
+    baseUnitIds[baseUnits[i].code] = u.id;
+  }
+
+  const baseWeightIds: Record<string, string> = {};
+  const baseWeightVals = Array.from(new Set(skuData.map((s) => s.weight))).sort((a, b) => a - b);
+  for (const w of baseWeightVals) {
+    const bw = await prisma.baseWeight.upsert({
+      where: { factoryId_value_unit: { factoryId: sidco.id, value: w, unit: 'kg' } },
+      update: {},
+      create: { factoryId: sidco.id, value: w, unit: 'kg', label: `${w} Kg`, sortOrder: Math.round(w * 100) },
+    });
+    baseWeightIds[String(w)] = bw.id;
+  }
+
+  // Link every SKU to its master-data records (FK ids + keep legacy strings in sync)
+  for (const s of skuData) {
+    await prisma.sKU.update({
+      where: { factoryId_itemNumber: { factoryId: sidco.id, itemNumber: s.itemNumber } },
+      data: {
+        categoryId: masterCategory.id,
+        category: 'Powder Detergent',
+        brandId: brandIds[s.brand],
+        brand: s.brand,
+        packagingTypeId: packTypeIds[s.packagingType] ?? null,
+        packagingType: s.packagingType,
+        baseUnitId: baseUnitIds['CARTON'],
+        baseUnit: 'CARTON',
+        baseWeightId: baseWeightIds[String(s.weight)] ?? null,
+        weight: s.weight,
+        weightUnit: 'kg',
+      },
+    });
+  }
+  console.log(`✅ SIDCO product master data: 1 category, ${brandNames.length} brands, ${packTypes.length} packaging types, ${baseUnits.length} base units, ${baseWeightVals.length} base weights — all ${skuData.length} SKUs linked`);
 
   // ============================================================
   // SIDCO — MACHINE CYCLE TIMES (from NCC Prerequisites)

@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
+import { MasterDataSelect, type MasterItem } from '@/components/ui/master-data-select';
 
 interface StorageLocationOption {
   id: string;
@@ -52,6 +53,12 @@ interface SKU {
   storageLocationRef: { id: string; code: string; name: string } | null;
   family: { name: string; brand: string | null } | null;
   bomComponents: BOMComponent[];
+  // Master-data FK ids (preferred over the legacy text columns)
+  categoryId: string | null;
+  brandId: string | null;
+  packagingTypeId: string | null;
+  baseUnitId: string | null;
+  baseWeightId: string | null;
 }
 
 const BOM_COLORS: Record<string, string> = {
@@ -187,8 +194,9 @@ function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onD
 }
 
 const EMPTY_CREATE = {
-  code: '', name: '', itemNumber: '', brand: '', category: '', packagingType: '',
-  unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '', baseUnit: 'PCS',
+  code: '', name: '', itemNumber: '',
+  categoryId: '', brandId: '', packagingTypeId: '', baseUnitId: '', baseWeightId: '',
+  unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '',
   storageLocationId: '',
   weight: '', weightUnit: 'kg',
   length: '', width: '', height: '', dimensionUnit: 'cm',
@@ -201,7 +209,9 @@ export function ProductsView() {
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<SKU | null>(null);
   const [editForm, setEditForm] = useState({
-    name: '', brand: '', category: '', baseUnit: '', storageLocationId: '',
+    name: '',
+    categoryId: '', brandId: '', packagingTypeId: '', baseUnitId: '', baseWeightId: '',
+    storageLocationId: '',
     weight: '', weightUnit: 'kg',
     length: '', width: '', height: '', dimensionUnit: 'cm',
   });
@@ -267,9 +277,11 @@ export function ProductsView() {
     setEditTarget(sku);
     setEditForm({
       name: sku.name,
-      brand: sku.brand ?? '',
-      category: sku.category ?? '',
-      baseUnit: sku.baseUnit,
+      categoryId: sku.categoryId ?? '',
+      brandId: sku.brandId ?? '',
+      packagingTypeId: sku.packagingTypeId ?? '',
+      baseUnitId: sku.baseUnitId ?? '',
+      baseWeightId: sku.baseWeightId ?? '',
       storageLocationId: sku.storageLocationId ?? '',
       weight: sku.weight != null ? String(sku.weight) : '',
       weightUnit: sku.weightUnit ?? 'kg',
@@ -286,13 +298,14 @@ export function ProductsView() {
       code: formData.code,
       name: formData.name,
       itemNumber: formData.itemNumber,
-      brand: formData.brand || null,
-      category: formData.category || null,
-      packagingType: formData.packagingType || null,
+      categoryId: formData.categoryId || null,
+      brandId: formData.brandId || null,
+      packagingTypeId: formData.packagingTypeId || null,
+      baseUnitId: formData.baseUnitId || null,
+      baseWeightId: formData.baseWeightId || null,
       unitsPerInner: formData.unitsPerInner ? parseInt(formData.unitsPerInner) : 1,
       innersPerCarton: formData.innersPerCarton ? parseInt(formData.innersPerCarton) : 1,
       cartonsPerPallet: formData.cartonsPerPallet ? parseInt(formData.cartonsPerPallet) : 1,
-      baseUnit: formData.baseUnit,
       storageLocationId: formData.storageLocationId || null,
       weight: formData.weight ? parseFloat(formData.weight) : null,
       weightUnit: formData.weightUnit,
@@ -386,22 +399,37 @@ export function ProductsView() {
               <Label className="text-xs">Product Name *</Label>
               <Input value={formData.name} onChange={e => setFormData(v => ({ ...v, name: e.target.value }))} className="h-9 mt-1" />
             </div>
-            <div>
-              <Label className="text-xs">Brand</Label>
-              <Input value={formData.brand} onChange={e => setFormData(v => ({ ...v, brand: e.target.value }))} className="h-9 mt-1" />
-            </div>
-            <div>
-              <Label className="text-xs">Category</Label>
-              <Input value={formData.category} onChange={e => setFormData(v => ({ ...v, category: e.target.value }))} className="h-9 mt-1" />
-            </div>
-            <div>
-              <Label className="text-xs">Packaging Type</Label>
-              <Input value={formData.packagingType} onChange={e => setFormData(v => ({ ...v, packagingType: e.target.value }))} className="h-9 mt-1" placeholder="e.g. Bottle, Box" />
-            </div>
-            <div>
-              <Label className="text-xs">Base Unit</Label>
-              <Input value={formData.baseUnit} onChange={e => setFormData(v => ({ ...v, baseUnit: e.target.value }))} className="h-9 mt-1" />
-            </div>
+            <MasterDataSelect
+              entity="brands" label="Brand"
+              value={formData.brandId}
+              onChange={(id) => setFormData(v => ({ ...v, brandId: id ?? '' }))}
+            />
+            <MasterDataSelect
+              entity="categories" label="Category"
+              value={formData.categoryId}
+              onChange={(id) => setFormData(v => ({ ...v, categoryId: id ?? '' }))}
+            />
+            <MasterDataSelect
+              entity="packaging-types" label="Packaging Type"
+              value={formData.packagingTypeId}
+              onChange={(id) => setFormData(v => ({ ...v, packagingTypeId: id ?? '' }))}
+            />
+            <MasterDataSelect
+              entity="base-units" label="Base Unit"
+              value={formData.baseUnitId}
+              onChange={(id) => setFormData(v => ({ ...v, baseUnitId: id ?? '' }))}
+            />
+            <MasterDataSelect
+              entity="base-weights" label="Base Weight"
+              value={formData.baseWeightId}
+              onChange={(id, item: MasterItem | null) => setFormData(v => ({
+                ...v,
+                baseWeightId: id ?? '',
+                // auto-fill net weight from the selected base weight
+                weight: item?.value != null ? String(item.value) : v.weight,
+                weightUnit: item?.unit ?? v.weightUnit,
+              }))}
+            />
             <div>
               <Label className="text-xs">Units per Inner</Label>
               <Input type="number" value={formData.unitsPerInner} onChange={e => setFormData(v => ({ ...v, unitsPerInner: e.target.value }))} className="h-9 mt-1" />
@@ -504,18 +532,36 @@ export function ProductsView() {
               <Label className="text-xs">Product Name *</Label>
               <Input value={editForm.name} onChange={e => setEditForm(v => ({ ...v, name: e.target.value }))} className="h-9 mt-1" />
             </div>
-            <div>
-              <Label className="text-xs">Brand</Label>
-              <Input value={editForm.brand} onChange={e => setEditForm(v => ({ ...v, brand: e.target.value }))} className="h-9 mt-1" />
-            </div>
-            <div>
-              <Label className="text-xs">Category</Label>
-              <Input value={editForm.category} onChange={e => setEditForm(v => ({ ...v, category: e.target.value }))} className="h-9 mt-1" />
-            </div>
-            <div>
-              <Label className="text-xs">Base Unit</Label>
-              <Input value={editForm.baseUnit} onChange={e => setEditForm(v => ({ ...v, baseUnit: e.target.value }))} className="h-9 mt-1" />
-            </div>
+            <MasterDataSelect
+              entity="brands" label="Brand"
+              value={editForm.brandId}
+              onChange={(id) => setEditForm(v => ({ ...v, brandId: id ?? '' }))}
+            />
+            <MasterDataSelect
+              entity="categories" label="Category"
+              value={editForm.categoryId}
+              onChange={(id) => setEditForm(v => ({ ...v, categoryId: id ?? '' }))}
+            />
+            <MasterDataSelect
+              entity="packaging-types" label="Packaging Type"
+              value={editForm.packagingTypeId}
+              onChange={(id) => setEditForm(v => ({ ...v, packagingTypeId: id ?? '' }))}
+            />
+            <MasterDataSelect
+              entity="base-units" label="Base Unit"
+              value={editForm.baseUnitId}
+              onChange={(id) => setEditForm(v => ({ ...v, baseUnitId: id ?? '' }))}
+            />
+            <MasterDataSelect
+              entity="base-weights" label="Base Weight"
+              value={editForm.baseWeightId}
+              onChange={(id, item: MasterItem | null) => setEditForm(v => ({
+                ...v,
+                baseWeightId: id ?? '',
+                weight: item?.value != null ? String(item.value) : v.weight,
+                weightUnit: item?.unit ?? v.weightUnit,
+              }))}
+            />
 
             {/* Weight & Dimensions */}
             <div className="col-span-2 border-t pt-3 mt-1">
@@ -597,9 +643,11 @@ export function ProductsView() {
                 id: editTarget.id,
                 dto: {
                   name: editForm.name,
-                  brand: editForm.brand || null,
-                  category: editForm.category || null,
-                  unit: editForm.baseUnit || undefined,
+                  categoryId: editForm.categoryId || null,
+                  brandId: editForm.brandId || null,
+                  packagingTypeId: editForm.packagingTypeId || null,
+                  baseUnitId: editForm.baseUnitId || null,
+                  baseWeightId: editForm.baseWeightId || null,
                   storageLocationId: editForm.storageLocationId || null,
                   weight: editForm.weight ? parseFloat(editForm.weight) : null,
                   weightUnit: editForm.weightUnit,
