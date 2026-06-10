@@ -161,6 +161,49 @@ export class TraceabilityService {
   }
 
   // ────────────────────────────────────────────────────────────
+  // MATERIAL CONSUMPTION LEDGER (fed by routing-step materials on WO completion)
+  // ────────────────────────────────────────────────────────────
+
+  async listConsumption(factoryId: string | null, filters: {
+    search?: string; workOrderId?: string; page?: number; limit?: number;
+  }) {
+    const { search, workOrderId, page = 1, limit = 50 } = filters;
+    const where = {
+      ...(factoryId ? { factoryId } : {}),
+      ...(workOrderId && { workOrderId }),
+      ...(search && {
+        OR: [
+          { materialCode: { contains: search, mode: 'insensitive' as const } },
+          { materialName: { contains: search, mode: 'insensitive' as const } },
+        ],
+      }),
+    };
+    const [total, data, totals] = await Promise.all([
+      this.prisma.materialConsumption.count({ where }),
+      this.prisma.materialConsumption.findMany({
+        where,
+        include: {
+          workOrder: { select: { id: true, orderNumber: true } },
+          batchRecord: { select: { id: true, batchNumber: true, lotNumber: true } },
+          materialLot: { select: { id: true, lotNumber: true } },
+        },
+        orderBy: { consumedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.materialConsumption.aggregate({
+        where, _sum: { quantityPlanned: true, quantityActual: true },
+      }),
+    ]);
+    return {
+      data, total, page, limit,
+      totalPages: Math.ceil(total / limit),
+      totalPlanned: totals._sum.quantityPlanned ?? 0,
+      totalActual: totals._sum.quantityActual ?? 0,
+    };
+  }
+
+  // ────────────────────────────────────────────────────────────
   // DASHBOARD STATS
   // ────────────────────────────────────────────────────────────
 

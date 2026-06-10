@@ -36,6 +36,8 @@ interface SKU {
   itemNumber: string;
   code: string;
   name: string;
+  nameAr: string | null;
+  shortName: string | null;
   brand: string | null;
   category: string | null;
   packagingType: string | null;
@@ -194,7 +196,7 @@ function SKURow({ sku, index, onDelete, onEdit }: { sku: SKU; index: number; onD
 }
 
 const EMPTY_CREATE = {
-  code: '', name: '', itemNumber: '',
+  code: '', name: '', nameAr: '', shortName: '', itemNumber: '',
   categoryId: '', brandId: '', packagingTypeId: '', baseUnitId: '', baseWeightId: '',
   unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '',
   storageLocationId: '',
@@ -209,8 +211,9 @@ export function ProductsView() {
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<SKU | null>(null);
   const [editForm, setEditForm] = useState({
-    name: '',
+    name: '', nameAr: '', shortName: '',
     categoryId: '', brandId: '', packagingTypeId: '', baseUnitId: '', baseWeightId: '',
+    unitsPerInner: '', innersPerCarton: '', cartonsPerPallet: '',
     storageLocationId: '',
     weight: '', weightUnit: 'kg',
     length: '', width: '', height: '', dimensionUnit: 'cm',
@@ -277,6 +280,11 @@ export function ProductsView() {
     setEditTarget(sku);
     setEditForm({
       name: sku.name,
+      nameAr: sku.nameAr ?? '',
+      shortName: sku.shortName ?? '',
+      unitsPerInner: String(sku.unitsPerInner ?? 1),
+      innersPerCarton: String(sku.innersPerCarton ?? 1),
+      cartonsPerPallet: String(sku.cartonsPerPallet ?? 1),
       categoryId: sku.categoryId ?? '',
       brandId: sku.brandId ?? '',
       packagingTypeId: sku.packagingTypeId ?? '',
@@ -297,6 +305,8 @@ export function ProductsView() {
     createMutation.mutate({
       code: formData.code,
       name: formData.name,
+      nameAr: formData.nameAr || null,
+      shortName: formData.shortName || null,
       itemNumber: formData.itemNumber,
       categoryId: formData.categoryId || null,
       brandId: formData.brandId || null,
@@ -398,6 +408,14 @@ export function ProductsView() {
             <div className="col-span-2">
               <Label className="text-xs">Product Name *</Label>
               <Input value={formData.name} onChange={e => setFormData(v => ({ ...v, name: e.target.value }))} className="h-9 mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Name (Arabic)</Label>
+              <Input dir="rtl" value={formData.nameAr} onChange={e => setFormData(v => ({ ...v, nameAr: e.target.value }))} className="h-9 mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Short Name</Label>
+              <Input value={formData.shortName} onChange={e => setFormData(v => ({ ...v, shortName: e.target.value }))} className="h-9 mt-1" />
             </div>
             <MasterDataSelect
               entity="brands" label="Brand"
@@ -528,9 +546,26 @@ export function ProductsView() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle className="text-sm">Edit Product</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3 py-2 max-h-[70vh] overflow-y-auto pr-1">
+            {/* Identity (immutable references) */}
+            <div>
+              <Label className="text-xs">Product Code</Label>
+              <Input value={editTarget?.code ?? ''} disabled className="h-9 mt-1 opacity-60" />
+            </div>
+            <div>
+              <Label className="text-xs">Item Number</Label>
+              <Input value={editTarget?.itemNumber ?? ''} disabled className="h-9 mt-1 opacity-60" />
+            </div>
             <div className="col-span-2">
               <Label className="text-xs">Product Name *</Label>
               <Input value={editForm.name} onChange={e => setEditForm(v => ({ ...v, name: e.target.value }))} className="h-9 mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Name (Arabic)</Label>
+              <Input dir="rtl" value={editForm.nameAr} onChange={e => setEditForm(v => ({ ...v, nameAr: e.target.value }))} className="h-9 mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Short Name</Label>
+              <Input value={editForm.shortName} onChange={e => setEditForm(v => ({ ...v, shortName: e.target.value }))} className="h-9 mt-1" />
             </div>
             <MasterDataSelect
               entity="brands" label="Brand"
@@ -562,6 +597,18 @@ export function ProductsView() {
                 weightUnit: item?.unit ?? v.weightUnit,
               }))}
             />
+            <div>
+              <Label className="text-xs">Units per Inner</Label>
+              <Input type="number" min="1" value={editForm.unitsPerInner} onChange={e => setEditForm(v => ({ ...v, unitsPerInner: e.target.value }))} className="h-9 mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Inners per Carton</Label>
+              <Input type="number" min="1" value={editForm.innersPerCarton} onChange={e => setEditForm(v => ({ ...v, innersPerCarton: e.target.value }))} className="h-9 mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Cartons per Pallet</Label>
+              <Input type="number" min="1" value={editForm.cartonsPerPallet} onChange={e => setEditForm(v => ({ ...v, cartonsPerPallet: e.target.value }))} className="h-9 mt-1" />
+            </div>
 
             {/* Weight & Dimensions */}
             <div className="col-span-2 border-t pt-3 mt-1">
@@ -643,6 +690,11 @@ export function ProductsView() {
                 id: editTarget.id,
                 dto: {
                   name: editForm.name,
+                  nameAr: editForm.nameAr || null,
+                  shortName: editForm.shortName || null,
+                  unitsPerInner: editForm.unitsPerInner ? parseInt(editForm.unitsPerInner) : 1,
+                  innersPerCarton: editForm.innersPerCarton ? parseInt(editForm.innersPerCarton) : 1,
+                  cartonsPerPallet: editForm.cartonsPerPallet ? parseInt(editForm.cartonsPerPallet) : 1,
                   categoryId: editForm.categoryId || null,
                   brandId: editForm.brandId || null,
                   packagingTypeId: editForm.packagingTypeId || null,

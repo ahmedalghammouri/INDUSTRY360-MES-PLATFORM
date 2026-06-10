@@ -28,6 +28,25 @@ export class TraceabilityController {
     return this.traceabilityService.getDashboardStats(user.factoryId);
   }
 
+  @Get('consumption')
+  @ApiOperation({ summary: 'Material consumption ledger (per WO/batch/lot, fed by routing-step materials on completion)' })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'workOrderId', required: false })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async listConsumption(
+    @CurrentUser() user: RequestUser,
+    @Query('search') search?: string,
+    @Query('workOrderId') workOrderId?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '50',
+  ) {
+    return this.traceabilityService.listConsumption(user.factoryId, {
+      search, workOrderId,
+      page: parseInt(page, 10), limit: parseInt(limit, 10),
+    });
+  }
+
   // ────────────────────────────────────────────────────────────
   // FACTORY-WIDE EVENT FEED
   // ────────────────────────────────────────────────────────────

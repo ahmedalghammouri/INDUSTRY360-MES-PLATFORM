@@ -1,7 +1,7 @@
 import { TraceabilityView } from '@/features/traceability/traceability-view';
 
-export const metadata = { title: 'Traceability | STAR-MES' };
+export const metadata = { title: 'Trace Log | STAR-MES' };
 
 export default function TraceabilityPage() {
-  return <TraceabilityView />;
+  return <TraceabilityView fixedTab="log" />;
 }

@@ -20,6 +20,8 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/services/api.client';
 import { cn, generateId, formatDate } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -50,156 +52,40 @@ interface ChangeRequest {
   reason: string;
 }
 
-// ── Mock Data ────────────────────────────────────────────────────
+// API row → view model (real data from /plm/change-requests)
+interface ApiChangeRequest {
+  id: string;
+  crNumber: string;
+  title: string;
+  description: string | null;
+  type: ChangeRequest['type'];
+  status: ChangeRequest['status'];
+  priority: ChangeRequest['priority'];
+  reason: string | null;
+  targetDate: string | null;
+  createdAt: string;
+  sku: { id: string; itemNumber: string; name: string } | null;
+  requestedBy: { id: string; name: string } | null;
+  reviewedBy: { id: string; name: string } | null;
+}
 
-const MOCK_CRS: ChangeRequest[] = [
-  {
-    id: '1',
-    crNumber: 'ECR-2026-001',
-    title: 'Update BOM for Orange Juice 1L — new cap supplier',
-    description: 'Supplier A discontinuing plastic cap SKU-CAP-22. Switch to SKU-CAP-24 from Supplier B with identical spec.',
-    type: 'BOM_CHANGE',
-    status: 'APPROVED',
-    priority: 'HIGH',
-    affectedProduct: 'SKU-001 Orange Juice 1L',
-    requestedBy: 'Ahmed Al-Rashid',
-    reviewedBy: 'Sara Khalid',
-    createdAt: '2026-05-10T08:00:00Z',
-    targetDate: '2026-06-15',
-    reason: 'Supplier change requires BOM update to maintain production continuity',
-  },
-  {
-    id: '2',
-    crNumber: 'ECR-2026-002',
-    title: 'Reduce pasteurization temp in Mango Juice recipe',
-    description: 'Quality team recommends reducing pasteurization from 85°C to 82°C to preserve vitamin C content by ~12%.',
-    type: 'RECIPE_CHANGE',
-    status: 'UNDER_REVIEW',
-    priority: 'MEDIUM',
-    affectedProduct: 'SKU-007 Mango Juice 500ml',
-    requestedBy: 'Fatima Hussain',
-    reviewedBy: 'Dr. Youssef Nasser',
-    createdAt: '2026-05-18T10:30:00Z',
-    targetDate: '2026-06-20',
-    reason: 'Nutritional improvement based on R&D lab findings — vitamin C degradation at 85°C exceeds spec',
-  },
-  {
-    id: '3',
-    crNumber: 'ECR-2026-003',
-    title: 'Add inline weight check to Bottling Line 3',
-    description: 'Insert automatic checkweigher station between filler and capper on Line 3 to catch underfills in real time.',
-    type: 'PROCESS_CHANGE',
-    status: 'SUBMITTED',
-    priority: 'HIGH',
-    affectedProduct: 'All 1L PET Bottled Products',
-    requestedBy: 'Khalid Al-Mansouri',
-    createdAt: '2026-05-22T09:15:00Z',
-    targetDate: '2026-07-01',
-    reason: 'Three customer complaints for underfill in Q1 2026; ISO 9001 corrective action required',
-  },
-  {
-    id: '4',
-    crNumber: 'ECR-2026-004',
-    title: 'Redesign label artwork for Apple Juice export pack',
-    description: 'EU regulation update requires allergen info in 12pt minimum font. Current artwork uses 9pt.',
-    type: 'DESIGN_CHANGE',
-    status: 'APPROVED',
-    priority: 'CRITICAL',
-    affectedProduct: 'SKU-012 Apple Juice 330ml Export',
-    requestedBy: 'Laila Al-Zahrani',
-    reviewedBy: 'Omar Bakr',
-    createdAt: '2026-04-30T07:45:00Z',
-    targetDate: '2026-05-30',
-    reason: 'EU 1169/2011 amendment — non-compliance risks product recall and export ban from June 2026',
-  },
-  {
-    id: '5',
-    crNumber: 'ECR-2026-005',
-    title: 'Replace preservative E211 with E202 in Guava Nectar',
-    description: 'Marketing-driven reformulation to achieve "clean label" positioning. Shelf-life impact assessment in progress.',
-    type: 'RECIPE_CHANGE',
-    status: 'DRAFT',
-    priority: 'MEDIUM',
-    affectedProduct: 'SKU-019 Guava Nectar 1L',
-    requestedBy: 'Nour Al-Qasim',
-    createdAt: '2026-06-01T11:00:00Z',
-    targetDate: '2026-08-01',
-    reason: 'Clean-label product strategy — consumer research shows 67% preference for E202 over E211',
-  },
-  {
-    id: '6',
-    crNumber: 'ECR-2026-006',
-    title: 'Update mixing sequence for Tomato Paste concentrate',
-    description: 'Engineering proposes reversing salt-addition order to prevent caking on agitator blades.',
-    type: 'PROCESS_CHANGE',
-    status: 'IMPLEMENTED',
-    priority: 'LOW',
-    affectedProduct: 'SKU-031 Tomato Paste 800g',
-    requestedBy: 'Hassan Al-Farsi',
-    reviewedBy: 'Ibrahim Saleh',
-    createdAt: '2026-03-12T14:00:00Z',
-    targetDate: '2026-04-01',
-    reason: 'Reduce agitator maintenance frequency from weekly to monthly; current caking adds 45 min/week downtime',
-  },
-  {
-    id: '7',
-    crNumber: 'ECR-2026-007',
-    title: 'BOM revision — substitute glass bottles with PET for Mineral Water 500ml',
-    description: 'Phase-out glass packaging on Line 1 to reduce breakage waste and freight cost.',
-    type: 'BOM_CHANGE',
-    status: 'REJECTED',
-    priority: 'HIGH',
-    affectedProduct: 'SKU-045 Mineral Water 500ml Glass',
-    requestedBy: 'Aisha Al-Otaibi',
-    reviewedBy: 'Tariq Hamdan',
-    createdAt: '2026-04-05T09:00:00Z',
-    targetDate: '2026-06-01',
-    reason: 'Cost reduction initiative — PET substitution saves SAR 0.18/unit; annual saving ~SAR 540K',
-  },
-  {
-    id: '8',
-    crNumber: 'ECR-2026-008',
-    title: 'Adjust fill volume tolerance for Lemonade 250ml can',
-    description: 'Tighten fill tolerance from ±3ml to ±1.5ml to reduce overfill giveaway.',
-    type: 'PROCESS_CHANGE',
-    status: 'UNDER_REVIEW',
-    priority: 'MEDIUM',
-    affectedProduct: 'SKU-052 Lemonade Can 250ml',
-    requestedBy: 'Reem Al-Harbi',
-    reviewedBy: 'Walid Nassar',
-    createdAt: '2026-05-28T08:30:00Z',
-    targetDate: '2026-06-30',
-    reason: 'Overfill giveaway costing SAR 0.04/can; line produces 120K cans/day; annual impact SAR 1.75M',
-  },
-  {
-    id: '9',
-    crNumber: 'ECR-2026-009',
-    title: 'New outer carton design for Dairy Line gift packs',
-    description: 'Seasonal Ramadan packaging redesign — gold foil embossed carton replacing standard brown kraft.',
-    type: 'DESIGN_CHANGE',
-    status: 'DRAFT',
-    priority: 'LOW',
-    affectedProduct: 'SKU-060 Dairy Gift Pack Assorted',
-    requestedBy: 'Mona Al-Rasheed',
-    createdAt: '2026-06-03T13:00:00Z',
-    targetDate: '2026-12-01',
-    reason: 'Annual seasonal packaging programme — Q4 2026 Ramadan campaign launch',
-  },
-  {
-    id: '10',
-    crNumber: 'ECR-2026-010',
-    title: 'Increase sterilization dwell time for canned vegetables',
-    description: 'SFDA advisory recommends F0 value increase from 6 to 8 minutes for low-acid canned goods following industry alert.',
-    type: 'RECIPE_CHANGE',
-    status: 'SUBMITTED',
-    priority: 'CRITICAL',
-    affectedProduct: 'All Canned Vegetable SKUs (18 products)',
-    requestedBy: 'Dr. Sameer Al-Khatib',
-    createdAt: '2026-06-05T07:00:00Z',
-    targetDate: '2026-06-12',
-    reason: 'SFDA Circular 2026-F-041: mandatory F0 uplift for Clostridium botulinum risk mitigation',
-  },
-];
+function apiToCr(r: ApiChangeRequest): ChangeRequest {
+  return {
+    id: r.id,
+    crNumber: r.crNumber,
+    title: r.title,
+    description: r.description ?? '',
+    type: r.type,
+    status: r.status,
+    priority: r.priority,
+    affectedProduct: r.sku ? `${r.sku.itemNumber} — ${r.sku.name}` : '—',
+    requestedBy: r.requestedBy?.name ?? '—',
+    reviewedBy: r.reviewedBy?.name ?? undefined,
+    createdAt: r.createdAt,
+    targetDate: r.targetDate ?? '',
+    reason: r.reason ?? '',
+  };
+}
 
 // ── Config ───────────────────────────────────────────────────────
 
@@ -263,7 +149,7 @@ interface ToastMsg {
 // ── Main Component ────────────────────────────────────────────────
 
 export default function PlmChangeRequestsView() {
-  const [crs, setCrs] = useState<ChangeRequest[]>([...MOCK_CRS]);
+  const queryClient = useQueryClient();
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
@@ -272,17 +158,31 @@ export default function PlmChangeRequestsView() {
   const [createOpen, setCreateOpen] = useState(false);
   const [detailCr, setDetailCr] = useState<ChangeRequest | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [crCounter, setCrCounter] = useState(11);
 
-  // Create form state
+  // Create form state (skuId = real product reference)
   const [form, setForm] = useState({
     title: '',
     type: 'BOM_CHANGE' as ChangeRequest['type'],
     priority: 'MEDIUM' as ChangeRequest['priority'],
-    affectedProduct: '',
+    skuId: '',
     targetDate: '',
     reason: '',
   });
+
+  // ── Live data ───────────────────────────────────────────────────
+  const { data: crData } = useQuery({
+    queryKey: ['plm', 'change-requests'],
+    queryFn: () => api.get<{ data: ApiChangeRequest[] }>('/plm/change-requests', { params: { limit: 200 } }),
+    staleTime: 15_000,
+  });
+  const crs: ChangeRequest[] = ((crData as any)?.data ?? []).map(apiToCr);
+
+  const { data: productsData } = useQuery({
+    queryKey: ['plm', 'cr-products'],
+    queryFn: () => api.get<{ data: Array<{ id: string; itemNumber: string; name: string }> }>('/inventory/products', { params: { limit: 200 } }),
+    staleTime: 300_000,
+  });
+  const products = ((productsData as any)?.data ?? []) as Array<{ id: string; itemNumber: string; name: string }>;
 
   // ── Toasts ──────────────────────────────────────────────────────
   const addToast = (message: string, variant: 'success' | 'error' = 'success') => {
@@ -290,44 +190,49 @@ export default function PlmChangeRequestsView() {
     setToasts((prev) => [...prev, { id, message, variant }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
   };
+  const errMsg = (e: unknown) =>
+    (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Operation failed';
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['plm', 'change-requests'] });
+
+  // ── Mutations (real workflow on the server) ─────────────────────
+  const transitionMut = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: ChangeRequest['status'] }) =>
+      api.post<ApiChangeRequest>(`/plm/change-requests/${id}/transition`, { status }),
+    onSuccess: (r) => { invalidate(); addToast(`${r.crNumber} → ${STATUS_LABELS[r.status]}`, r.status === 'REJECTED' ? 'error' : 'success'); },
+    onError: (e) => addToast(errMsg(e), 'error'),
+  });
+
+  const createMut = useMutation({
+    mutationFn: async () => {
+      const created = await api.post<ApiChangeRequest>('/plm/change-requests', {
+        title: form.title,
+        description: form.reason,
+        type: form.type,
+        priority: form.priority,
+        skuId: form.skuId || undefined,
+        reason: form.reason,
+        targetDate: form.targetDate || undefined,
+      });
+      // The dialog submits straight into the review queue
+      return api.post<ApiChangeRequest>(`/plm/change-requests/${created.id}/transition`, { status: 'SUBMITTED' });
+    },
+    onSuccess: (r) => {
+      invalidate();
+      addToast(`Change request ${r.crNumber} submitted for review`, 'success');
+      setForm({ title: '', type: 'BOM_CHANGE', priority: 'MEDIUM', skuId: '', targetDate: '', reason: '' });
+      setCreateOpen(false);
+    },
+    onError: (e) => addToast(errMsg(e), 'error'),
+  });
 
   // ── Actions ─────────────────────────────────────────────────────
-  const handleApprove = (cr: ChangeRequest) => {
-    setCrs((prev) =>
-      prev.map((c) => (c.id === cr.id ? { ...c, status: 'APPROVED', reviewedBy: 'Current User' } : c)),
-    );
-    addToast(`${cr.crNumber} approved successfully`, 'success');
-  };
-
-  const handleReject = (cr: ChangeRequest) => {
-    setCrs((prev) =>
-      prev.map((c) => (c.id === cr.id ? { ...c, status: 'REJECTED', reviewedBy: 'Current User' } : c)),
-    );
-    addToast(`${cr.crNumber} rejected`, 'error');
-  };
-
+  const handleApprove = (cr: ChangeRequest) => transitionMut.mutate({ id: cr.id, status: 'APPROVED' });
+  const handleReject = (cr: ChangeRequest) => transitionMut.mutate({ id: cr.id, status: 'REJECTED' });
+  const handleStartReview = (cr: ChangeRequest) => transitionMut.mutate({ id: cr.id, status: 'UNDER_REVIEW' });
+  const handleImplement = (cr: ChangeRequest) => transitionMut.mutate({ id: cr.id, status: 'IMPLEMENTED' });
   const handleCreate = () => {
-    if (!form.title || !form.affectedProduct || !form.targetDate || !form.reason) return;
-    const newCrNumber = `ECR-2026-${String(crCounter).padStart(3, '0')}`;
-    const newCr: ChangeRequest = {
-      id: generateId(),
-      crNumber: newCrNumber,
-      title: form.title,
-      description: form.reason,
-      type: form.type,
-      status: 'SUBMITTED',
-      priority: form.priority,
-      affectedProduct: form.affectedProduct,
-      requestedBy: 'Current User',
-      createdAt: new Date().toISOString(),
-      targetDate: form.targetDate,
-      reason: form.reason,
-    };
-    setCrs((prev) => [newCr, ...prev]);
-    setCrCounter((n) => n + 1);
-    addToast(`Change request ${newCrNumber} submitted for review`, 'success');
-    setForm({ title: '', type: 'BOM_CHANGE', priority: 'MEDIUM', affectedProduct: '', targetDate: '', reason: '' });
-    setCreateOpen(false);
+    if (!form.title || !form.targetDate || !form.reason) return;
+    createMut.mutate();
   };
 
   // ── KPIs ─────────────────────────────────────────────────────────
@@ -455,13 +360,17 @@ export default function PlmChangeRequestsView() {
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Affected Product *</label>
-                <input
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  placeholder="e.g. SKU-001 Orange Juice 1L"
-                  value={form.affectedProduct}
-                  onChange={(e) => setForm((f) => ({ ...f, affectedProduct: e.target.value }))}
-                />
+                <label className="text-xs font-medium text-muted-foreground">Affected Product</label>
+                <select
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  value={form.skuId}
+                  onChange={(e) => setForm((f) => ({ ...f, skuId: e.target.value }))}
+                >
+                  <option value="">— Select product (optional) —</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>{p.itemNumber} — {p.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Target Date *</label>
@@ -489,9 +398,9 @@ export default function PlmChangeRequestsView() {
               </Button>
               <Button
                 onClick={handleCreate}
-                disabled={!form.title || !form.affectedProduct || !form.targetDate || !form.reason}
+                disabled={!form.title || !form.targetDate || !form.reason || createMut.isPending}
               >
-                Submit for Review
+                {createMut.isPending ? 'Submitting…' : 'Submit for Review'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -693,14 +602,20 @@ export default function PlmChangeRequestsView() {
                           <Button
                             size="sm"
                             className="h-7 gap-1 bg-yellow-600 px-2 text-xs hover:bg-yellow-700"
-                            onClick={() =>
-                              setCrs((prev) =>
-                                prev.map((c) => (c.id === cr.id ? { ...c, status: 'UNDER_REVIEW' } : c)),
-                              )
-                            }
+                            onClick={() => handleStartReview(cr)}
                           >
                             <Clock className="h-3 w-3" />
                             Start Review
+                          </Button>
+                        )}
+                        {cr.status === 'APPROVED' && (
+                          <Button
+                            size="sm"
+                            className="h-7 gap-1 bg-purple-600 px-2 text-xs hover:bg-purple-700"
+                            onClick={() => handleImplement(cr)}
+                          >
+                            <CheckCircle2 className="h-3 w-3" />
+                            Implement
                           </Button>
                         )}
                       </div>

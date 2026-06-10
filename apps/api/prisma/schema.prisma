@@ -75,6 +75,7 @@ model Factory {
   packagingTypes         PackagingType[]
   baseUnits              BaseUnit[]
   baseWeights            BaseWeight[]
+  changeRequests         ChangeRequest[]
   shifts                 ShiftTemplate[]
   shiftInstances         ShiftInstance[]
   productionOrders       ProductionOrder[]
@@ -385,6 +386,51 @@ model ProductFamily {
   @@map("product_families")
 }
 
+// ── PLM ENGINEERING CHANGE REQUESTS ──────────────────────────────────────────
+enum ChangeRequestType {
+  BOM_CHANGE
+  RECIPE_CHANGE
+  PROCESS_CHANGE
+  DESIGN_CHANGE
+}
+
+enum ChangeRequestStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  IMPLEMENTED
+}
+
+model ChangeRequest {
+  id            String              @id @default(uuid())
+  factoryId     String
+  crNumber      String              // ECR-2026-001
+  title         String
+  description   String?
+  type          ChangeRequestType
+  status        ChangeRequestStatus @default(DRAFT)
+  priority      Priority            @default(MEDIUM)
+  skuId         String?             // affected product
+  requestedById String?
+  reviewedById  String?
+  reason        String?
+  targetDate    DateTime?
+  implementedAt DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  factory     Factory @relation(fields: [factoryId], references: [id])
+  sku         SKU?    @relation(fields: [skuId], references: [id])
+  requestedBy User?   @relation("CRRequestedBy", fields: [requestedById], references: [id])
+  reviewedBy  User?   @relation("CRReviewedBy", fields: [reviewedById], references: [id])
+
+  @@unique([factoryId, crNumber])
+  @@map("change_requests")
+  @@index([factoryId, status])
+}
+
 // ── PRODUCT MASTER DATA (managed lookups powering the product form) ─────────
 model ProductCategory {
   id        String   @id @default(uuid())
@@ -521,6 +567,7 @@ model SKU {
   manufacturingProcesses ManufacturingProcess[]
   processLinks           ManufacturingProcessSku[]
   recipes                Recipe[]
+  changeRequests         ChangeRequest[]
 
   @@unique([factoryId, itemNumber])
   @@map("skus")
@@ -1889,6 +1936,8 @@ model User {
   operatedDowntimes   DowntimeEvent[]    @relation("DowntimeOperator")
   jobOrdersAsOperator JobOrder[]         @relation("JOOperator")
   scrapLogsAsOperator ScrapLog[]         @relation("ScrapLogOperator")
+  changeRequestsRaised   ChangeRequest[] @relation("CRRequestedBy")
+  changeRequestsReviewed ChangeRequest[] @relation("CRReviewedBy")
 
   @@map("users")
   @@index([enterpriseId])
@@ -2045,6 +2094,7 @@ model RawMaterial {
   materialLots       MaterialLot[]
   bomItems           BOMItem[]
   recipeIngredients  RecipeIngredient[]
+  routingStepUses    RoutingStepMaterial[]
 
   @@unique([factoryId, code])
   @@map("raw_materials")
@@ -2314,6 +2364,11 @@ model RoutingStep {
   cycleTimeSec  Float?   // PRIMARY reference for job-order cycle time & duration
   cycleTimeMins Float?   // legacy (auto-derived = cycleTimeSec/60)
   setupTimeMins Float?
+  // Unit flow: what the step consumes/produces (BaseUnit codes: PCS/INNER/CARTON/PALLET).
+  // cycleTimeSec is "seconds per ONE outUnit" — scheduling converts the order
+  // quantity through the SKU packaging hierarchy to get the true duration.
+  inUnit        String?
+  outUnit       String?
   description   String?
   parameters    Json?    // process parameters: { temperature: 80, pressure: 2.5 }
   isOptional    Boolean  @default(false)
@@ -2328,9 +2383,31 @@ model RoutingStep {
   predecessors    StepDependency[]      @relation("DepTo")
   successors      StepDependency[]      @relation("DepFrom")
   jobOrders       JobOrder[]
+  materials       RoutingStepMaterial[]
 
   @@unique([processId, stepNumber])
   @@map("routing_steps")
+}
+
+// Input raw materials consumed by a routing step.
+// qtyPerOutputUnit = quantity needed to produce ONE outUnit of the step —
+// completion writes real MaterialConsumption rows (qty × produced output)
+// feeding Traceability & Genealogy.
+model RoutingStepMaterial {
+  id            String   @id @default(uuid())
+  stepId        String
+  rawMaterialId String?  // optional link to the raw-materials master
+  materialCode  String?
+  name          String
+  qtyPerOutputUnit Float
+  unit          String   @default("KG")
+  createdAt     DateTime @default(now())
+
+  step        RoutingStep  @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  rawMaterial RawMaterial? @relation(fields: [rawMaterialId], references: [id], onDelete: SetNull)
+
+  @@map("routing_step_materials")
+  @@index([stepId])
 }
 
 // ============================================================
@@ -2515,6 +2592,7 @@ model JobOrder {
   handoverQty       Float          @default(0)   // qty actually transferred to next step
   handoverCriteria  Float?         // min qty before successor becomes READY
   outputUnit        String?        // PIECE, CARTON, PALLET — unit of plannedQtyOut / actualQtyGood
+  inputUnit         String?        // unit of plannedQtyIn (step's consumed unit)
 
   // OEE denominator — stamped from MachineCycleTime at JO creation
   idealCycleTimeSec Float?

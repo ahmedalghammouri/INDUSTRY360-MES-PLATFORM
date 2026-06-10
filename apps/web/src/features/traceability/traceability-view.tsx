@@ -275,8 +275,8 @@ function GenealogyPanel() {
   );
 }
 
-export function TraceabilityView() {
-  const [activeTab, setActiveTab] = useState<'log' | 'genealogy'>('log');
+export function TraceabilityView({ fixedTab }: { fixedTab?: 'log' | 'genealogy' } = {}) {
+  const [activeTab, setActiveTab] = useState<'log' | 'genealogy'>(fixedTab ?? 'log');
   const [entityTypeFilter, setEntityTypeFilter] = useState<string>('');
   const [eventSearch, setEventSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -343,27 +343,33 @@ export function TraceabilityView() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
         <div>
-          <h1 className="text-lg font-bold">Traceability & Genealogy</h1>
+          <h1 className="text-lg font-bold">
+            {fixedTab === 'genealogy' ? 'Genealogy Explorer' : fixedTab === 'log' ? 'Trace Log' : 'Traceability & Genealogy'}
+          </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Full audit trail and material genealogy across production, maintenance, inventory, and quality
+            {fixedTab === 'genealogy'
+              ? 'Batch ⇄ material lot ancestry — walk every product back to its inputs'
+              : 'Full audit trail across production, maintenance, inventory, and quality'}
           </p>
         </div>
-        {/* Tab switcher */}
-        <div className="flex rounded-lg border border-border overflow-hidden text-xs">
-          <button
-            className={cn('px-4 py-1.5 transition-colors', activeTab === 'log' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted/20')}
-            onClick={() => setActiveTab('log')}
-          >
-            Event Log
-          </button>
-          <button
-            className={cn('px-4 py-1.5 flex items-center gap-1.5 transition-colors', activeTab === 'genealogy' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted/20')}
-            onClick={() => setActiveTab('genealogy')}
-          >
-            <GitBranch size={11} />
-            Genealogy
-          </button>
-        </div>
+        {/* Tab switcher (hidden when the page is dedicated to one section) */}
+        {!fixedTab && (
+          <div className="flex rounded-lg border border-border overflow-hidden text-xs">
+            <button
+              className={cn('px-4 py-1.5 transition-colors', activeTab === 'log' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted/20')}
+              onClick={() => setActiveTab('log')}
+            >
+              Event Log
+            </button>
+            <button
+              className={cn('px-4 py-1.5 flex items-center gap-1.5 transition-colors', activeTab === 'genealogy' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted/20')}
+              onClick={() => setActiveTab('genealogy')}
+            >
+              <GitBranch size={11} />
+              Genealogy
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-4">

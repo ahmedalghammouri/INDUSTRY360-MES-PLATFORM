@@ -6,7 +6,7 @@ import {
   Activity, Zap, Users, AlertTriangle, TrendingUp,
   Clock, Building2, MapPin, ChevronRight, Shield, Wifi,
 } from 'lucide-react';
-import { FACTORIES, Factory } from './factories';
+import { Factory } from './factories';
 import { SaudiMap } from './saudi-map';
 import { authService, type FactoriesOverview } from '@/services/auth.service';
 import { useFactoryStore } from '@/store/factory-store';
@@ -72,7 +72,7 @@ function KPIBadge({ label, value, unit, icon: Icon, color }: {
 
 function GlobalStats({ summary }: { summary: FactoriesOverview['summary'] | null }) {
   const avgOEE = summary ? summary.avgOEE.toFixed(1) : '—';
-  const factories = summary ? summary.totalFactories : FACTORIES.length;
+  const factories = summary ? summary.totalFactories : 0;
   const employees = summary ? summary.totalEmployees : 0;
   const alarms = summary ? summary.totalActiveAlarms : 0;
 
@@ -115,16 +115,13 @@ export function FactorySelector() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, []);
 
-  const [liveByCode, setLiveByCode] = useState<Record<string, FactoriesOverview['factories'][number]['kpis']>>({});
-  const [summary, setSummary] = useState<FactoriesOverview['summary'] | null>(null);
+  const [overview, setOverview] = useState<FactoriesOverview | null>(null);
+  const summary = overview?.summary ?? null;
 
-  // Fetch factories WITH live KPIs and populate store for login page context
+  // Everything (branding, coordinates, KPIs) comes live from the API
   useEffect(() => {
     authService.getFactoriesOverview().then((data) => {
-      const map: Record<string, FactoriesOverview['factories'][number]['kpis']> = {};
-      data.factories.forEach((f) => { map[f.code] = f.kpis; });
-      setLiveByCode(map);
-      setSummary(data.summary);
+      setOverview(data);
       setFactories(
         data.factories.map((f) => ({
           id: f.id,
@@ -140,34 +137,27 @@ export function FactorySelector() {
         })),
       );
     }).catch(() => {
-      // API unavailable — selector falls back to static FACTORIES KPIs
+      // API unavailable — selector shows the loading state
     });
   }, [setFactories]);
 
-  // Merge live KPIs onto the static branding base (district/productionUnit/coords)
   const factories = useMemo<Factory[]>(() =>
-    FACTORIES.map((f) => {
-      const live = liveByCode[f.code];
-      if (!live) return f;
-      return {
-        ...f,
-        // productionUnit/district stay (facility attributes, not KPIs);
-        // every KPI value is live from the API — no static fallback.
-        kpis: {
-          ...f.kpis,
-          oee: live.oee,
-          availability: live.availability,
-          performance: live.performance,
-          quality: live.quality,
-          uptime: live.uptime,
-          production: live.production,
-          employees: live.employees,
-          activeAlarms: live.activeAlarms,
-          shiftsToday: live.shiftsToday,
-        },
-      };
-    }),
-  [liveByCode]);
+    (overview?.factories ?? [])
+      .filter((f) => f.lat != null && f.lng != null)
+      .map((f) => ({
+        id: f.id,
+        code: f.code,
+        name: f.name,
+        nameAr: f.nameAr ?? f.name,
+        city: f.city ?? '—',
+        lat: f.lat!,
+        lng: f.lng!,
+        color: f.color,
+        glowColor: f.glowColor,
+        isActive: f.isActive,
+        kpis: { ...f.kpis },
+      })),
+  [overview]);
 
   const active = selected ?? (hovered ? factories.find((f) => f.id === hovered) ?? null : null);
 
@@ -370,7 +360,7 @@ export function FactorySelector() {
                   <div className="text-xs text-white/40">{active.nameAr}</div>
                   <div className="flex items-center gap-1 mt-2">
                     <MapPin size={11} style={{ color: active.color }} />
-                    <span className="text-xs text-white/50">{active.district}, {active.city}</span>
+                    <span className="text-xs text-white/50">{active.district ? `${active.district}, ` : ''}{active.city}</span>
                   </div>
                 </div>
 
@@ -401,7 +391,7 @@ export function FactorySelector() {
 
                 {/* KPI grid */}
                 <div className="grid grid-cols-2 gap-2">
-                  <KPIBadge label="Production" value={active.kpis.production.toLocaleString()} unit={active.kpis.productionUnit} icon={TrendingUp} color={active.color} />
+                  <KPIBadge label="Production" value={active.kpis.production.toLocaleString()} unit={active.kpis.productionUnit ?? 'today'} icon={TrendingUp} color={active.color} />
                   <KPIBadge label="Employees" value={active.kpis.employees} icon={Users} color="#a855f7" />
                   <KPIBadge label="Uptime" value={active.kpis.uptime} unit="%" icon={Zap} color="#22c55e" />
                   <KPIBadge label="Shifts Today" value={active.kpis.shiftsToday} icon={Clock} color="#f59e0b" />

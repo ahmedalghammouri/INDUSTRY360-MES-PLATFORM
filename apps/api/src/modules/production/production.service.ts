@@ -634,6 +634,37 @@ export class ProductionService {
     return prevUnit;
   }
 
+  /**
+   * Convert a quantity between packaging-hierarchy units using the SKU spec:
+   * PCS/PIECE → INNER (÷unitsPerInner) → CARTON (÷innersPerCarton) → PALLET (÷cartonsPerPallet).
+   * This powers per-step qty flow AND duration = qtyOut × cycleTimeSec in scheduling.
+   */
+  private convertUnits(
+    qty: number,
+    fromUnit: string,
+    toUnit: string,
+    pkg: { unitsPerInner: number; innersPerCarton: number; cartonsPerPallet: number },
+  ): number {
+    const norm = (u: string) => {
+      const x = (u || 'PIECE').toUpperCase();
+      if (x === 'PCS' || x === 'EA' || x === 'UNIT') return 'PIECE';
+      return x;
+    };
+    const LADDER = ['PIECE', 'INNER', 'CARTON', 'PALLET'];
+    const factor = [
+      Math.max(1, pkg.unitsPerInner),    // pieces per inner
+      Math.max(1, pkg.innersPerCarton),  // inners per carton
+      Math.max(1, pkg.cartonsPerPallet), // cartons per pallet
+    ];
+    const fi = LADDER.indexOf(norm(fromUnit));
+    const ti = LADDER.indexOf(norm(toUnit));
+    if (fi < 0 || ti < 0 || fi === ti) return qty;
+    let q = qty;
+    if (ti > fi) { for (let i = fi; i < ti; i++) q = q / factor[i]; return Math.ceil(q); }
+    for (let i = fi - 1; i >= ti; i--) q = q * factor[i];
+    return Math.round(q);
+  }
+
   /** Calculate the expected output quantity when the unit changes between steps. */
   private calcOutputQty(
     outputUnit: string,
@@ -641,15 +672,7 @@ export class ProductionService {
     prevQty: number,
     pkg: { unitsPerInner: number; innersPerCarton: number; cartonsPerPallet: number },
   ): number {
-    if (outputUnit === prevUnit) return prevQty;
-    const ppc = Math.max(1, pkg.unitsPerInner * pkg.innersPerCarton); // pieces per carton
-    const cpp = Math.max(1, pkg.cartonsPerPallet);
-    if (outputUnit === 'CARTON') return Math.ceil(prevQty / ppc);
-    if (outputUnit === 'PALLET') {
-      const cartonsIn = prevUnit === 'CARTON' ? prevQty : Math.ceil(prevQty / ppc);
-      return Math.ceil(cartonsIn / cpp);
-    }
-    return prevQty;
+    return this.convertUnits(prevQty, prevUnit, outputUnit, pkg);
   }
 
   async previewAutoGenerateWOs(factoryId: string | null, poId: string): Promise<any> {
@@ -997,6 +1020,10 @@ export class ProductionService {
     // Auto-calculate OEE
     const oeeResult = await this.calculateAndStoreOEE(wo, dto.actualQty, goodQty, actualEnd);
 
+    // Traceability & genealogy: output batch + per-step trace events +
+    // per-step material consumptions (linked to lots when available)
+    await this.recordTraceability(wo, userId, dto.actualQty, goodQty, scrapQty, actualEnd);
+
     // Update machine to IDLE
     await this.updateMachineStatus(wo.machineId!, 'IDLE', null, null);
 
@@ -1322,6 +1349,180 @@ export class ProductionService {
     await this.prisma.batchRecord.delete({ where: { id } });
   }
 
+  /**
+   * Traceability & genealogy backbone, written at WO completion:
+   *  1. Output BatchRecord (idempotent per WO) with real quantities.
+   *  2. Per job-order step: STEP_COMPLETED TraceEvent carrying the unit flow
+   *     (qtyIn/inUnit → qtyOut/outUnit, machine, cycle time).
+   *  3. Per routing-step input material: MaterialConsumption
+   *     (planned = qtyPerOutputUnit × step planned output; actual scaled by
+   *     the WO's actual/planned ratio), FIFO-linked to the oldest ACTIVE
+   *     MaterialLot of that material code, plus a CONSUMED TraceEvent —
+   *     this is what the Genealogy explorer walks.
+   */
+  private async recordTraceability(
+    wo: { id: string; factoryId: string; orderNumber: string; skuId: string | null; plannedQty: number; actualStart: Date | null },
+    userId: string,
+    actualQty: number,
+    goodQty: number,
+    scrapQty: number,
+    actualEnd: Date,
+  ) {
+    try {
+      const sku = wo.skuId
+        ? await this.prisma.sKU.findUnique({ where: { id: wo.skuId }, select: { baseUnit: true, name: true, itemNumber: true } })
+        : null;
+
+      // 1) Output batch (idempotent)
+      const batchNumber = `BATCH-${wo.orderNumber}`;
+      const batch = await this.prisma.batchRecord.upsert({
+        where: { batchNumber },
+        update: {
+          quantity: Math.round(actualQty),
+          goodQuantity: Math.round(goodQty),
+          scrapQuantity: Math.round(scrapQty),
+          endTime: actualEnd,
+          status: 'COMPLETED',
+        },
+        create: {
+          factoryId: wo.factoryId,
+          workOrderId: wo.id,
+          skuId: wo.skuId,
+          batchNumber,
+          lotNumber: `LOT-${wo.orderNumber}`,
+          status: 'COMPLETED',
+          quantity: Math.round(actualQty),
+          goodQuantity: Math.round(goodQty),
+          scrapQuantity: Math.round(scrapQty),
+          unit: sku?.baseUnit ?? 'CARTON',
+          startTime: wo.actualStart ?? undefined,
+          endTime: actualEnd,
+        },
+      });
+
+      // 2+3) Steps with their routing materials
+      const jos = await this.prisma.jobOrder.findMany({
+        where: { workOrderId: wo.id },
+        orderBy: { sequenceOrder: 'asc' },
+        include: {
+          machine: { select: { name: true, code: true } },
+          routingStep: { include: { materials: true } },
+        },
+      });
+
+      const actualRatio = wo.plannedQty > 0 ? actualQty / wo.plannedQty : 1;
+
+      for (const jo of jos) {
+        await this.prisma.traceEvent.create({
+          data: {
+            factoryId: wo.factoryId,
+            entityType: 'PROD_WO',
+            entityId: wo.id,
+            entityCode: wo.orderNumber,
+            eventType: 'STEP_COMPLETED',
+            quantity: jo.plannedQtyOut ?? null,
+            eventData: {
+              step: jo.sequenceOrder,
+              operation: jo.operationName,
+              machine: jo.machine?.name ?? null,
+              machineCode: jo.machine?.code ?? null,
+              qtyIn: jo.plannedQtyIn,
+              inUnit: jo.inputUnit,
+              qtyOut: jo.plannedQtyOut,
+              outUnit: jo.outputUnit,
+              cycleTimeSec: jo.idealCycleTimeSec,
+              batchNumber,
+            },
+            performedById: userId,
+            performedAt: actualEnd,
+            relatedType: 'BATCH',
+            relatedId: batch.id,
+          },
+        });
+
+        for (const m of jo.routingStep?.materials ?? []) {
+          const plannedQty = m.qtyPerOutputUnit * (jo.plannedQtyOut ?? 0);
+          const actualUsed = plannedQty * actualRatio;
+          // FIFO genealogy link: oldest active lot of this material
+          const lot = m.materialCode
+            ? await this.prisma.materialLot.findFirst({
+                where: { factoryId: wo.factoryId, materialCode: m.materialCode, status: 'ACTIVE' },
+                orderBy: { receivedAt: 'asc' },
+                select: { id: true, lotNumber: true },
+              })
+            : null;
+
+          await this.prisma.materialConsumption.create({
+            data: {
+              factoryId: wo.factoryId,
+              workOrderId: wo.id,
+              batchRecordId: batch.id,
+              materialLotId: lot?.id ?? null,
+              materialCode: m.materialCode ?? m.name,
+              materialName: m.name,
+              quantityPlanned: Math.round(plannedQty * 1000) / 1000,
+              quantityActual: Math.round(actualUsed * 1000) / 1000,
+              unit: m.unit,
+              consumedAt: actualEnd,
+              consumedById: userId,
+            },
+          });
+
+          await this.prisma.traceEvent.create({
+            data: {
+              factoryId: wo.factoryId,
+              entityType: 'RAW_MATERIAL',
+              entityId: m.rawMaterialId ?? m.id,
+              entityCode: m.materialCode ?? m.name,
+              eventType: 'CONSUMED',
+              quantity: Math.round(actualUsed * 1000) / 1000,
+              eventData: {
+                material: m.name,
+                unit: m.unit,
+                step: jo.sequenceOrder,
+                operation: jo.operationName,
+                lotNumber: lot?.lotNumber ?? null,
+                batchNumber,
+                workOrder: wo.orderNumber,
+              },
+              performedById: userId,
+              performedAt: actualEnd,
+              relatedType: 'PROD_WO',
+              relatedId: wo.id,
+            },
+          });
+        }
+      }
+
+      // Batch-level completion event (genealogy root)
+      await this.prisma.traceEvent.create({
+        data: {
+          factoryId: wo.factoryId,
+          entityType: 'BATCH',
+          entityId: batch.id,
+          entityCode: batchNumber,
+          eventType: 'BATCH_COMPLETED',
+          quantity: actualQty,
+          eventData: {
+            workOrder: wo.orderNumber,
+            sku: sku ? `${sku.itemNumber} ${sku.name}` : null,
+            goodQty,
+            scrapQty,
+            unit: sku?.baseUnit ?? 'CARTON',
+            steps: jos.length,
+          },
+          performedById: userId,
+          performedAt: actualEnd,
+          relatedType: 'PROD_WO',
+          relatedId: wo.id,
+        },
+      });
+    } catch (err) {
+      // Traceability must never block production completion
+      this.logger.error('Failed to record traceability for WO completion', err);
+    }
+  }
+
   // ────────────────────────────────────────────────────────────
   // PRIVATE HELPERS
   // ────────────────────────────────────────────────────────────
@@ -1415,7 +1616,20 @@ export class ProductionService {
     goodOutput: number,
     actualEnd: Date,
   ) {
-    if (!wo.machineId || !wo.actualStart) return null;
+    if (!wo.actualStart) return null;
+
+    // Routed WOs carry machines on their job orders, not the header —
+    // fall back to the first routed machine so OEE is still recorded.
+    let machineId = wo.machineId;
+    if (!machineId) {
+      const firstJo = await this.prisma.jobOrder.findFirst({
+        where: { workOrderId: wo.id, machineId: { not: null } },
+        orderBy: { sequenceOrder: 'asc' },
+        select: { machineId: true },
+      });
+      machineId = firstJo?.machineId ?? null;
+    }
+    if (!machineId) return null;
 
     try {
       const plannedStart = wo.actualStart;
@@ -1450,7 +1664,7 @@ export class ProductionService {
       await this.prisma.oEERecord.create({
         data: {
           factoryId: wo.factoryId,
-          machineId: wo.machineId,
+          machineId,
           recordDate: today,
           plannedProductionMin: plannedMinutes,
           actualProductionMin: plannedMinutes - downtimeMinutes,
@@ -1755,9 +1969,12 @@ export class ProductionService {
         ?? cycleTime?.cycleTimeSeconds
         ?? (step.cycleTimeMins != null ? step.cycleTimeMins * 60 : null);
 
-      // Packaging-aware unit/qty per step
-      const outputUnit = this.resolveStepOutputUnit(step.operationName, prevOutputUnit);
-      const outputQty  = this.calcOutputQty(outputUnit, prevOutputUnit, prevOutputQty, skuPkg);
+      // Unit flow: the routing step's explicit In/Out units win;
+      // the operation-name heuristic is only a fallback for legacy routings.
+      const inputUnit  = step.inUnit ?? prevOutputUnit;
+      const outputUnit = step.outUnit ?? this.resolveStepOutputUnit(step.operationName, inputUnit);
+      const inputQty   = this.convertUnits(prevOutputQty, prevOutputUnit, inputUnit, skuPkg);
+      const outputQty  = this.convertUnits(inputQty, inputUnit, outputUnit, skuPkg);
 
       const jo: Record<string, unknown> = await this.prisma.jobOrder.create({
         data: {
@@ -1774,8 +1991,9 @@ export class ProductionService {
           predecessorLagMins,
           plannedStart: jPlannedStart,
           plannedEnd: jPlannedEnd,
-          plannedQtyIn: prevOutputQty,
+          plannedQtyIn: inputQty,
           plannedQtyOut: outputQty,
+          inputUnit,
           outputUnit,
           idealCycleTimeSec,
         },

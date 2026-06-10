@@ -41,7 +41,8 @@ async function main() {
 
   // 1) Ensure machines have a capacity so durations are realistic.
   const machines = await prisma.machine.findMany({
-    where: { factoryId: fid, isActive: true, machineType: { not: 'PRODUCTION_LINE' } },
+    // Production machines only (M1..M5) — utilities are never routing steps
+    where: { factoryId: fid, isActive: true, machineType: { not: 'PRODUCTION_LINE' }, code: { startsWith: 'M' } },
     select: { id: true, name: true, code: true, designCapacity: true },
     orderBy: { sortOrder: 'asc' },
   });

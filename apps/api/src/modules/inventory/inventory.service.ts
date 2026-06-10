@@ -341,7 +341,8 @@ export class InventoryService {
   }
 
   async createProduct(factoryId: string | null, dto: {
-    code: string; name: string; itemNumber?: string; category?: string; brand?: string;
+    code: string; name: string; nameAr?: string; shortName?: string;
+    itemNumber?: string; category?: string; brand?: string;
     categoryId?: string | null; brandId?: string | null; packagingTypeId?: string | null;
     baseUnitId?: string | null; baseWeightId?: string | null;
     unit?: string; weight?: number; weightUnit?: string;
@@ -357,6 +358,8 @@ export class InventoryService {
         factoryId: resolvedFactoryId,
         code: dto.code,
         name: dto.name,
+        nameAr: dto.nameAr ?? null,
+        shortName: dto.shortName ?? null,
         itemNumber: dto.itemNumber ?? dto.code,
         category: dto.category,
         brand: dto.brand,
@@ -379,7 +382,8 @@ export class InventoryService {
   }
 
   async updateProduct(factoryId: string | null, id: string, dto: {
-    name?: string; category?: string; brand?: string; unit?: string;
+    name?: string; nameAr?: string | null; shortName?: string | null;
+    category?: string; brand?: string; unit?: string;
     categoryId?: string | null; brandId?: string | null; packagingTypeId?: string | null;
     baseUnitId?: string | null; baseWeightId?: string | null;
     weight?: number | null; weightUnit?: string;
@@ -396,6 +400,8 @@ export class InventoryService {
       where: { id },
       data: {
         ...(dto.name && { name: dto.name }),
+        ...(dto.nameAr !== undefined && { nameAr: dto.nameAr }),
+        ...(dto.shortName !== undefined && { shortName: dto.shortName }),
         ...(dto.category !== undefined && { category: dto.category }),
         ...(dto.brand !== undefined && { brand: dto.brand }),
         ...(dto.unit && { baseUnit: dto.unit }),
@@ -978,6 +984,7 @@ export class InventoryService {
             include: {
               machine: { select: { code: true, name: true } },
               workCenterRef: { select: { id: true, code: true, name: true, level: true } },
+              materials: true,
               predecessors: {
                 include: { fromStep: { select: { id: true, stepNumber: true, operationName: true } } },
               },
@@ -1013,6 +1020,9 @@ export class InventoryService {
       cycleTimeSec?: number;
       cycleTimeMins?: number;
       setupTimeMins?: number;
+      inUnit?: string;
+      outUnit?: string;
+      materials?: Array<{ rawMaterialId?: string; materialCode?: string; name: string; qtyPerOutputUnit: number; unit?: string }>;
       description?: string;
       parameters?: Record<string, unknown>;
       isOptional?: boolean;
@@ -1068,9 +1078,22 @@ export class InventoryService {
               cycleTimeSec: sec,
               cycleTimeMins: sec != null ? sec / 60 : null,
               setupTimeMins: s.setupTimeMins,
+              inUnit: s.inUnit ?? null,
+              outUnit: s.outUnit ?? null,
               description: s.description,
               parameters: (s.parameters as any) ?? undefined,
               isOptional: s.isOptional ?? false,
+              ...(s.materials?.length && {
+                materials: {
+                  create: s.materials.map((m) => ({
+                    rawMaterialId: m.rawMaterialId ?? null,
+                    materialCode: m.materialCode ?? null,
+                    name: m.name,
+                    qtyPerOutputUnit: m.qtyPerOutputUnit,
+                    unit: m.unit ?? 'KG',
+                  })),
+                },
+              }),
             };
           }),
         },
@@ -1080,7 +1103,7 @@ export class InventoryService {
         categoryRef: { select: { id: true, name: true } },
         baseWeightRef: { select: { id: true, value: true, unit: true, label: true } },
         skuLinks: { include: { sku: { select: { id: true, code: true, name: true } } } },
-        routingSteps: { orderBy: { stepNumber: 'asc' } },
+        routingSteps: { orderBy: { stepNumber: 'asc' }, include: { materials: true } },
       },
     });
 
@@ -1125,6 +1148,9 @@ export class InventoryService {
       cycleTimeSec?: number;
       cycleTimeMins?: number;
       setupTimeMins?: number;
+      inUnit?: string;
+      outUnit?: string;
+      materials?: Array<{ rawMaterialId?: string; materialCode?: string; name: string; qtyPerOutputUnit: number; unit?: string }>;
       description?: string;
       parameters?: Record<string, unknown>;
       isOptional?: boolean;
@@ -1183,16 +1209,29 @@ export class InventoryService {
                 cycleTimeSec: sec,
                 cycleTimeMins: sec != null ? sec / 60 : null,
                 setupTimeMins: s.setupTimeMins,
+                inUnit: s.inUnit ?? null,
+                outUnit: s.outUnit ?? null,
                 description: s.description,
                 parameters: (s.parameters as any) ?? undefined,
                 isOptional: s.isOptional ?? false,
+                ...(s.materials?.length && {
+                  materials: {
+                    create: s.materials.map((m) => ({
+                      rawMaterialId: m.rawMaterialId ?? null,
+                      materialCode: m.materialCode ?? null,
+                      name: m.name,
+                      qtyPerOutputUnit: m.qtyPerOutputUnit,
+                      unit: m.unit ?? 'KG',
+                    })),
+                  },
+                }),
               };
             }),
           },
         },
         include: {
           sku: { select: { code: true, name: true } },
-          routingSteps: { orderBy: { stepNumber: 'asc' } },
+          routingSteps: { orderBy: { stepNumber: 'asc' }, include: { materials: true } },
         },
       });
 

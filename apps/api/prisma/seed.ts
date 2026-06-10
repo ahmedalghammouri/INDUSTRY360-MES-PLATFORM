@@ -520,7 +520,7 @@ async function main() {
     { itemNumber: '10310290', name: 'Miza (Panda) HF 2.25kg', brand: 'Miza', category: 'Powder Detergent', weight: 2.25, packagingType: 'HF', unitsPerInner: 4, innersPerCarton: 1 },
     { itemNumber: '10310291', name: 'Miza (Panda) LF 2.25kg', brand: 'Miza', category: 'Powder Detergent', weight: 2.25, packagingType: 'LF', unitsPerInner: 4, innersPerCarton: 1 },
     // Rex
-    { itemNumber: '10310297', name: 'Rex HF 2.5kg', brand: 'Rex', category: 'Powder Detergent', weight: 2.5, packagingType: 'HF', unitsPerInner: 6, innersPerCarton: 1 },
+    { itemNumber: '10310297', name: 'Rex HF 2.5kg', brand: 'REX', category: 'Powder Detergent', weight: 2.5, packagingType: 'HF', unitsPerInner: 6, innersPerCarton: 1 },
     { itemNumber: '10310298', name: 'REX LF 2.5kg', brand: 'REX', category: 'Powder Detergent', weight: 2.5, packagingType: 'LF', unitsPerInner: 6, innersPerCarton: 1 },
   ];
 
@@ -934,6 +934,75 @@ async function main() {
   });
 
   console.log(`✅ SIDCO users: Issa Masadeh (Admin), Mohammed Brakat (Manager), Mohammed Yousef (Supervisor) + Operator + Maintenance + Quality`);
+
+  // ============================================================
+  // SIDCO — PLM ENGINEERING CHANGE REQUESTS (real workflow data)
+  // ============================================================
+  const crData: Array<{
+    crNumber: string; title: string; description: string;
+    type: 'BOM_CHANGE' | 'RECIPE_CHANGE' | 'PROCESS_CHANGE' | 'DESIGN_CHANGE';
+    status: 'DRAFT' | 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'IMPLEMENTED';
+    priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    itemNumber: string; reason: string; daysAhead: number; reviewed: boolean;
+  }> = [
+    {
+      crNumber: 'ECR-2026-001',
+      title: 'Update carton glue spec for GENTO 2.25 Kg cartons',
+      description: 'Current hot-melt glue fails seal test in high humidity. Switch to supplier grade HM-240 on the Cartomac glue system.',
+      type: 'BOM_CHANGE', status: 'IMPLEMENTED', priority: 'HIGH',
+      itemNumber: '10310189', reason: 'Carton seal failures during summer humidity', daysAhead: -20, reviewed: true,
+    },
+    {
+      crNumber: 'ECR-2026-002',
+      title: 'Reduce Big Betti fill cycle for 1.5 Kg SKUs',
+      description: 'Trial showed stable weights at 28s vs current 30s per inner for 1.5 Kg fills. Update routing cycle time after MSA.',
+      type: 'PROCESS_CHANGE', status: 'APPROVED', priority: 'MEDIUM',
+      itemNumber: '10310110', reason: 'Throughput improvement ~6% on 1.5 Kg runs', daysAhead: 14, reviewed: true,
+    },
+    {
+      crNumber: 'ECR-2026-003',
+      title: 'Alwatani Blue HF — perfume dosage adjustment',
+      description: 'Marketing requested stronger scent retention. Increase perfume dosage from 0.30% to 0.35% in the blending recipe.',
+      type: 'RECIPE_CHANGE', status: 'UNDER_REVIEW', priority: 'MEDIUM',
+      itemNumber: '10310067', reason: 'Customer feedback on scent fade', daysAhead: 21, reviewed: true,
+    },
+    {
+      crNumber: 'ECR-2026-004',
+      title: 'New pallet pattern for REX 2.5 Kg cartons',
+      description: 'Euro-Pack Robot pattern change from 8×5 to 7×6 to improve stability and reduce stretch film usage per pallet.',
+      type: 'DESIGN_CHANGE', status: 'SUBMITTED', priority: 'LOW',
+      itemNumber: '10310297', reason: 'Pallet lean reported by warehouse', daysAhead: 30, reviewed: false,
+    },
+    {
+      crNumber: 'ECR-2026-005',
+      title: 'SIDCO Extra White — replace inner bag film gauge',
+      description: 'Move from 60μ to 55μ film for inner bags; requires Big Betti sealing temperature re-validation.',
+      type: 'BOM_CHANGE', status: 'DRAFT', priority: 'MEDIUM',
+      itemNumber: '10310111', reason: 'Packaging cost reduction initiative', daysAhead: 45, reviewed: false,
+    },
+  ];
+  for (const c of crData) {
+    await prisma.changeRequest.upsert({
+      where: { factoryId_crNumber: { factoryId: sidco.id, crNumber: c.crNumber } },
+      update: {},
+      create: {
+        factoryId: sidco.id,
+        crNumber: c.crNumber,
+        title: c.title,
+        description: c.description,
+        type: c.type,
+        status: c.status,
+        priority: c.priority,
+        skuId: skuMap[c.itemNumber] ?? null,
+        reason: c.reason,
+        targetDate: new Date(Date.now() + c.daysAhead * 86_400_000),
+        requestedById: mohammedYousef.id,
+        reviewedById: c.reviewed ? mohammedBrakat.id : null,
+        implementedAt: c.status === 'IMPLEMENTED' ? new Date(Date.now() - 5 * 86_400_000) : null,
+      },
+    });
+  }
+  console.log(`✅ SIDCO change requests: ${crData.length} ECRs across the workflow`);
 
   // ============================================================
   // SIDCO — SPARE PARTS (common parts from NCC downtime list)

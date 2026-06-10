@@ -122,6 +122,15 @@ const navItems: NavItem[] = [
     ],
   },
   {
+    label: 'Traceability',
+    icon: GitCommit,
+    children: [
+      { label: 'Trace Log',            href: '/traceability',              icon: Activity  },
+      { label: 'Genealogy',            href: '/traceability/genealogy',    icon: GitBranch },
+      { label: 'Material Consumption', href: '/traceability/consumption',  icon: Boxes     },
+    ],
+  },
+  {
     label: 'Manufacturing',
     icon: Cog,
     badge: 'MRP',
@@ -244,7 +253,6 @@ const navItems: NavItem[] = [
     ],
   },
   { label: 'Plant Hierarchy', href: '/hierarchy', icon: GitBranch },
-  { label: 'Traceability', href: '/traceability', icon: GitCommit },
 
   // ═══════════════ INSIGHTS ═══════════════
   { section: 'Insights', label: 'Insights' },

@@ -32,16 +32,28 @@ interface StepDependency {
   lagMins: number;
 }
 
+interface StepMaterialForm {
+  rawMaterialId: string;
+  name: string;
+  qty: string;     // per ONE output unit of the step
+  unit: string;
+}
+
 interface StepForm {
   stepNumber: number;
   operationName: string;
   workCenterId: string;
   workCenterName: string;
-  cycleTimeSec: string;   // seconds — THE reference for JO cycle/duration
+  cycleTimeSec: string;   // seconds per ONE output unit — THE reference for JO cycle/duration
   setupTimeMins: string;
+  inUnit: string;         // consumed unit (PCS/INNER/CARTON/PALLET)
+  outUnit: string;        // produced unit — scheduling converts order qty to this
+  materials: StepMaterialForm[];
   description: string;
   isOptional: boolean;
 }
+
+const FLOW_UNITS = ['PCS', 'INNER', 'CARTON', 'PALLET'] as const;
 
 type ProcessScope = 'PRODUCT' | 'CATEGORY' | 'BASE_WEIGHT' | 'PRODUCT_LIST';
 
@@ -77,6 +89,9 @@ interface RoutingStep {
   cycleTimeSec?: number;
   cycleTimeMins?: number;
   setupTimeMins?: number;
+  inUnit?: string | null;
+  outUnit?: string | null;
+  materials?: Array<{ id: string; rawMaterialId: string | null; materialCode: string | null; name: string; qtyPerOutputUnit: number; unit: string }>;
   description?: string;
   isOptional: boolean;
   machine?: { code: string; name: string };
@@ -133,6 +148,9 @@ const EMPTY_STEP = (): StepForm => ({
   workCenterName: '',
   cycleTimeSec: '',
   setupTimeMins: '',
+  inUnit: '',
+  outUnit: '',
+  materials: [],
   description: '',
   isOptional: false,
 });
@@ -390,6 +408,13 @@ function ProcessForm({
 }) {
   const totalCycleSec = steps.reduce((s, st) => s + (parseFloat(st.cycleTimeSec || '0') || 0), 0);
   const { data: masterData } = useProductMasterData();
+  const { data: rawMatData } = useQuery({
+    queryKey: ['raw-materials-list'],
+    queryFn: () => api.get('/inventory/raw-materials?limit=200'),
+    staleTime: 120_000,
+  });
+  const rawMaterials: Array<{ id: string; code: string; name: string; unit: string }> =
+    ((rawMatData as any)?.data ?? []);
 
   // Drag state
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -640,7 +665,7 @@ function ProcessForm({
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="flex flex-col gap-1">
-                      <span className="text-[10px] text-muted-foreground">Cycle time (sec)</span>
+                      <span className="text-[10px] text-muted-foreground">Cycle time (sec / 1 out-unit)</span>
                       <Input type="number" min="0" step="1" value={step.cycleTimeSec} onChange={e => updateStep(i, { cycleTimeSec: e.target.value })} className="h-7 text-xs" placeholder="0" />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -651,6 +676,87 @@ function ProcessForm({
                       <span className="text-[10px] text-muted-foreground">Notes</span>
                       <Input value={step.description} onChange={e => updateStep(i, { description: e.target.value })} className="h-7 text-xs" placeholder="Parameters, notes..." />
                     </div>
+                  </div>
+
+                  {/* Unit flow — drives qty conversion + duration in scheduling */}
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] text-muted-foreground">In unit (consumes)</span>
+                      <select
+                        className="h-7 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={step.inUnit}
+                        onChange={e => updateStep(i, { inUnit: e.target.value })}
+                      >
+                        <option value="">— auto (previous step) —</option>
+                        {FLOW_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] text-muted-foreground">Out unit (produces · cycle is per 1)</span>
+                      <select
+                        className="h-7 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={step.outUnit}
+                        onChange={e => updateStep(i, { outUnit: e.target.value })}
+                      >
+                        <option value="">— auto —</option>
+                        {FLOW_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Input raw materials — feed Traceability & Genealogy on completion */}
+                  <div className="mt-2 rounded-lg border border-border/50 bg-muted/20 p-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                        Input materials <span className="normal-case font-normal">(qty per 1 out-unit)</span>
+                      </span>
+                      <Button
+                        size="sm" variant="ghost" className="h-5 px-1.5 text-[10px]"
+                        onClick={() => updateStep(i, { materials: [...step.materials, { rawMaterialId: '', name: '', qty: '', unit: 'KG' }] })}
+                      >
+                        <Plus size={10} className="mr-0.5" />Add material
+                      </Button>
+                    </div>
+                    {step.materials.length === 0 ? (
+                      <p className="text-[10px] text-muted-foreground/60 px-1">No input materials for this step.</p>
+                    ) : step.materials.map((mat, mi) => (
+                      <div key={mi} className="flex items-center gap-1.5 mb-1">
+                        <select
+                          className="h-7 flex-[2] rounded-md border border-input bg-background px-2 text-xs focus:outline-none"
+                          value={mat.rawMaterialId}
+                          onChange={e => {
+                            const rm = rawMaterials.find(r => r.id === e.target.value);
+                            const next = [...step.materials];
+                            next[mi] = { ...mat, rawMaterialId: e.target.value, name: rm?.name ?? mat.name, unit: rm?.unit ?? mat.unit };
+                            updateStep(i, { materials: next });
+                          }}
+                        >
+                          <option value="">— free text —</option>
+                          {rawMaterials.map(r => <option key={r.id} value={r.id}>{r.code} — {r.name}</option>)}
+                        </select>
+                        <Input
+                          value={mat.name} placeholder="Material name"
+                          onChange={e => { const next = [...step.materials]; next[mi] = { ...mat, name: e.target.value }; updateStep(i, { materials: next }); }}
+                          className="h-7 flex-[2] text-xs" disabled={!!mat.rawMaterialId}
+                        />
+                        <Input
+                          type="number" min="0" step="0.001" value={mat.qty} placeholder="Qty"
+                          onChange={e => { const next = [...step.materials]; next[mi] = { ...mat, qty: e.target.value }; updateStep(i, { materials: next }); }}
+                          className="h-7 w-20 text-xs"
+                        />
+                        <Input
+                          value={mat.unit} placeholder="Unit"
+                          onChange={e => { const next = [...step.materials]; next[mi] = { ...mat, unit: e.target.value }; updateStep(i, { materials: next }); }}
+                          className="h-7 w-14 text-xs"
+                        />
+                        <button
+                          className="p-1 text-muted-foreground hover:text-red-400"
+                          onClick={() => updateStep(i, { materials: step.materials.filter((_, x) => x !== mi) })}
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
@@ -853,6 +959,14 @@ export function ManufacturingProcessesView() {
       workCenterName: s.workCenterRef?.name ?? s.workCenter ?? '',
       cycleTimeSec: String(s.cycleTimeSec ?? (s.cycleTimeMins != null ? s.cycleTimeMins * 60 : '')),
       setupTimeMins: String(s.setupTimeMins ?? ''),
+      inUnit: s.inUnit ?? '',
+      outUnit: s.outUnit ?? '',
+      materials: (s.materials ?? []).map(m => ({
+        rawMaterialId: m.rawMaterialId ?? '',
+        name: m.name,
+        qty: String(m.qtyPerOutputUnit),
+        unit: m.unit,
+      })),
       description: s.description ?? '',
       isOptional: s.isOptional,
     })));
@@ -875,6 +989,16 @@ export function ManufacturingProcessesView() {
       workCenter: s.workCenterName || undefined,
       cycleTimeSec: parseFloat(s.cycleTimeSec || '0') || undefined,
       setupTimeMins: parseFloat(s.setupTimeMins || '0') || undefined,
+      inUnit: s.inUnit || undefined,
+      outUnit: s.outUnit || undefined,
+      materials: s.materials
+        .filter(m => m.name.trim() && parseFloat(m.qty || '0') > 0)
+        .map(m => ({
+          rawMaterialId: m.rawMaterialId || undefined,
+          name: m.name.trim(),
+          qtyPerOutputUnit: parseFloat(m.qty),
+          unit: m.unit || 'KG',
+        })),
       description: s.description || undefined,
       isOptional: s.isOptional,
       dependencies: depList.filter(d => d.toStepIndex === i).map(d => ({

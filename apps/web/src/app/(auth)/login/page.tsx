@@ -16,8 +16,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-// Static fallback
-import { FACTORIES } from '@/features/factory-selector/factories';
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -63,13 +61,17 @@ export default function LoginPage() {
     ];
   })();
 
-  // Resolve factory info: API-loaded store first, then static fallback
+  // Resolve factory info: store first (set by the selector), else the live overview fetch
   const factory: FactoryBrief | null = factoryCode
     ? (allFactories.find((f) => f.code === factoryCode) ??
         (() => {
-          const s = FACTORIES.find((f) => f.code === factoryCode);
-          if (!s) return null;
-          return { id: s.id, code: s.code, name: s.name, nameAr: s.nameAr, city: s.city, lat: s.lat, lng: s.lng, color: s.color, glowColor: s.glowColor, isActive: true };
+          const f = overview?.factories.find((x) => x.code === factoryCode);
+          if (!f) return null;
+          return {
+            id: f.id, code: f.code, name: f.name, nameAr: f.nameAr,
+            city: f.city ?? undefined, lat: f.lat ?? undefined, lng: f.lng ?? undefined,
+            color: f.color, glowColor: f.glowColor, isActive: f.isActive,
+          };
         })())
     : null;
 

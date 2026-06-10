@@ -31,42 +31,57 @@ export class DashboardService {
   }
 
   private async getKPIs(factoryId: string | null) {
-    const now = new Date();
-    const dayStart = new Date(now.setHours(0, 0, 0, 0));
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const prevDayStart = new Date(dayStart.getTime() - 86_400_000);
 
     const factoryFilter = factoryId ? { factoryId } : {};
 
-    const oeeRecords = await this.prisma.oEERecord.findMany({
-      where: { ...factoryFilter, recordDate: { gte: dayStart } },
-    });
+    // Today + yesterday in one go — trends are real day-over-day deltas
+    const [oeeRecords, prevRecords, activeAlarms, prevAlarms] = await Promise.all([
+      this.prisma.oEERecord.findMany({ where: { ...factoryFilter, recordDate: { gte: dayStart } } }),
+      this.prisma.oEERecord.findMany({ where: { ...factoryFilter, recordDate: { gte: prevDayStart, lt: dayStart } } }),
+      this.prisma.alarmEvent.count({ where: { ...factoryFilter, acknowledgedAt: null, resolvedAt: null } }),
+      this.prisma.alarmEvent.count({ where: { ...factoryFilter, triggeredAt: { gte: prevDayStart, lt: dayStart } } }),
+    ]);
 
-    if (oeeRecords.length === 0) {
-      return this.getMockKPIs();
-    }
+    type Rec = (typeof oeeRecords)[number];
+    const avg = (rows: Rec[], pick: (r: Rec) => number | null) =>
+      rows.length ? rows.reduce((s, r) => s + (pick(r) ?? 0), 0) / rows.length : 0;
+    const sum = (rows: Rec[], pick: (r: Rec) => number | null) =>
+      rows.reduce((s, r) => s + (pick(r) ?? 0), 0);
+    const r1 = (n: number) => Math.round(n * 10) / 10;
 
-    const avgOEE = oeeRecords.reduce((sum, r) => sum + (r.oee ?? 0), 0) / oeeRecords.length;
-    const avgAvailability = oeeRecords.reduce((sum, r) => sum + (r.availability ?? 0), 0) / oeeRecords.length;
-    const avgPerformance = oeeRecords.reduce((sum, r) => sum + (r.performance ?? 0), 0) / oeeRecords.length;
-    const avgQuality = oeeRecords.reduce((sum, r) => sum + (r.quality ?? 0), 0) / oeeRecords.length;
-    const totalOutput = oeeRecords.reduce((sum, r) => sum + (r.totalOutput ?? 0), 0);
-
-    const activeAlarms = await this.prisma.alarmEvent.count({
-      where: { ...factoryFilter, acknowledgedAt: null, resolvedAt: null },
-    });
+    const today = {
+      oee: avg(oeeRecords, (r) => r.oee),
+      availability: avg(oeeRecords, (r) => r.availability),
+      performance: avg(oeeRecords, (r) => r.performance),
+      quality: avg(oeeRecords, (r) => r.quality),
+      output: sum(oeeRecords, (r) => r.totalOutput),
+    };
+    const prev = {
+      oee: avg(prevRecords, (r) => r.oee),
+      availability: avg(prevRecords, (r) => r.availability),
+      performance: avg(prevRecords, (r) => r.performance),
+      quality: avg(prevRecords, (r) => r.quality),
+      output: sum(prevRecords, (r) => r.totalOutput),
+    };
+    // Trend = delta vs yesterday (0 when either day has no data yet)
+    const trend = (t: number, p: number) => (prevRecords.length && oeeRecords.length ? r1(t - p) : 0);
 
     return {
-      oee: Math.round(avgOEE * 10) / 10,
-      availability: Math.round(avgAvailability * 10) / 10,
-      performance: Math.round(avgPerformance * 10) / 10,
-      quality: Math.round(avgQuality * 10) / 10,
-      totalOutput,
+      oee: r1(today.oee),
+      availability: r1(today.availability),
+      performance: r1(today.performance),
+      quality: r1(today.quality),
+      totalOutput: today.output,
       activeAlarms,
-      oeeTrend: 2.3,
-      availabilityTrend: 1.1,
-      performanceTrend: -0.5,
-      qualityTrend: 0.8,
-      outputTrend: 5.2,
-      alarmTrend: -1,
+      oeeTrend: trend(today.oee, prev.oee),
+      availabilityTrend: trend(today.availability, prev.availability),
+      performanceTrend: trend(today.performance, prev.performance),
+      qualityTrend: trend(today.quality, prev.quality),
+      outputTrend: trend(today.output, prev.output),
+      alarmTrend: activeAlarms - prevAlarms,
     };
   }
 
@@ -107,27 +122,34 @@ export class DashboardService {
 
   private async getProductionStatus(factoryId: string | null) {
     const factoryFilter = factoryId ? { factoryId } : {};
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
 
-    const [totalMachines, activeWOs] = await Promise.all([
+    const [totalMachines, activeWOs, completedToday, shiftTargets, outputToday] = await Promise.all([
       this.prisma.machine.count({ where: { ...factoryFilter, isActive: true } }),
       this.prisma.workOrder.count({ where: { ...factoryFilter, status: 'IN_PROGRESS' } }),
+      this.prisma.workOrder.count({
+        where: { ...factoryFilter, status: 'COMPLETED', actualEnd: { gte: dayStart } },
+      }),
+      // Planned output = sum of today's shift targets (real shift model)
+      this.prisma.shiftInstance.aggregate({
+        where: { ...factoryFilter, startTime: { gte: dayStart } },
+        _sum: { targetQty: true },
+      }),
+      // Actual output = today's recorded OEE output
+      this.prisma.oEERecord.aggregate({
+        where: { ...factoryFilter, recordDate: { gte: dayStart } },
+        _sum: { totalOutput: true },
+      }),
     ]);
-
-    const completedToday = await this.prisma.workOrder.count({
-      where: {
-        ...factoryFilter,
-        status: 'COMPLETED',
-        actualEnd: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
-      },
-    });
 
     return {
       runningLines: Math.min(activeWOs, totalMachines),
       totalLines: totalMachines,
       activeOrders: activeWOs,
       completedToday,
-      plannedOutput: 1200,
-      actualOutput: 980,
+      plannedOutput: shiftTargets._sum.targetQty ?? 0,
+      actualOutput: outputToday._sum.totalOutput ?? 0,
     };
   }
 
@@ -164,7 +186,7 @@ export class DashboardService {
       orderBy: { startTime: 'desc' },
     });
 
-    if (!activeShift) return this.getMockShiftSummary();
+    if (!activeShift) return null; // no active shift right now — UI renders an idle state
 
     const elapsed = (Date.now() - activeShift.startTime.getTime()) / 60_000;
 
@@ -230,21 +252,4 @@ export class DashboardService {
     });
   }
 
-  private getMockKPIs() {
-    return {
-      oee: 82.5, availability: 87.2, performance: 94.8, quality: 99.2,
-      totalOutput: 4823, activeAlarms: 3,
-      oeeTrend: 2.3, availabilityTrend: 1.1, performanceTrend: -0.5,
-      qualityTrend: 0.8, outputTrend: 5.2, alarmTrend: -1,
-    };
-  }
-
-  private getMockShiftSummary() {
-    return {
-      shiftName: 'Morning Shift', operator: 'Ahmed Al-Rashid',
-      startTime: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-      elapsed: 240, output: 842, target: 960,
-      oee: 87.7, downtime: 25, defects: 3,
-    };
-  }
 }
