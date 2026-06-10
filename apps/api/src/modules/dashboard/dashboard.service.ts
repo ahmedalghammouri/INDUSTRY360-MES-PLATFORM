@@ -205,7 +205,8 @@ export class DashboardService {
     dayStart.setHours(0, 0, 0, 0);
 
     const events = await this.prisma.downtimeEvent.findMany({
-      where: { ...factoryFilter, startTime: { gte: dayStart }, durationMinutes: { not: null } },
+      // Unplanned-loss Pareto only — planned downtime (break/cleaning) is excluded
+      where: { ...factoryFilter, startTime: { gte: dayStart }, durationMinutes: { not: null }, isPlanned: false },
       select: { category: true, durationMinutes: true },
     });
 

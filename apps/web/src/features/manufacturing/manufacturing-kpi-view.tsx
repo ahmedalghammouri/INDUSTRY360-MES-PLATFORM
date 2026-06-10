@@ -188,7 +188,11 @@ export default function ManufacturingKpiView() {
 
   const { data: oeeRecords, isLoading: recordsLoading } = useQuery({
     queryKey: ['production', 'oee-records', timeframe],
-    queryFn: () => api.get<OeeRecord[]>('/production/oee-records?limit=30'),
+    // Endpoint is paginated → unwrap the `data` array (guard non-array shapes)
+    queryFn: async () => {
+      const res = await api.get<{ data: OeeRecord[] } | OeeRecord[]>('/production/oee-records?limit=30');
+      return Array.isArray(res) ? res : (res?.data ?? []);
+    },
     refetchInterval: 60_000,
   });
 

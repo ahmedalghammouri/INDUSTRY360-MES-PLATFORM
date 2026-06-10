@@ -211,7 +211,11 @@ export default function ManufacturingOeeView() {
   // Query: OEE records history
   const { data: oeeRecords, isLoading: recordsLoading } = useQuery<OeeRecord[]>({
     queryKey: ['oee', 'records'],
-    queryFn: () => api.get<OeeRecord[]>('/production/oee-records?limit=50'),
+    // Endpoint is paginated → unwrap the `data` array (guard non-array shapes)
+    queryFn: async () => {
+      const res = await api.get<{ data: OeeRecord[] } | OeeRecord[]>('/production/oee-records?limit=50');
+      return Array.isArray(res) ? res : (res?.data ?? []);
+    },
     refetchInterval: 30_000,
   });
 

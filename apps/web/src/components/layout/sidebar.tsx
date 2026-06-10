@@ -26,6 +26,7 @@ import {
   Gauge,
   AlertTriangle,
   Calendar,
+  Clock,
   Boxes,
   Network,
   FileText,
@@ -84,6 +85,9 @@ const navItems: NavItem[] = [
   // ── 1b. Dashboard Center (catalog & launcher) ───────────────
   { label: 'Dashboard Center', href: '/dashboard-center', icon: LayoutGrid, badge: 'New', badgeVariant: 'default' },
 
+  // ── 1c. Planned Downtime (shift model + scheduled stops) ────
+  { label: 'Planned Downtime', href: '/production/shifts', icon: Clock, badge: 'NCC', badgeVariant: 'outline' },
+
   // ── 2. Production (Planning & Reporting) ────────────────────
   {
     label: 'Production',
@@ -92,6 +96,7 @@ const navItems: NavItem[] = [
       { label: 'Overview',               href: '/production',                      icon: Gauge         },
       { label: 'Prod. Orders (PO)',      href: '/production/production-orders',    icon: GitCommit,    badge: 'ISA-95', badgeVariant: 'outline' },
       { label: 'Production Scheduling',  href: '/production/scheduling',           icon: Calendar      },
+      { label: 'Shift Configuration',    href: '/production/shifts',               icon: Clock         },
       { label: 'Scrap Log Audit',        href: '/production/scrap-log',            icon: AlertTriangle, badge: 'Audit',  badgeVariant: 'outline' },
       { label: 'Batches & Lots',         href: '/production/batches',              icon: Boxes         },
       {

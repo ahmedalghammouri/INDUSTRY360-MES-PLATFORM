@@ -4,14 +4,14 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, EyeOff, Loader2, Shield, Factory, AlertCircle, ArrowLeft, MapPin } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Shield, AlertCircle, ArrowLeft, MapPin } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 
 import { useAuthStore } from '@/store/auth-store';
 import { useFactoryStore, type FactoryBrief } from '@/store/factory-store';
-import { authService } from '@/services/auth.service';
+import { authService, type FactoriesOverview } from '@/services/auth.service';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -38,6 +38,30 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [overview, setOverview] = useState<FactoriesOverview | null>(null);
+
+  // Live platform stats for the marketing panel (real, not hardcoded)
+  useEffect(() => {
+    authService.getFactoriesOverview().then(setOverview).catch(() => {});
+  }, []);
+
+  // Stats reflect the selected factory's live KPIs, or the network summary
+  const liveStats = (() => {
+    if (!overview) return null;
+    const f = factoryCode ? overview.factories.find((x) => x.code === factoryCode) : null;
+    if (f) {
+      return [
+        { label: 'Overall OEE', value: `${f.kpis.oee.toFixed(1)}%` },
+        { label: 'Quality Rate', value: `${f.kpis.quality.toFixed(1)}%` },
+        { label: 'Active Alarms', value: `${f.kpis.activeAlarms}` },
+      ];
+    }
+    return [
+      { label: 'Network Avg OEE', value: `${overview.summary.avgOEE.toFixed(1)}%` },
+      { label: 'Active Factories', value: `${overview.summary.totalFactories}` },
+      { label: 'Avg Quality', value: `${overview.summary.avgQuality.toFixed(1)}%` },
+    ];
+  })();
 
   // Resolve factory info: API-loaded store first, then static fallback
   const factory: FactoryBrief | null = factoryCode
@@ -109,8 +133,9 @@ export default function LoginPage() {
 
         <div className="relative z-10 flex flex-col justify-between p-16">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <Factory className="w-6 h-6 text-white" />
+            <div className="w-11 h-11 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center p-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="STAR-MES" className="w-full h-full object-contain" />
             </div>
             <div>
               <div className="text-white font-bold text-xl tracking-tight">STAR-MES</div>
@@ -140,11 +165,11 @@ export default function LoginPage() {
               transition={{ duration: 0.6, delay: 0.2 }}
               className="grid grid-cols-3 gap-6"
             >
-              {[
-                { label: 'OEE Improvement', value: '+23%' },
-                { label: 'Downtime Reduction', value: '40%' },
-                { label: 'Quality Rate', value: '99.2%' },
-              ].map((stat) => (
+              {(liveStats ?? [
+                { label: 'Network Avg OEE', value: '—' },
+                { label: 'Active Factories', value: '—' },
+                { label: 'Avg Quality', value: '—' },
+              ]).map((stat) => (
                 <div key={stat.label} className="glass-card rounded-xl p-4">
                   <div className="text-2xl font-bold gradient-text">{stat.value}</div>
                   <div className="text-xs text-white/40 mt-1">{stat.label}</div>
@@ -169,8 +194,9 @@ export default function LoginPage() {
         >
           {/* Mobile logo */}
           <div className="flex items-center gap-3 lg:hidden">
-            <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-              <Factory className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 rounded-xl bg-foreground/5 border border-border flex items-center justify-center p-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="STAR-MES" className="w-full h-full object-contain" />
             </div>
             <div className="font-bold text-lg">STAR-MES</div>
           </div>

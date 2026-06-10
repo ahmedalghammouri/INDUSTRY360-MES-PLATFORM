@@ -269,6 +269,98 @@ export class AuthService {
     });
   }
 
+  /**
+   * Public landing-page overview: every active factory with REAL KPIs
+   * (OEE/availability/performance/quality averaged from oee_records,
+   * employee headcount, active-alarm count, shifts started today, today's
+   * output) plus a network-wide summary. Powers the factory-selector map
+   * and the login marketing panel with live data instead of static numbers.
+   */
+  async getFactoriesOverview() {
+    const factories = await this.prisma.factory.findMany({
+      where: { isActive: true },
+      select: { id: true, code: true, name: true, nameAr: true, city: true, lat: true, lng: true, color: true, glowColor: true, isActive: true },
+      orderBy: { code: 'asc' },
+    });
+    const ids = factories.map((f) => f.id);
+    if (ids.length === 0) {
+      return { factories: [], summary: { avgOEE: 0, avgQuality: 0, totalFactories: 0, totalEmployees: 0, totalActiveAlarms: 0 } };
+    }
+
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+
+    const [oeeAll, oeeToday, employees, alarms, shifts] = await Promise.all([
+      // OEE quality metrics averaged over all records (stable snapshot)
+      this.prisma.oEERecord.groupBy({
+        by: ['factoryId'],
+        where: { factoryId: { in: ids } },
+        _avg: { oee: true, availability: true, performance: true, quality: true },
+      }),
+      // Today's output for the production figure
+      this.prisma.oEERecord.groupBy({
+        by: ['factoryId'],
+        where: { factoryId: { in: ids }, recordDate: { gte: dayStart } },
+        _sum: { totalOutput: true },
+      }),
+      this.prisma.user.groupBy({
+        by: ['factoryId'],
+        where: { factoryId: { in: ids }, isActive: true, deletedAt: null },
+        _count: { _all: true },
+      }),
+      this.prisma.alarmEvent.groupBy({
+        by: ['factoryId'],
+        where: { factoryId: { in: ids }, resolvedAt: null },
+        _count: { _all: true },
+      }),
+      this.prisma.shiftInstance.groupBy({
+        by: ['factoryId'],
+        where: { factoryId: { in: ids }, startTime: { gte: dayStart } },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const round1 = (n: number | null | undefined) => Math.round((n ?? 0) * 10) / 10;
+    const oeeMap = new Map(oeeAll.map((r) => [r.factoryId, r._avg]));
+    const prodMap = new Map(oeeToday.map((r) => [r.factoryId, r._sum.totalOutput ?? 0]));
+    const empMap = new Map(employees.map((r) => [r.factoryId, r._count._all]));
+    const alarmMap = new Map(alarms.map((r) => [r.factoryId, r._count._all]));
+    const shiftMap = new Map(shifts.map((r) => [r.factoryId, r._count._all]));
+
+    const enriched = factories.map((f) => {
+      const o = oeeMap.get(f.id);
+      const availability = round1(o?.availability);
+      return {
+        ...f,
+        kpis: {
+          oee: round1(o?.oee),
+          availability,
+          performance: round1(o?.performance),
+          quality: round1(o?.quality),
+          uptime: availability, // availability is the real uptime proxy
+          production: prodMap.get(f.id) ?? 0,
+          employees: empMap.get(f.id) ?? 0,
+          activeAlarms: alarmMap.get(f.id) ?? 0,
+          shiftsToday: shiftMap.get(f.id) ?? 0,
+        },
+      };
+    });
+
+    const withOEE = enriched.filter((f) => f.kpis.oee > 0);
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((s, n) => s + n, 0) / arr.length : 0);
+
+    return {
+      factories: enriched,
+      summary: {
+        avgOEE: round1(avg(withOEE.map((f) => f.kpis.oee))),
+        avgQuality: round1(avg(withOEE.map((f) => f.kpis.quality))),
+        totalFactories: factories.length,
+        totalEmployees: enriched.reduce((s, f) => s + f.kpis.employees, 0),
+        totalActiveAlarms: enriched.reduce((s, f) => s + f.kpis.activeAlarms, 0),
+      },
+    };
+  }
+
   private async generateTokens(
     user: User,
     factoryId: string | null,

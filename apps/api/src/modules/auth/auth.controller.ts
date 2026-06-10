@@ -28,6 +28,14 @@ export class AuthController {
     return this.authService.getFactoriesForSelector();
   }
 
+  // Public landing overview: factories enriched with live KPIs + network summary
+  @Public()
+  @Get('factories/overview')
+  @ApiOperation({ summary: 'Factories with live KPIs for the landing page', description: 'Each active factory with real OEE/quality/alarm/employee/shift KPIs plus a network-wide summary.' })
+  async getFactoriesOverview() {
+    return this.authService.getFactoriesOverview();
+  }
+
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)

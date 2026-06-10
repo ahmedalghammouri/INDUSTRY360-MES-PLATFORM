@@ -430,13 +430,13 @@ async function main() {
   // Working days: Saturday–Thursday (days 0,1,2,3,4,6 in JS: 0=Sun)
   // ============================================================
   const shift1 = await prisma.shiftTemplate.upsert({
-    where: { factoryId_code: { factoryId: sidco.id, code: 'SHIFT-A' } },
-    update: {},
+    where: { factoryId_code: { factoryId: sidco.id, code: 'S1' } },
+    update: { targetQtyPerShift: 3000 },
     create: {
       factoryId: sidco.id,
-      code: 'SHIFT-A',
+      code: 'S1',
       name: 'Day Shift',
-      nameAr: 'وردية الصباح',
+      nameAr: 'الوردية الصباحية',
       startTime: '07:30',
       endTime: '19:30',
       crossesMidnight: false,
@@ -445,17 +445,18 @@ async function main() {
       breakMinutes: 30,
       cleaningMinutes: 30,
       days: [0, 1, 2, 3, 4, 6], // Sun=0, Mon=1, Tue=2, Wed=3, Thu=4, Sat=6
+      targetQtyPerShift: 3000, // NCC: 3000–3500 boxes/shift
     },
   });
 
   const shift2 = await prisma.shiftTemplate.upsert({
-    where: { factoryId_code: { factoryId: sidco.id, code: 'SHIFT-B' } },
-    update: {},
+    where: { factoryId_code: { factoryId: sidco.id, code: 'S2' } },
+    update: { targetQtyPerShift: 3000 },
     create: {
       factoryId: sidco.id,
-      code: 'SHIFT-B',
+      code: 'S2',
       name: 'Night Shift',
-      nameAr: 'وردية المساء',
+      nameAr: 'الوردية الليلية',
       startTime: '19:30',
       endTime: '07:30',
       crossesMidnight: true,
@@ -464,6 +465,7 @@ async function main() {
       breakMinutes: 30,
       cleaningMinutes: 30,
       days: [0, 1, 2, 3, 4, 6],
+      targetQtyPerShift: 3000,
     },
   });
   console.log(`✅ SIDCO shifts: Day (07:30-19:30), Night (19:30-07:30), 11h production / 12h total`);

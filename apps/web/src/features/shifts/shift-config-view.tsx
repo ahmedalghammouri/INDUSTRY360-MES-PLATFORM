@@ -1,0 +1,599 @@
+'use client';
+
+import React, { useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import {
+  Clock, CalendarDays, Gauge, Target, Plus, Pencil, Trash2,
+  CalendarPlus, Moon, Sun, AlertTriangle, Coffee, Sparkles, ShieldOff, Timer,
+} from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
+import {
+  DOW_LABELS, DOW_ORDER, type ShiftTemplate, type ShiftTemplateInput,
+} from '@/services/shift.service';
+import {
+  useShiftConfig, useShiftTemplates, useShiftInstances,
+  useCreateTemplate, useUpdateTemplate, useDeleteTemplate, useGenerateInstances,
+  usePlannedCauses, usePlannedDowntime, useGeneratePlannedDowntime,
+  useAddPlannedDowntime, useDeletePlannedDowntime,
+} from './use-shifts';
+import { ScopeTreePicker, type ScopeSelection } from './scope-tree-picker';
+
+// ── Form state ───────────────────────────────────────────────────────────────
+type FormState = {
+  code: string; name: string; nameAr: string;
+  startTime: string; endTime: string;
+  shiftDurationHours: string; plannedProductionHours: string;
+  breakMinutes: string; cleaningMinutes: string;
+  days: number[]; targetQtyPerShift: string; isActive: boolean;
+};
+
+const EMPTY: FormState = {
+  code: '', name: '', nameAr: '',
+  startTime: '07:30', endTime: '19:30',
+  shiftDurationHours: '12', plannedProductionHours: '11',
+  breakMinutes: '30', cleaningMinutes: '30',
+  days: [6, 0, 1, 2, 3, 4], targetQtyPerShift: '3000', isActive: true,
+};
+
+function toForm(t: ShiftTemplate): FormState {
+  return {
+    code: t.code, name: t.name, nameAr: t.nameAr ?? '',
+    startTime: t.startTime, endTime: t.endTime,
+    shiftDurationHours: String(t.shiftDurationHours),
+    plannedProductionHours: String(t.plannedProductionHours),
+    breakMinutes: String(t.breakMinutes), cleaningMinutes: String(t.cleaningMinutes),
+    days: t.days ?? [], targetQtyPerShift: t.targetQtyPerShift != null ? String(t.targetQtyPerShift) : '',
+    isActive: t.isActive,
+  };
+}
+
+function toPayload(f: FormState): ShiftTemplateInput {
+  return {
+    code: f.code.trim(), name: f.name.trim(),
+    nameAr: f.nameAr.trim() || undefined,
+    startTime: f.startTime, endTime: f.endTime,
+    shiftDurationHours: Number(f.shiftDurationHours),
+    plannedProductionHours: Number(f.plannedProductionHours),
+    breakMinutes: Number(f.breakMinutes) || 0,
+    cleaningMinutes: Number(f.cleaningMinutes) || 0,
+    days: f.days,
+    targetQtyPerShift: f.targetQtyPerShift ? Number(f.targetQtyPerShift) : undefined,
+    isActive: f.isActive,
+  };
+}
+
+// ── Summary card ─────────────────────────────────────────────────────────────
+function SummaryCard({ icon: Icon, label, value, hint, accent }: {
+  icon: React.ElementType; label: string; value: React.ReactNode; hint?: string; accent: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-card p-4">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</span>
+        <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center', accent)}>
+          <Icon size={16} />
+        </div>
+      </div>
+      <div className="text-2xl font-bold tabular-nums">{value}</div>
+      {hint && <div className="text-xs text-muted-foreground mt-1">{hint}</div>}
+    </div>
+  );
+}
+
+function DayChips({ days }: { days: number[] }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {DOW_ORDER.map((d) => (
+        <span
+          key={d}
+          className={cn(
+            'text-[10px] px-1.5 py-0.5 rounded font-medium',
+            days.includes(d) ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground/50',
+          )}
+        >
+          {DOW_LABELS[d]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ── Main view ────────────────────────────────────────────────────────────────
+export function ShiftConfigView() {
+  const { data: config } = useShiftConfig();
+  const { data: templates, isLoading } = useShiftTemplates(true);
+  const { data: instancesResp } = useShiftInstances({ limit: 20 });
+
+  const { data: causes } = usePlannedCauses();
+  const { data: plannedResp } = usePlannedDowntime({ limit: 30 });
+
+  const createMut = useCreateTemplate();
+  const updateMut = useUpdateTemplate();
+  const deleteMut = useDeleteTemplate();
+  const generateMut = useGenerateInstances();
+  const plannedGenMut = useGeneratePlannedDowntime();
+  const addPlannedMut = useAddPlannedDowntime();
+  const deletePlannedMut = useDeletePlannedDowntime();
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<ShiftTemplate | null>(null);
+  const [form, setForm] = useState<FormState>(EMPTY);
+  const [deleting, setDeleting] = useState<ShiftTemplate | null>(null);
+
+  // Manual "Add planned downtime" dialog
+  const [addPdOpen, setAddPdOpen] = useState(false);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [pd, setPd] = useState<{ causeId: string; scope: ScopeSelection | null; date: string; time: string; durationMinutes: string; notes: string }>({
+    causeId: '', scope: null, date: todayIso, time: '13:00', durationMinutes: '30', notes: '',
+  });
+  const patchPd = (p: Partial<typeof pd>) => setPd((s) => ({ ...s, ...p }));
+  const openAddPd = () => {
+    setPd({ causeId: causes?.[0]?.id ?? '', scope: null, date: todayIso, time: '13:00', durationMinutes: '30', notes: '' });
+    setAddPdOpen(true);
+  };
+  const pdValid = !!pd.causeId && !!pd.scope && !!pd.date && /^([01]\d|2[0-3]):([0-5]\d)$/.test(pd.time) && Number(pd.durationMinutes) > 0;
+  const submitPd = () => {
+    if (!pd.scope) return;
+    addPlannedMut.mutate({
+      causeId: pd.causeId,
+      scopeType: pd.scope.type,
+      scopeId: pd.scope.id,
+      startTime: new Date(`${pd.date}T${pd.time}:00`).toISOString(),
+      durationMinutes: Number(pd.durationMinutes),
+      notes: pd.notes.trim() || undefined,
+    }, { onSuccess: () => setAddPdOpen(false) });
+  };
+
+  const patch = (p: Partial<FormState>) => setForm((s) => ({ ...s, ...p }));
+
+  const openCreate = () => { setEditing(null); setForm(EMPTY); setFormOpen(true); };
+  const openEdit = (t: ShiftTemplate) => { setEditing(t); setForm(toForm(t)); setFormOpen(true); };
+
+  const duration = Number(form.shiftDurationHours);
+  const planned = Number(form.plannedProductionHours);
+  const isValid =
+    form.code.trim().length > 0 &&
+    form.name.trim().length > 0 &&
+    /^([01]\d|2[0-3]):([0-5]\d)$/.test(form.startTime) &&
+    /^([01]\d|2[0-3]):([0-5]\d)$/.test(form.endTime) &&
+    duration > 0 && planned >= 0 && planned <= duration &&
+    form.days.length > 0;
+
+  const submit = () => {
+    const payload = toPayload(form);
+    if (editing) {
+      updateMut.mutate({ id: editing.id, body: payload }, { onSuccess: () => setFormOpen(false) });
+    } else {
+      createMut.mutate(payload, { onSuccess: () => setFormOpen(false) });
+    }
+  };
+
+  const weekRange = () => {
+    const today = new Date();
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    return { dateFrom: iso(today), dateTo: iso(new Date(today.getTime() + 6 * 86_400_000)) };
+  };
+  const generateWeek = () => generateMut.mutate({ ...weekRange(), withPlannedDowntime: true });
+  const generatePlannedWeek = () => plannedGenMut.mutate(weekRange());
+
+  const plannedEvents = plannedResp?.data ?? [];
+  const totalPlannedMinutes = plannedResp?.totalPlannedMinutes ?? 0;
+  const causeIcon = (category?: string) =>
+    category === 'PLANNED_CLEANING' ? Sparkles : category === 'PLANNED_BREAK' ? Coffee : ShieldOff;
+
+  const crossesMidnight = useMemo(
+    () => form.endTime <= form.startTime,
+    [form.startTime, form.endTime],
+  );
+  const plannedMinutes = Math.max(0, duration * 60 - (Number(form.breakMinutes) || 0) - (Number(form.cleaningMinutes) || 0));
+
+  const instances = instancesResp?.data ?? [];
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">Shift Configuration</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Define the shift model that segments every OEE, availability and production report.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={generateWeek} disabled={generateMut.isPending}>
+            <CalendarPlus size={16} className="mr-2" />
+            Generate this week
+          </Button>
+          <Button onClick={openCreate}>
+            <Plus size={16} className="mr-2" />
+            New Shift
+          </Button>
+        </div>
+      </div>
+
+      {/* Config summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <SummaryCard icon={Clock} label="Shifts / day" value={config?.shiftsPerDay ?? '—'}
+          accent="bg-indigo-500/15 text-indigo-400" />
+        <SummaryCard icon={CalendarDays} label="Working days / week" value={config?.workingDaysPerWeek ?? '—'}
+          hint={config ? config.workingDays.map((d) => DOW_LABELS[d]).join(' · ') : undefined}
+          accent="bg-emerald-500/15 text-emerald-400" />
+        <SummaryCard icon={Gauge} label="Planned production hrs / day" value={config?.plannedProductionHoursPerDay ?? '—'}
+          accent="bg-amber-500/15 text-amber-400" />
+        <SummaryCard icon={Target} label="Target / shift"
+          value={config?.shifts?.[0]?.targetQtyPerShift ?? '—'}
+          hint="boxes / packs" accent="bg-rose-500/15 text-rose-400" />
+      </div>
+
+      <Tabs defaultValue="planned">
+        <TabsList>
+          <TabsTrigger value="planned">Planned Downtime</TabsTrigger>
+          <TabsTrigger value="templates">Shift Templates</TabsTrigger>
+          <TabsTrigger value="instances">Scheduled Shifts</TabsTrigger>
+        </TabsList>
+
+        {/* Templates */}
+        <TabsContent value="templates" className="space-y-3 mt-4">
+          {isLoading ? (
+            <div className="text-sm text-muted-foreground">Loading shifts…</div>
+          ) : (templates ?? []).length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">
+              No shift templates yet. Click <strong>New Shift</strong> to define one.
+            </div>
+          ) : (
+            (templates ?? []).map((t) => (
+              <motion.div
+                key={t.id}
+                initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                className={cn(
+                  'rounded-xl border bg-card p-4 flex items-center gap-4',
+                  t.isActive ? 'border-border/60' : 'border-border/40 opacity-60',
+                )}
+              >
+                <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
+                  t.crossesMidnight ? 'bg-indigo-500/15 text-indigo-400' : 'bg-amber-500/15 text-amber-400')}>
+                  {t.crossesMidnight ? <Moon size={18} /> : <Sun size={18} />}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold">{t.name}</span>
+                    <Badge variant="outline" className="text-[10px] font-mono">{t.code}</Badge>
+                    {!t.isActive && <Badge variant="secondary" className="text-[10px]">Inactive</Badge>}
+                    {t.crossesMidnight && <Badge variant="secondary" className="text-[10px]">Crosses midnight</Badge>}
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1 flex-wrap">
+                    <span className="flex items-center gap-1"><Clock size={12} />{t.startTime}–{t.endTime}</span>
+                    <span>{t.plannedProductionHours}h planned / {t.shiftDurationHours}h</span>
+                    <span>Break {t.breakMinutes}m · Clean {t.cleaningMinutes}m</span>
+                    {t.targetQtyPerShift != null && <span className="flex items-center gap-1"><Target size={12} />{t.targetQtyPerShift}</span>}
+                    <span>{t.instanceCount} scheduled</span>
+                  </div>
+                  <div className="mt-2"><DayChips days={t.days} /></div>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(t)}>
+                    <Pencil size={15} />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeleting(t)}>
+                    <Trash2 size={15} />
+                  </Button>
+                </div>
+              </motion.div>
+            ))
+          )}
+        </TabsContent>
+
+        {/* Instances */}
+        <TabsContent value="instances" className="mt-4">
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-muted-foreground">
+                <tr className="text-left">
+                  <th className="px-4 py-2 font-medium">Date</th>
+                  <th className="px-4 py-2 font-medium">Shift</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2 font-medium text-right">Target</th>
+                  <th className="px-4 py-2 font-medium text-right">Actual</th>
+                  <th className="px-4 py-2 font-medium text-right">OEE</th>
+                  <th className="px-4 py-2 font-medium">Operator</th>
+                </tr>
+              </thead>
+              <tbody>
+                {instances.length === 0 ? (
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                    No scheduled shifts. Use <strong>Generate this week</strong>.
+                  </td></tr>
+                ) : instances.map((i) => (
+                  <tr key={i.id} className="border-t border-border/50">
+                    <td className="px-4 py-2 tabular-nums">{i.shiftDate.slice(0, 10)}</td>
+                    <td className="px-4 py-2">{i.shiftTemplate.name} <span className="text-muted-foreground font-mono text-xs">{i.shiftTemplate.code}</span></td>
+                    <td className="px-4 py-2">
+                      <Badge variant={i.status === 'COMPLETED' ? 'secondary' : i.status === 'IN_PROGRESS' ? 'default' : 'outline'} className="text-[10px]">
+                        {i.status}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">{i.targetQty ?? '—'}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{i.actualQty}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{i.oee != null ? `${i.oee}%` : '—'}</td>
+                    <td className="px-4 py-2">{i.operator?.name ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </TabsContent>
+
+        {/* Planned Downtime */}
+        <TabsContent value="planned" className="space-y-4 mt-4">
+          <div className="rounded-xl border border-border/60 bg-card p-4">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="max-w-xl">
+                <h3 className="font-semibold flex items-center gap-2"><ShieldOff size={16} className="text-emerald-400" /> Planned Downtime</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Break and cleaning time from each shift is materialised as planned downtime events linked to downtime
+                  reason codes. They are <strong>excluded from OEE availability loss</strong> and the unplanned Pareto, but
+                  remain visible in the Downtime module.
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button variant="outline" onClick={generatePlannedWeek} disabled={plannedGenMut.isPending}>
+                  <CalendarPlus size={16} className="mr-2" />
+                  Generate (this week)
+                </Button>
+                <Button onClick={openAddPd}>
+                  <Plus size={16} className="mr-2" />
+                  Add Planned Downtime
+                </Button>
+              </div>
+            </div>
+
+            {/* Linked reason codes */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {(causes ?? []).map((c) => {
+                const Icon = causeIcon(c.category);
+                return (
+                  <span key={c.id} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-xs">
+                    <Icon size={13} className="text-muted-foreground" />
+                    <span className="font-medium">{c.name}</span>
+                    <Badge variant="outline" className="text-[10px] font-mono ml-1">{c.code}</Badge>
+                  </span>
+                );
+              })}
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 px-2.5 py-1 text-xs">
+                <Timer size={13} /> {totalPlannedMinutes} planned min logged
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-muted-foreground">
+                <tr className="text-left">
+                  <th className="px-4 py-2 font-medium">Start</th>
+                  <th className="px-4 py-2 font-medium">Machine</th>
+                  <th className="px-4 py-2 font-medium">Reason</th>
+                  <th className="px-4 py-2 font-medium">Type</th>
+                  <th className="px-4 py-2 font-medium text-right">Minutes</th>
+                  <th className="px-4 py-2 font-medium w-10"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {plannedEvents.length === 0 ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                    No planned downtime yet. Click <strong>Add Planned Downtime</strong> or <strong>Generate (this week)</strong>.
+                  </td></tr>
+                ) : plannedEvents.map((e) => {
+                  const Icon = causeIcon(e.category);
+                  return (
+                    <tr key={e.id} className="border-t border-border/50">
+                      <td className="px-4 py-2 tabular-nums">{e.startTime.slice(0, 16).replace('T', ' ')}</td>
+                      <td className="px-4 py-2">{e.machine?.name ?? '—'} <span className="text-muted-foreground font-mono text-xs">{e.machine?.code}</span></td>
+                      <td className="px-4 py-2">{e.cause?.name ?? '—'}</td>
+                      <td className="px-4 py-2">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Icon size={13} className="text-muted-foreground" />
+                          <span className="text-xs">{e.category.replace('PLANNED_', '').toLowerCase()}</span>
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums">{e.durationMinutes ?? '—'}</td>
+                      <td className="px-4 py-2 text-right">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                          onClick={() => deletePlannedMut.mutate(e.id)} disabled={deletePlannedMut.isPending}>
+                          <Trash2 size={14} />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* Create / Edit form */}
+      <FormDialog
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        title={editing ? `Edit Shift — ${editing.name}` : 'New Shift'}
+        onSubmit={submit}
+        submitLabel={editing ? 'Save changes' : 'Create shift'}
+        isSubmitting={createMut.isPending || updateMut.isPending}
+        isValid={isValid}
+      >
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label>Code</Label>
+            <Input value={form.code} onChange={(e) => patch({ code: e.target.value })} placeholder="S1" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Name</Label>
+            <Input value={form.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Day Shift" />
+          </div>
+          <div className="space-y-1.5 col-span-2">
+            <Label>Name (Arabic)</Label>
+            <Input value={form.nameAr} onChange={(e) => patch({ nameAr: e.target.value })} placeholder="الوردية الصباحية" dir="rtl" />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Start time</Label>
+            <Input type="time" value={form.startTime} onChange={(e) => patch({ startTime: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>End time</Label>
+            <Input type="time" value={form.endTime} onChange={(e) => patch({ endTime: e.target.value })} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Shift duration (hrs)</Label>
+            <Input type="number" step="0.5" value={form.shiftDurationHours} onChange={(e) => patch({ shiftDurationHours: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Planned production (hrs)</Label>
+            <Input type="number" step="0.5" value={form.plannedProductionHours} onChange={(e) => patch({ plannedProductionHours: e.target.value })} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Break (min)</Label>
+            <Input type="number" value={form.breakMinutes} onChange={(e) => patch({ breakMinutes: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Cleaning (min)</Label>
+            <Input type="number" value={form.cleaningMinutes} onChange={(e) => patch({ cleaningMinutes: e.target.value })} />
+          </div>
+
+          <div className="space-y-1.5 col-span-2">
+            <Label>Target qty / shift</Label>
+            <Input type="number" value={form.targetQtyPerShift} onChange={(e) => patch({ targetQtyPerShift: e.target.value })} placeholder="3000" />
+          </div>
+
+          <div className="space-y-2 col-span-2">
+            <Label>Working days</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {DOW_ORDER.map((d) => {
+                const on = form.days.includes(d);
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => patch({ days: on ? form.days.filter((x) => x !== d) : [...form.days, d] })}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                      on ? 'bg-primary/15 text-primary border-primary/40' : 'bg-muted/40 text-muted-foreground border-border',
+                    )}
+                  >
+                    {DOW_LABELS[d]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 col-span-2">
+            <Checkbox id="isActive" checked={form.isActive} onCheckedChange={(v) => patch({ isActive: !!v })} />
+            <Label htmlFor="isActive" className="font-normal cursor-pointer">Active</Label>
+          </div>
+        </div>
+
+        {/* Live computed feedback */}
+        <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground space-y-1">
+          <div>Planned production window: <strong className="text-foreground">{plannedMinutes} min</strong> (duration − break − cleaning) — this is the OEE availability denominator.</div>
+          {crossesMidnight && <div className="flex items-center gap-1 text-indigo-400"><Moon size={12} /> This shift crosses midnight.</div>}
+          {planned > duration && <div className="flex items-center gap-1 text-destructive"><AlertTriangle size={12} /> Planned hours cannot exceed shift duration.</div>}
+        </div>
+      </FormDialog>
+
+      {/* Delete confirm */}
+      <FormDialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title={`Delete ${deleting?.name ?? 'shift'}?`}
+        onSubmit={() => deleting && deleteMut.mutate(deleting.id, { onSuccess: () => setDeleting(null) })}
+        submitLabel="Delete"
+        isSubmitting={deleteMut.isPending}
+      >
+        <p className="text-sm text-muted-foreground">
+          {deleting && deleting.instanceCount > 0
+            ? `This shift has ${deleting.instanceCount} scheduled instance(s), so it will be deactivated (history preserved) rather than deleted.`
+            : 'This shift template will be permanently deleted.'}
+        </p>
+      </FormDialog>
+
+      {/* Add Planned Downtime (manual) */}
+      <FormDialog
+        open={addPdOpen}
+        onClose={() => setAddPdOpen(false)}
+        title="Add Planned Downtime"
+        onSubmit={submitPd}
+        submitLabel="Add"
+        isSubmitting={addPlannedMut.isPending}
+        isValid={pdValid}
+      >
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>Reason</Label>
+            <select
+              value={pd.causeId}
+              onChange={(e) => patchPd({ causeId: e.target.value })}
+              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+            >
+              <option value="" disabled>Select a downtime reason…</option>
+              {(causes ?? []).map((c) => (
+                <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Apply to (hierarchy scope)</Label>
+            {pd.scope && (
+              <div className="text-xs mb-1.5 inline-flex items-center gap-1.5 rounded bg-primary/10 text-primary px-2 py-1">
+                <span className="font-mono uppercase text-[10px]">{pd.scope.type}</span>
+                <span className="font-medium">{pd.scope.name}</span>
+                <span className="font-mono text-[10px] opacity-70">{pd.scope.code}</span>
+              </div>
+            )}
+            <ScopeTreePicker value={pd.scope} onSelect={(sel) => patchPd({ scope: sel })} />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <Label>Date</Label>
+              <Input type="date" value={pd.date} onChange={(e) => patchPd({ date: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Start time</Label>
+              <Input type="time" value={pd.time} onChange={(e) => patchPd({ time: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Duration (min)</Label>
+              <Input type="number" value={pd.durationMinutes} onChange={(e) => patchPd({ durationMinutes: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Notes (optional)</Label>
+            <Input value={pd.notes} onChange={(e) => patchPd({ notes: e.target.value })} placeholder="e.g. Weekly deep clean" />
+          </div>
+
+          <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
+            Creates planned downtime for{' '}
+            <strong className="text-foreground">
+              {pd.scope ? (pd.scope.type === 'MACHINE' ? '1 machine' : pd.scope.type === 'LINE' ? 'every machine in the line' : 'every machine in the area') : '…'}
+            </strong>. Excluded from OEE availability loss; visible in the Downtime module.
+          </div>
+        </div>
+      </FormDialog>
+    </div>
+  );
+}

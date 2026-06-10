@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Activity, Zap, Users, AlertTriangle, TrendingUp,
@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { FACTORIES, Factory } from './factories';
 import { SaudiMap } from './saudi-map';
-import { authService } from '@/services/auth.service';
+import { authService, type FactoriesOverview } from '@/services/auth.service';
 import { useFactoryStore } from '@/store/factory-store';
 
 function AnimatedNumber({ value, decimals = 1 }: { value: number; decimals?: number }) {
@@ -70,20 +70,19 @@ function KPIBadge({ label, value, unit, icon: Icon, color }: {
   );
 }
 
-function GlobalStats() {
-  const total = FACTORIES.reduce((acc, f) => ({
-    oee: acc.oee + f.kpis.oee,
-    alarms: acc.alarms + f.kpis.activeAlarms,
-    employees: acc.employees + f.kpis.employees,
-  }), { oee: 0, alarms: 0, employees: 0 });
+function GlobalStats({ summary }: { summary: FactoriesOverview['summary'] | null }) {
+  const avgOEE = summary ? summary.avgOEE.toFixed(1) : '—';
+  const factories = summary ? summary.totalFactories : FACTORIES.length;
+  const employees = summary ? summary.totalEmployees : 0;
+  const alarms = summary ? summary.totalActiveAlarms : 0;
 
   return (
     <div className="grid grid-cols-4 gap-3 mb-4">
       {[
-        { label: 'Avg OEE', value: (total.oee / FACTORIES.length).toFixed(1), unit: '%', color: '#00d4ff', icon: Activity },
-        { label: 'Factories', value: FACTORIES.length, unit: 'sites', color: '#22c55e', icon: Building2 },
-        { label: 'Employees', value: total.employees, unit: 'total', color: '#a855f7', icon: Users },
-        { label: 'Active Alarms', value: total.alarms, unit: '', color: total.alarms > 5 ? '#ef4444' : '#f59e0b', icon: AlertTriangle },
+        { label: 'Avg OEE', value: avgOEE, unit: '%', color: '#818cf8', icon: Activity },
+        { label: 'Factories', value: factories, unit: 'sites', color: '#22c55e', icon: Building2 },
+        { label: 'Employees', value: employees, unit: 'total', color: '#a855f7', icon: Users },
+        { label: 'Active Alarms', value: alarms, unit: '', color: alarms > 5 ? '#ef4444' : '#f59e0b', icon: AlertTriangle },
       ].map((s) => (
         <div key={s.label} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/5 bg-white/[0.03]">
           <s.icon size={20} style={{ color: s.color }} />
@@ -116,11 +115,18 @@ export function FactorySelector() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, []);
 
-  // Fetch factories from API and populate store for login page context
+  const [liveByCode, setLiveByCode] = useState<Record<string, FactoriesOverview['factories'][number]['kpis']>>({});
+  const [summary, setSummary] = useState<FactoriesOverview['summary'] | null>(null);
+
+  // Fetch factories WITH live KPIs and populate store for login page context
   useEffect(() => {
-    authService.getFactories().then((apiFactories) => {
+    authService.getFactoriesOverview().then((data) => {
+      const map: Record<string, FactoriesOverview['factories'][number]['kpis']> = {};
+      data.factories.forEach((f) => { map[f.code] = f.kpis; });
+      setLiveByCode(map);
+      setSummary(data.summary);
       setFactories(
-        apiFactories.map((f) => ({
+        data.factories.map((f) => ({
           id: f.id,
           code: f.code,
           name: f.name,
@@ -134,11 +140,36 @@ export function FactorySelector() {
         })),
       );
     }).catch(() => {
-      // API unavailable — login page will fall back to static FACTORIES
+      // API unavailable — selector falls back to static FACTORIES KPIs
     });
   }, [setFactories]);
 
-  const active = selected ?? (hovered ? FACTORIES.find((f) => f.id === hovered) ?? null : null);
+  // Merge live KPIs onto the static branding base (district/productionUnit/coords)
+  const factories = useMemo<Factory[]>(() =>
+    FACTORIES.map((f) => {
+      const live = liveByCode[f.code];
+      if (!live) return f;
+      return {
+        ...f,
+        // productionUnit/district stay (facility attributes, not KPIs);
+        // every KPI value is live from the API — no static fallback.
+        kpis: {
+          ...f.kpis,
+          oee: live.oee,
+          availability: live.availability,
+          performance: live.performance,
+          quality: live.quality,
+          uptime: live.uptime,
+          production: live.production,
+          employees: live.employees,
+          activeAlarms: live.activeAlarms,
+          shiftsToday: live.shiftsToday,
+        },
+      };
+    }),
+  [liveByCode]);
+
+  const active = selected ?? (hovered ? factories.find((f) => f.id === hovered) ?? null : null);
 
   function handleSelect(factory: Factory) {
     setSelected(factory);
@@ -151,26 +182,27 @@ export function FactorySelector() {
     <div
       className="min-h-screen w-full flex flex-col overflow-hidden"
       style={{
-        background: 'radial-gradient(ellipse at 60% 40%, #001428 0%, #000a18 50%, #000510 100%)',
+        background: 'radial-gradient(ellipse at 60% 40%, #0d1020 0%, #0a0c16 50%, #07090f 100%)',
         fontFamily: 'var(--font-geist-sans), sans-serif',
       }}
     >
       {/* Scanline overlay */}
       <div
         className="pointer-events-none fixed inset-0 z-0 opacity-[0.03]"
-        style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,200,255,0.5) 2px, rgba(0,200,255,0.5) 3px)', backgroundSize: '100% 4px' }}
+        style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(129,140,248,0.5) 2px, rgba(129,140,248,0.5) 3px)', backgroundSize: '100% 4px' }}
       />
 
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-8 py-4 border-b border-white/[0.06]">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center">
-              <Shield size={20} className="text-cyan-400" />
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500/15 to-violet-500/15 border border-indigo-500/30 flex items-center justify-center p-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="STAR-MES" className="w-full h-full object-contain" />
             </div>
             <div>
               <div className="text-white font-bold text-lg tracking-tight leading-none">STAR-MES</div>
-              <div className="text-cyan-400/70 text-xs font-mono tracking-widest">MES PLATFORM</div>
+              <div className="text-indigo-300/70 text-xs font-mono tracking-widest">MES PLATFORM</div>
             </div>
           </div>
           <div className="h-6 w-px bg-white/10 mx-2" />
@@ -185,7 +217,7 @@ export function FactorySelector() {
             <Wifi size={12} />
             <span>KSA INDUSTRIAL NETWORK</span>
           </div>
-          <div className="flex items-center gap-2 text-cyan-300 text-sm font-mono">
+          <div className="flex items-center gap-2 text-indigo-300 text-sm font-mono">
             <Clock size={14} />
             <span suppressHydrationWarning>
               {mounted && time ? time.toLocaleTimeString('en-SA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--:--'}
@@ -203,14 +235,14 @@ export function FactorySelector() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white tracking-tight">
-              Manufacturing Network — <span className="text-cyan-400">Kingdom of Saudi Arabia</span>
+              Manufacturing Network — <span className="text-indigo-300">Kingdom of Saudi Arabia</span>
             </h1>
             <p className="text-white/40 text-sm mt-0.5">
               Select a facility to access its Manufacturing Execution System
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {FACTORIES.map((f) => (
+            {factories.map((f) => (
               <button
                 key={f.id}
                 onClick={() => handleSelect(f)}
@@ -231,16 +263,16 @@ export function FactorySelector() {
         </div>
 
         {/* Global stats bar */}
-        <GlobalStats />
+        <GlobalStats summary={summary} />
 
         {/* Map + detail panel */}
         <div className="flex-1 flex gap-4 min-h-0">
           {/* Left panel — factory list */}
           <div className="w-64 flex flex-col gap-2 overflow-y-auto">
             <div className="text-[11px] text-white/30 font-mono uppercase tracking-widest px-1 mb-1">
-              Facilities ({FACTORIES.length})
+              Facilities ({factories.length})
             </div>
-            {FACTORIES.map((f) => {
+            {factories.map((f) => {
               const isActive = hovered === f.id || selected?.id === f.id;
               return (
                 <button
@@ -288,20 +320,20 @@ export function FactorySelector() {
 
           {/* Center — Map */}
           <div className="flex-1 relative rounded-2xl border border-white/[0.06] overflow-hidden"
-            style={{ background: 'radial-gradient(ellipse at center, #001830 0%, #000c1c 100%)' }}
+            style={{ background: 'radial-gradient(ellipse at center, #12152a 0%, #0a0c18 100%)' }}
           >
             {/* Corner decorations */}
-            <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-cyan-500/30 rounded-tl-2xl" />
-            <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-cyan-500/30 rounded-tr-2xl" />
-            <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-cyan-500/30 rounded-bl-2xl" />
-            <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-cyan-500/30 rounded-br-2xl" />
+            <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-indigo-500/30 rounded-tl-2xl" />
+            <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-indigo-500/30 rounded-tr-2xl" />
+            <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-indigo-500/30 rounded-bl-2xl" />
+            <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-indigo-500/30 rounded-br-2xl" />
 
             <div className="absolute top-3 left-1/2 -translate-x-1/2 text-[10px] font-mono text-white/20 tracking-widest uppercase">
               Kingdom of Saudi Arabia — Industrial Network
             </div>
 
             <SaudiMap
-              factories={FACTORIES}
+              factories={factories}
               selectedId={selected?.id ?? null}
               hoveredId={hovered}
               onHover={setHovered}
@@ -403,7 +435,7 @@ export function FactorySelector() {
                   </div>
                 </div>
                 <div className="w-full space-y-2 mt-2">
-                  {FACTORIES.map((f) => (
+                  {factories.map((f) => (
                     <div key={f.id} className="flex items-center justify-between text-[11px]">
                       <div className="flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full" style={{ background: f.color }} />
