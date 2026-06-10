@@ -18,7 +18,7 @@ import { api } from '@/services/api.client';
 import { useQuery } from '@tanstack/react-query';
 import {
   FactoryGantt, type FactoryTask, type FactoryZoom,
-  type SupplyMarker, type DemandMarker,
+  type SupplyMarker, type DemandMarker, type GanttTreeNode, type DepType,
 } from '@/components/charts/factory-gantt';
 import { apsService, type CtpResult } from '@/services/aps.service';
 import { useApsPlan, useApsMrp, useRunSchedule, useRescheduleJob } from './use-aps';
@@ -150,20 +150,61 @@ export function ApsView() {
   const shortages = mrp?.requirements.filter((r) => r.shortage > 0) ?? [];
 
   // ── FactoryGantt data mapping ──
-  const tasks: FactoryTask[] = items.map((it) => ({
-    id: it.id,
-    resourceId: it.resourceId,
-    start: it.start,
-    end: it.end,
-    color: it.color,
-    statusColor: it.statusColor,
-    label: `[ ${it.orderNumber} ] · ${it.operation}`,
-    tooltip: `${it.orderNumber} · ${it.operation}\n${new Date(it.start).toLocaleString()} → ${new Date(it.end).toLocaleString()}${it.qty ? `\nQty ${it.qty}` : ''}\nStatus: ${it.status}`,
-    predecessorId: it.predecessorId,
-    orderKey: it.orderNumber,
-    status: it.status,
-    progress: it.progress,
-  }));
+  const DEP_SHORT: Record<string, DepType> = {
+    FINISH_TO_START: 'FS', START_TO_START: 'SS', START_TO_FINISH: 'SF', FINISH_TO_FINISH: 'FF',
+  };
+
+  const tasks: FactoryTask[] = items.map((it) => {
+    const dep = DEP_SHORT[it.predecessorType] ?? 'FS';
+    const depNote = it.predecessorId ? `\nLink: ${dep}${it.predecessorLagMins ? ` ${it.predecessorLagMins > 0 ? '+' : ''}${it.predecessorLagMins}m` : ''}` : '';
+    return {
+      id: it.id,
+      resourceId: it.resourceId,
+      start: it.start,
+      end: it.end,
+      color: it.color,
+      statusColor: it.statusColor,
+      label: `[ ${it.orderNumber} ] · ${it.operation}`,
+      tooltip: `${it.orderNumber} · ${it.operation} @ ${it.resourceName}\n${new Date(it.start).toLocaleString()} → ${new Date(it.end).toLocaleString()}${it.qty ? `\nQty ${it.qty}` : ''}\nStatus: ${it.status}${depNote}`,
+      predecessorId: it.predecessorId,
+      predecessorType: dep,
+      orderKey: it.orderNumber,
+      status: it.status,
+      progress: it.progress,
+    };
+  });
+
+  // Expandable order tree: Production Order → Work Order → Job Order steps.
+  const tree: GanttTreeNode[] = (() => {
+    const poMap = new Map<string, { label: string; wos: Map<string, typeof items> }>();
+    for (const it of items) {
+      const poKey = it.productionOrderId ?? '__direct';
+      const poLabel = it.productionOrderNumber ?? 'Direct Work Orders';
+      if (!poMap.has(poKey)) poMap.set(poKey, { label: poLabel, wos: new Map() });
+      const po = poMap.get(poKey)!;
+      if (!po.wos.has(it.workOrderId)) po.wos.set(it.workOrderId, []);
+      po.wos.get(it.workOrderId)!.push(it);
+    }
+    return [...poMap.entries()].map(([poKey, po]) => ({
+      id: `po:${poKey}`,
+      label: po.label,
+      sub: `${po.wos.size} work order${po.wos.size === 1 ? '' : 's'}`,
+      children: [...po.wos.entries()].map(([woId, ops]) => {
+        const sorted = [...ops].sort((a, b) => a.sequenceOrder - b.sequenceOrder);
+        return {
+          id: `wo:${woId}`,
+          label: sorted[0].orderNumber,
+          sub: `${sorted.length} steps · ${sorted[0].priority}`,
+          children: sorted.map((op) => ({
+            id: `jo:${op.id}`,
+            label: `${op.sequenceOrder}. ${op.operation}`,
+            sub: `${op.resourceName}${op.predecessorId ? ` · ${DEP_SHORT[op.predecessorType] ?? 'FS'}${op.predecessorLagMins ? `+${op.predecessorLagMins}m` : ''}` : ''}`,
+            taskId: op.id,
+          })),
+        };
+      }),
+    }));
+  })();
 
   const ganttResources = (plan?.machines ?? []).map((mc) => ({ id: mc.id, name: mc.name, sub: mc.code }));
 
@@ -234,6 +275,7 @@ export function ApsView() {
           title="Factory Navigator"
           tasks={tasks}
           resources={ganttResources}
+          tree={tree}
           supply={supplyMarkers}
           demand={demandMarkers}
           rangeFrom={plan!.range.from}

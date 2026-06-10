@@ -5,11 +5,10 @@ import { ChevronLeft, ChevronRight, CalendarRange, Layers, Boxes } from 'lucide-
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { GanttZoom } from '@/components/charts/gantt-chart';
-import { FactoryGantt, type FactoryTask, type GanttResource } from '@/components/charts/factory-gantt';
+import { FactoryGantt, type FactoryTask, type GanttResource, type FactoryZoom } from '@/components/charts/factory-gantt';
 import { useUnifiedSchedule } from './use-schedule';
 
-const WINDOW_DAYS: Record<GanttZoom, number> = { day: 4, week: 14, month: 35 };
+const WINDOW_DAYS: Record<FactoryZoom, number> = { '30min': 1, hour: 2, day: 4, week: 14, month: 35 };
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 interface ScheduleViewProps {
@@ -25,7 +24,7 @@ export function ScheduleView({
   defaultTypes,
   lockTypes = false,
 }: ScheduleViewProps) {
-  const [zoom, setZoom] = useState<GanttZoom>('week');
+  const [zoom, setZoom] = useState<FactoryZoom>('week');
   const [groupBy, setGroupBy] = useState<'type' | 'resource'>('type');
   const [anchor, setAnchor] = useState(() => {
     const d = new Date();
@@ -117,7 +116,7 @@ export function ScheduleView({
           </div>
           {/* zoom */}
           <div className="inline-flex rounded-lg border border-border overflow-hidden">
-            {(['day', 'week', 'month'] as GanttZoom[]).map((z) => (
+            {(['day', 'week', 'month'] as FactoryZoom[]).map((z) => (
               <button key={z} onClick={() => setZoom(z)}
                 className={cn('px-2.5 py-1.5 text-xs capitalize', z !== 'day' && 'border-l border-border',
                   zoom === z ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted/50')}>

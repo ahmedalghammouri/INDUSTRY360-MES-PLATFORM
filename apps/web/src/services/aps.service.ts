@@ -6,9 +6,14 @@ export interface ApsItem {
   title: string;
   subtitle?: string;
   operation: string;
+  sequenceOrder: number;
   orderNumber: string;
   workOrderId: string;
+  productionOrderId: string | null;
+  productionOrderNumber: string | null;
   predecessorId: string | null;
+  predecessorType: 'FINISH_TO_START' | 'START_TO_START' | 'START_TO_FINISH' | 'FINISH_TO_FINISH';
+  predecessorLagMins: number;
   status: string;
   resourceId: string;
   resourceName: string;
