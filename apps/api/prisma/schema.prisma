@@ -2366,6 +2366,8 @@ model JobOrder {
 
   // Predecessor chain — JO[N] becomes READY when JO[N-1] signals COMPLETE
   predecessorId     String?
+  predecessorType   DependencyType @default(FINISH_TO_START) // FS/SS/SF/FF vs predecessor
+  predecessorLagMins Float         @default(0)               // +lag / −lead minutes
 
   // Schedule
   plannedStart      DateTime?

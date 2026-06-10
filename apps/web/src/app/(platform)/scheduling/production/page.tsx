@@ -1,15 +1,11 @@
-import { ScheduleView } from '@/features/scheduling/schedule-view';
+import { ApsView } from '@/features/aps/aps-view';
 
-export const metadata = { title: 'Production Schedule | Industry360' };
+export const metadata = { title: 'Production Schedule — APS | Industry360' };
 
 export default function ProductionSchedulePage() {
   return (
     <div className="max-w-[1800px] mx-auto">
-      <ScheduleView
-        title="Production Schedule"
-        subtitle="Gantt of production orders and work orders across machines."
-        defaultTypes={['PRODUCTION_ORDER', 'WORK_ORDER']}
-      />
+      <ApsView />
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, CalendarRange, Layers, Boxes } from 'lucide-
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { GanttZoom } from '@/components/charts/gantt-chart';
-import { SvarGantt } from '@/components/charts/svar-gantt';
+import { FactoryGantt, type FactoryTask, type GanttResource } from '@/components/charts/factory-gantt';
 import { useUnifiedSchedule } from './use-schedule';
 
 const WINDOW_DAYS: Record<GanttZoom, number> = { day: 4, week: 14, month: 35 };
@@ -52,10 +52,30 @@ export function ScheduleView({
     return items.filter((i) => activeTypes.has(i.type));
   }, [data, activeTypes]);
 
-  const typeLabels = useMemo(
-    () => Object.fromEntries(typeMeta.map((t) => [t.type, t.label])),
-    [typeMeta],
-  );
+  // ── FactoryGantt mapping: rows = types or resources ──
+  const ganttResources: GanttResource[] = useMemo(() => {
+    if (groupBy === 'resource') {
+      const seen = new Map<string, GanttResource>();
+      for (const it of filteredItems) {
+        if (!seen.has(it.resourceId)) seen.set(it.resourceId, { id: it.resourceId, name: it.resourceName });
+      }
+      return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    const present = new Set(filteredItems.map((i) => i.type));
+    return typeMeta.filter((t) => present.has(t.type)).map((t) => ({ id: t.type, name: t.label, sub: `${counts[t.type] ?? 0} items` }));
+  }, [filteredItems, groupBy, typeMeta, counts]);
+
+  const ganttTasks: FactoryTask[] = useMemo(() => filteredItems.map((it) => ({
+    id: it.id,
+    resourceId: groupBy === 'resource' ? it.resourceId : it.type,
+    start: it.start,
+    end: it.end,
+    color: it.color,
+    label: it.title,
+    tooltip: `${it.title}${it.subtitle ? `\n${it.subtitle}` : ''}\n${it.resourceName}\n${new Date(it.start).toLocaleString()} → ${new Date(it.end).toLocaleString()}`,
+    status: it.status,
+    progress: it.progress,
+  })), [filteredItems, groupBy]);
 
   const toggleType = (t: string) => {
     setActiveTypes((prev) => {
@@ -144,13 +164,14 @@ export function ScheduleView({
           {Array.from({ length: 6 }).map((_, i) => <div key={i} className="shimmer h-7 rounded" />)}
         </div>
       ) : (
-        <SvarGantt
-          items={filteredItems}
+        <FactoryGantt
+          tasks={ganttTasks}
+          resources={ganttResources}
           rangeFrom={dateFrom}
           rangeTo={dateTo}
-          groupBy={groupBy}
           zoom={zoom}
-          typeLabels={typeLabels}
+          onZoomChange={(z) => setZoom(z)}
+          statusExtra={`${rangeLabel} · grouped by ${groupBy}`}
         />
       )}
     </div>

@@ -25,6 +25,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { DashboardsModule } from './modules/dashboards/dashboards.module';
 import { ShiftModule } from './modules/shift/shift.module';
 import { SchedulingModule } from './modules/scheduling/scheduling.module';
+import { ApsModule } from './modules/aps/aps.module';
 import { WebSocketGatewayModule } from './gateways/websocket.module';
 import { HealthModule } from './modules/health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -102,6 +103,7 @@ import { configuration } from './config/configuration';
     DashboardsModule,
     ShiftModule,
     SchedulingModule,
+    ApsModule,
     WebSocketGatewayModule,
     HealthModule,
   ],
