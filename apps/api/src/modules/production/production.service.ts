@@ -1650,6 +1650,8 @@ export class ProductionService {
           include: {
             machine: { select: { id: true, name: true, code: true } },
             workCenterRef: { select: { id: true, name: true, code: true } },
+            // Typed routing relations (FS/SS/SF/FF + lag) — copied onto job orders
+            predecessors: { select: { fromStepId: true, type: true, lagMins: true } },
           },
           orderBy: { stepNumber: 'asc' },
         },
@@ -1704,9 +1706,17 @@ export class ProductionService {
 
     const created: any[] = [];
     let prevId: string | null = null;
+    const stepToJo = new Map<string, string>(); // routingStepId → created JO id
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
+
+      // Routing-defined predecessor (typed FS/SS/SF/FF + lag); falls back to
+      // the sequential chain when the routing has no dependency rows.
+      const routedDep = step.predecessors?.find((d) => stepToJo.has(d.fromStepId));
+      const predecessorId = routedDep ? stepToJo.get(routedDep.fromStepId)! : prevId;
+      const predecessorType = routedDep?.type ?? 'FINISH_TO_START';
+      const predecessorLagMins = routedDep?.lagMins ?? 0;
 
       // Resolve machine via helper (WorkCenter fallback)
       const resolvedMachine = await this.resolveStepMachine(step, factoryId);
@@ -1739,7 +1749,9 @@ export class ProductionService {
           sequenceOrder: step.stepNumber,
           operationName: step.operationName,
           status: i === 0 ? 'READY' : 'SCHEDULED',
-          predecessorId: prevId,
+          predecessorId,
+          predecessorType: predecessorType as any,
+          predecessorLagMins,
           plannedStart: jPlannedStart,
           plannedEnd: jPlannedEnd,
           plannedQtyIn: prevOutputQty,
@@ -1757,6 +1769,7 @@ export class ProductionService {
       prevOutputQty  = outputQty;
       created.push(jo);
       prevId = jo['id'] as string;
+      stepToJo.set(step.id, prevId);
     }
 
     this.logger.log(

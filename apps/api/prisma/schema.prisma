@@ -70,6 +70,11 @@ model Factory {
   machines               Machine[]
   users                  User[]
   skus                   SKU[]
+  productCategories      ProductCategory[]
+  productBrands          ProductBrand[]
+  packagingTypes         PackagingType[]
+  baseUnits              BaseUnit[]
+  baseWeights            BaseWeight[]
   shifts                 ShiftTemplate[]
   shiftInstances         ShiftInstance[]
   productionOrders       ProductionOrder[]
@@ -380,6 +385,90 @@ model ProductFamily {
   @@map("product_families")
 }
 
+// ── PRODUCT MASTER DATA (managed lookups powering the product form) ─────────
+model ProductCategory {
+  id        String   @id @default(uuid())
+  factoryId String
+  name      String
+  nameAr    String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  factory   Factory                @relation(fields: [factoryId], references: [id])
+  skus      SKU[]
+  processes ManufacturingProcess[]
+
+  @@unique([factoryId, name])
+  @@map("product_categories")
+}
+
+model ProductBrand {
+  id        String   @id @default(uuid())
+  factoryId String
+  name      String
+  nameAr    String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  factory Factory @relation(fields: [factoryId], references: [id])
+  skus    SKU[]
+
+  @@unique([factoryId, name])
+  @@map("product_brands")
+}
+
+model PackagingType {
+  id        String   @id @default(uuid())
+  factoryId String
+  name      String
+  nameAr    String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  factory Factory @relation(fields: [factoryId], references: [id])
+  skus    SKU[]
+
+  @@unique([factoryId, name])
+  @@map("packaging_types")
+}
+
+model BaseUnit {
+  id        String   @id @default(uuid())
+  factoryId String
+  code      String   // PCS, CARTON, PALLET, KG …
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  factory Factory @relation(fields: [factoryId], references: [id])
+  skus    SKU[]
+
+  @@unique([factoryId, code])
+  @@map("base_units")
+}
+
+model BaseWeight {
+  id        String   @id @default(uuid())
+  factoryId String
+  value     Float    // e.g. 2.25
+  unit      String   @default("kg")
+  label     String?  // e.g. "2.25 Kg"
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  factory   Factory                @relation(fields: [factoryId], references: [id])
+  skus      SKU[]
+  processes ManufacturingProcess[]
+
+  @@unique([factoryId, value, unit])
+  @@map("base_weights")
+}
+
 model SKU {
   id              String   @id @default(uuid())
   factoryId       String
@@ -389,19 +478,25 @@ model SKU {
   name            String
   nameAr          String?
   shortName       String?
-  brand           String?
-  category        String?
+  brand           String?  // legacy text (kept in sync with brandRef.name)
+  category        String?  // legacy text (kept in sync with categoryRef.name)
+  // Master-data relations (preferred; the legacy strings stay synced)
+  categoryId      String?
+  brandId         String?
+  packagingTypeId String?
+  baseUnitId      String?
+  baseWeightId    String?
   weight          Float?
   weightUnit      String   @default("kg")
   length          Float?
   width           Float?
   height          Float?
   dimensionUnit   String   @default("cm")
-  packagingType   String?  // HF (High Foam), LF (Low Foam)
+  packagingType   String?  // legacy text (kept in sync with packagingTypeRef.name)
   unitsPerInner   Int      @default(1)
   innersPerCarton Int      @default(1)
   cartonsPerPallet Int     @default(1)
-  baseUnit        String   @default("EA") // EA, INNER, CARTON
+  baseUnit        String   @default("EA") // legacy text (kept in sync with baseUnitRef.code)
   isActive        Boolean  @default(true)
   metadata        Json?
   createdAt       DateTime @default(now())
@@ -412,6 +507,11 @@ model SKU {
   factory                Factory              @relation(fields: [factoryId], references: [id])
   family                 ProductFamily?       @relation(fields: [familyId], references: [id])
   storageLocationRef     StorageLocation?     @relation(fields: [storageLocationId], references: [id])
+  categoryRef            ProductCategory?     @relation(fields: [categoryId], references: [id])
+  brandRef               ProductBrand?        @relation(fields: [brandId], references: [id])
+  packagingTypeRef       PackagingType?       @relation(fields: [packagingTypeId], references: [id])
+  baseUnitRef            BaseUnit?            @relation(fields: [baseUnitId], references: [id])
+  baseWeightRef          BaseWeight?          @relation(fields: [baseWeightId], references: [id])
   cycleTimes             MachineCycleTime[]
   bomComponents          BOMComponent[]
   bomHeaders             BOMHeader[]
@@ -419,11 +519,14 @@ model SKU {
   productionOrders       ProductionOrder[]
   batchRecords           BatchRecord[]
   manufacturingProcesses ManufacturingProcess[]
+  processLinks           ManufacturingProcessSku[]
   recipes                Recipe[]
 
   @@unique([factoryId, itemNumber])
   @@map("skus")
   @@index([factoryId])
+  @@index([categoryId])
+  @@index([baseWeightId])
 }
 
 model BOMComponent {
@@ -2153,7 +2256,7 @@ model StorageLocation {
 model ManufacturingProcess {
   id          String   @id @default(uuid())
   factoryId   String
-  skuId       String
+  skuId       String?  // set when scopeType = PRODUCT (legacy single-product routing)
   version     String   @default("1.0")
   name        String
   description String?
@@ -2164,13 +2267,41 @@ model ManufacturingProcess {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  factory      Factory        @relation(fields: [factoryId], references: [id])
-  sku          SKU            @relation(fields: [skuId], references: [id])
+  // Scope: which products this routing applies to
+  scopeType    ProcessScope @default(PRODUCT)
+  categoryId   String?      // scopeType = CATEGORY → all SKUs of this category
+  baseWeightId String?      // scopeType = BASE_WEIGHT → all SKUs of this weight
+
+  factory      Factory          @relation(fields: [factoryId], references: [id])
+  sku          SKU?             @relation(fields: [skuId], references: [id])
+  categoryRef  ProductCategory? @relation(fields: [categoryId], references: [id])
+  baseWeightRef BaseWeight?     @relation(fields: [baseWeightId], references: [id])
+  skuLinks     ManufacturingProcessSku[]   // scopeType = PRODUCT_LIST
   routingSteps RoutingStep[]
   recipes      Recipe[]
 
   @@unique([skuId, version])
   @@map("manufacturing_processes")
+}
+
+enum ProcessScope {
+  PRODUCT       // one SKU
+  CATEGORY      // every SKU in a category
+  BASE_WEIGHT   // every SKU with the same base weight
+  PRODUCT_LIST  // explicit SKU list
+}
+
+// Join table for PRODUCT_LIST scope
+model ManufacturingProcessSku {
+  id        String @id @default(uuid())
+  processId String
+  skuId     String
+
+  process ManufacturingProcess @relation(fields: [processId], references: [id], onDelete: Cascade)
+  sku     SKU                  @relation(fields: [skuId], references: [id], onDelete: Cascade)
+
+  @@unique([processId, skuId])
+  @@map("manufacturing_process_skus")
 }
 
 model RoutingStep {
@@ -2180,7 +2311,8 @@ model RoutingStep {
   operationName String   // e.g. "Mixing", "Filling", "Capping", "Labelling", "Packaging"
   workCenter    String?  // machine / area code
   machineId     String?
-  cycleTimeMins Float?
+  cycleTimeSec  Float?   // PRIMARY reference for job-order cycle time & duration
+  cycleTimeMins Float?   // legacy (auto-derived = cycleTimeSec/60)
   setupTimeMins Float?
   description   String?
   parameters    Json?    // process parameters: { temperature: 80, pressure: 2.5 }
