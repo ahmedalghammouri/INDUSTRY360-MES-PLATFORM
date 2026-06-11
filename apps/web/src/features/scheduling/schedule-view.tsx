@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, CalendarRange, Layers, Boxes } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarRange, CalendarDays, GanttChartSquare, Layers, Boxes } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FactoryGantt, type FactoryTask, type GanttResource, type FactoryZoom } from '@/components/charts/factory-gantt';
+import { ScheduleCalendar } from './schedule-calendar';
 import { useUnifiedSchedule } from './use-schedule';
 
 const WINDOW_DAYS: Record<FactoryZoom, number> = { '30min': 1, hour: 2, day: 4, week: 14, month: 35 };
@@ -35,15 +36,22 @@ export function ScheduleView({
   const [activeTypes, setActiveTypes] = useState<Set<string> | null>(
     defaultTypes ? new Set(defaultTypes) : null,
   );
+  const [view, setView] = useState<'gantt' | 'calendar'>('gantt');
+  const [calAnchor, setCalAnchor] = useState(() => new Date());
 
   const windowDays = WINDOW_DAYS[zoom];
-  const dateFrom = iso(anchor);
-  const dateTo = iso(new Date(anchor.getTime() + windowDays * 86_400_000));
+  const isoLocal = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const monthFrom = new Date(calAnchor.getFullYear(), calAnchor.getMonth(), 1);
+  const monthTo = new Date(calAnchor.getFullYear(), calAnchor.getMonth() + 1, 0);
+  const dateFrom = view === 'calendar' ? isoLocal(monthFrom) : iso(anchor);
+  const dateTo = view === 'calendar' ? isoLocal(monthTo) : iso(new Date(anchor.getTime() + windowDays * 86_400_000));
 
   const { data, isLoading } = useUnifiedSchedule({ dateFrom, dateTo });
 
   const typeMeta = data?.typeMeta ?? [];
   const counts = data?.counts ?? {};
+  const typeLabels = useMemo(() => Object.fromEntries(typeMeta.map((t) => [t.type, t.label])), [typeMeta]);
 
   const filteredItems = useMemo(() => {
     const items = data?.items ?? [];
@@ -103,27 +111,42 @@ export function ScheduleView({
           <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* group by */}
+          {/* view: gantt / calendar */}
           <div className="inline-flex rounded-lg border border-border overflow-hidden">
-            <button onClick={() => setGroupBy('type')}
-              className={cn('px-2.5 py-1.5 text-xs flex items-center gap-1.5', groupBy === 'type' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted/50')}>
-              <Layers size={13} /> Type
+            <button onClick={() => setView('gantt')}
+              className={cn('px-2.5 py-1.5 text-xs flex items-center gap-1.5', view === 'gantt' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted/50')}>
+              <GanttChartSquare size={13} /> Gantt
             </button>
-            <button onClick={() => setGroupBy('resource')}
-              className={cn('px-2.5 py-1.5 text-xs flex items-center gap-1.5 border-l border-border', groupBy === 'resource' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted/50')}>
-              <Boxes size={13} /> Resource
+            <button onClick={() => setView('calendar')}
+              className={cn('px-2.5 py-1.5 text-xs flex items-center gap-1.5 border-l border-border', view === 'calendar' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted/50')}>
+              <CalendarDays size={13} /> Calendar
             </button>
           </div>
-          {/* zoom */}
-          <div className="inline-flex rounded-lg border border-border overflow-hidden">
-            {(['day', 'week', 'month'] as FactoryZoom[]).map((z) => (
-              <button key={z} onClick={() => setZoom(z)}
-                className={cn('px-2.5 py-1.5 text-xs capitalize', z !== 'day' && 'border-l border-border',
-                  zoom === z ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted/50')}>
-                {z}
-              </button>
-            ))}
-          </div>
+          {view === 'gantt' && (
+            <>
+              {/* group by */}
+              <div className="inline-flex rounded-lg border border-border overflow-hidden">
+                <button onClick={() => setGroupBy('type')}
+                  className={cn('px-2.5 py-1.5 text-xs flex items-center gap-1.5', groupBy === 'type' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted/50')}>
+                  <Layers size={13} /> Type
+                </button>
+                <button onClick={() => setGroupBy('resource')}
+                  className={cn('px-2.5 py-1.5 text-xs flex items-center gap-1.5 border-l border-border', groupBy === 'resource' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted/50')}>
+                  <Boxes size={13} /> Resource
+                </button>
+              </div>
+              {/* zoom */}
+              <div className="inline-flex rounded-lg border border-border overflow-hidden">
+                {(['day', 'week', 'month'] as FactoryZoom[]).map((z) => (
+                  <button key={z} onClick={() => setZoom(z)}
+                    className={cn('px-2.5 py-1.5 text-xs capitalize', z !== 'day' && 'border-l border-border',
+                      zoom === z ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted/50')}>
+                    {z}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -146,19 +169,30 @@ export function ScheduleView({
           })}
         </div>
 
-        {/* date nav */}
-        <div className="flex items-center gap-1.5">
-          <Button variant="outline" size="sm" className="h-8" onClick={today}>
-            <CalendarRange size={14} className="mr-1.5" /> Today
-          </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => shift(-1)}><ChevronLeft size={16} /></Button>
-          <span className="text-xs font-medium text-muted-foreground min-w-[180px] text-center tabular-nums">{rangeLabel}</span>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => shift(1)}><ChevronRight size={16} /></Button>
-        </div>
+        {/* date nav (gantt only — calendar has its own month nav) */}
+        {view === 'gantt' && (
+          <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" className="h-8" onClick={today}>
+              <CalendarRange size={14} className="mr-1.5" /> Today
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => shift(-1)}><ChevronLeft size={16} /></Button>
+            <span className="text-xs font-medium text-muted-foreground min-w-[180px] text-center tabular-nums">{rangeLabel}</span>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => shift(1)}><ChevronRight size={16} /></Button>
+          </div>
+        )}
       </div>
 
-      {/* Gantt */}
-      {isLoading ? (
+      {/* Body: calendar or gantt */}
+      {view === 'calendar' ? (
+        <ScheduleCalendar
+          items={filteredItems}
+          month={calAnchor}
+          typeLabels={typeLabels}
+          onPrevMonth={() => setCalAnchor((a) => new Date(a.getFullYear(), a.getMonth() - 1, 1))}
+          onNextMonth={() => setCalAnchor((a) => new Date(a.getFullYear(), a.getMonth() + 1, 1))}
+          onToday={() => setCalAnchor(new Date())}
+        />
+      ) : isLoading ? (
         <div className="rounded-xl border border-border/60 bg-card p-4 space-y-2">
           {Array.from({ length: 6 }).map((_, i) => <div key={i} className="shimmer h-7 rounded" />)}
         </div>
