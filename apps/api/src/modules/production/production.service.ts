@@ -90,6 +90,7 @@ export class ProductionService {
         productionOrderId: dto.productionOrderId,
         status: 'PLANNED',
         priority: dto.priority,
+        autoStart: dto.autoStart ?? false,
         plannedQty: dto.plannedQty,
         plannedStart: new Date(dto.plannedStart),
         plannedEnd: new Date(dto.plannedEnd),
@@ -1091,7 +1092,7 @@ export class ProductionService {
 
   async autoGenerateWorkOrders(
     factoryId: string | null, userId: string, poId: string,
-    dto: { plannedStart: string; plannedEnd: string; rescheduleRequestId?: string },
+    dto: { plannedStart: string; plannedEnd: string; rescheduleRequestId?: string; autoStart?: boolean },
   ): Promise<any> {
     if (!factoryId) throw new BadRequestException('Factory context required');
 
@@ -1156,6 +1157,7 @@ export class ProductionService {
         orderNumber,
         status: 'PLANNED',
         priority: po.priority as any,
+        autoStart: dto.autoStart ?? false,
         plannedQty: po.targetQty,
         plannedStart: start,
         plannedEnd: end,
@@ -1254,7 +1256,8 @@ export class ProductionService {
     });
     if (!rr) throw new NotFoundException('Reschedule request not found');
     if (rr.status !== 'PENDING') throw new BadRequestException(`Request already ${rr.status}.`);
-    return this.prisma.rescheduleRequest.update({
+
+    const updated = await this.prisma.rescheduleRequest.update({
       where: { id },
       data: {
         status: approve ? 'APPROVED' : 'REJECTED',
@@ -1268,13 +1271,102 @@ export class ProductionService {
         reviewedBy: { select: { id: true, name: true } },
       },
     });
+
+    // On approval the proposed window becomes authoritative everywhere: the PO
+    // and any already-generated work orders + their job-order dispatch list are
+    // shifted to the new Production Start/End.
+    if (approve) {
+      await this.applyRescheduleWindow(rr.factoryId, rr.productionOrderId, rr.proposedStart, rr.proposedEnd);
+    }
+
+    return updated;
+  }
+
+  /** Propagate an approved reschedule window to the PO + its open WOs + their JOs. */
+  private async applyRescheduleWindow(
+    factoryId: string, poId: string, start: Date, end: Date,
+  ) {
+    await this.prisma.productionOrder.update({
+      where: { id: poId },
+      data: { plannedStart: start, plannedEnd: end },
+    });
+
+    const wos = await this.prisma.workOrder.findMany({
+      where: { productionOrderId: poId, deletedAt: null, status: { in: ['PLANNED', 'RELEASED', 'IN_PROGRESS'] } },
+      select: { id: true },
+    });
+    for (const wo of wos) {
+      await this.rescheduleWorkOrderToWindow(factoryId, wo.id, start.getTime(), end);
+    }
+  }
+
+  /**
+   * Shift a work order to a new window and re-lay its job orders from `startMs`
+   * using the same overlap-aware engine (durations from ideal cycle × qty).
+   * COMPLETE/CANCELLED job orders keep their actual times.
+   */
+  private async rescheduleWorkOrderToWindow(
+    factoryId: string | null, woId: string, startMs: number, fallbackEnd: Date,
+  ) {
+    const jos = await this.prisma.jobOrder.findMany({
+      where: { workOrderId: woId },
+      select: {
+        id: true, machineId: true, sequenceOrder: true,
+        predecessorId: true, predecessorType: true, predecessorLagMins: true,
+        idealCycleTimeSec: true, plannedQtyOut: true, plannedQtyIn: true, status: true,
+      },
+      orderBy: { sequenceOrder: 'asc' },
+    });
+    const open = jos.filter((j) => !['COMPLETE', 'CANCELLED'].includes(j.status));
+
+    if (open.length === 0) {
+      await this.prisma.workOrder.update({
+        where: { id: woId },
+        data: { plannedStart: new Date(startMs), plannedEnd: fallbackEnd },
+      });
+      return;
+    }
+
+    const ops: SchedOp[] = open.map((j) => {
+      const qty = j.plannedQtyOut ?? j.plannedQtyIn ?? 1;
+      const durMs = j.idealCycleTimeSec && j.idealCycleTimeSec > 0
+        ? Math.max(qty * j.idealCycleTimeSec * 1000, 60_000)
+        : 3_600_000;
+      const predInSet = j.predecessorId && open.some((x) => x.id === j.predecessorId);
+      return {
+        id: j.id,
+        machineId: j.machineId,
+        durationMs: durMs,
+        predecessorId: predInSet ? j.predecessorId : null,
+        predecessorType: (j.predecessorType ?? 'FINISH_TO_START') as any,
+        predecessorLagMins: j.predecessorLagMins ?? 0,
+        sequenceOrder: j.sequenceOrder,
+      };
+    });
+    const sched = scheduleOps(ops, startMs);
+
+    await this.prisma.$transaction([
+      ...open.map((j) =>
+        this.prisma.jobOrder.update({
+          where: { id: j.id },
+          data: {
+            plannedStart: new Date(sched.start.get(j.id) ?? startMs),
+            plannedEnd: new Date(sched.end.get(j.id) ?? sched.finish),
+          },
+        }),
+      ),
+      this.prisma.workOrder.update({
+        where: { id: woId },
+        data: { plannedStart: new Date(startMs), plannedEnd: new Date(sched.finish) },
+      }),
+    ]);
   }
 
   // ────────────────────────────────────────────────────────────
   // STATE MACHINE
   // ────────────────────────────────────────────────────────────
 
-  async startWorkOrder(factoryId: string | null, userId: string, workOrderId: string, operatorId?: string) {
+  async startWorkOrder(factoryId: string | null, userId: string | null, workOrderId: string, operatorId?: string) {
     const wo = await this.assertTransition(factoryId, workOrderId, 'IN_PROGRESS');
 
     const updated = await this.prisma.workOrder.update({
@@ -1282,7 +1374,7 @@ export class ProductionService {
       data: {
         status: 'IN_PROGRESS',
         actualStart: new Date(),
-        startedById: userId,
+        ...(userId && { startedById: userId }),
         ...(operatorId && { operatorId }),
       },
       include: {
@@ -1292,10 +1384,16 @@ export class ProductionService {
     });
 
     // Update machine current status
-    await this.updateMachineStatus(updated.machineId!, 'RUNNING', workOrderId, updated.skuId);
+    if (updated.machineId) {
+      await this.updateMachineStatus(updated.machineId, 'RUNNING', workOrderId, updated.skuId);
+    }
 
     // Record production event
     await this.recordProductionEvent(updated.factoryId, workOrderId, updated.machineId, 'WO_STARTED');
+
+    // Starting a WO dispatches its first executable operations: every job order
+    // that is READY starts, and any START_TO_START-linked step starts in parallel.
+    await this.autoStartReadyJobOrders(updated.factoryId, workOrderId);
 
     this.eventEmitter.emit('production.work-order.started', {
       workOrder: updated,
@@ -1304,6 +1402,33 @@ export class ProductionService {
 
     this.logger.log(`WO ${wo.orderNumber} started`);
     return updated;
+  }
+
+  /**
+   * Cascade-start every READY job order of a work order. Starting an op promotes
+   * its START_TO_START successors to READY (via updateJobOrderStatus), so the next
+   * pass starts them too — parallel-capable steps begin simultaneously. FS
+   * successors stay SCHEDULED until their predecessor completes. Each op is
+   * attempted once; dependency failures are skipped (not fatal).
+   */
+  private async autoStartReadyJobOrders(factoryId: string | null, workOrderId: string) {
+    const attempted = new Set<string>();
+    for (let guard = 0; guard < 50; guard++) {
+      const ready = await this.prisma.jobOrder.findMany({
+        where: { workOrderId, status: 'READY', id: { notIn: [...attempted] } },
+        select: { id: true },
+        orderBy: { sequenceOrder: 'asc' },
+      });
+      if (ready.length === 0) break;
+      for (const r of ready) {
+        attempted.add(r.id);
+        try {
+          await this.updateJobOrderStatus(factoryId, r.id, 'EXECUTING', {});
+        } catch {
+          /* start criteria not yet met — leave it READY for the operator */
+        }
+      }
+    }
   }
 
   async holdWorkOrder(factoryId: string | null, userId: string, workOrderId: string, dto: HoldWorkOrderDto) {

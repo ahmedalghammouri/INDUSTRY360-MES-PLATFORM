@@ -740,6 +740,9 @@ model WorkOrder {
   orderNumber       String          @unique
   status            WorkOrderStatus @default(PLANNED)
   priority          Priority        @default(MEDIUM)
+  // Auto-start: when true, the scheduler starts this WO (and cascades its job
+  // orders) automatically once plannedStart arrives — no operator action needed.
+  autoStart         Boolean         @default(false)
   plannedQty        Int
   actualQty         Int             @default(0)
   goodQty           Int             @default(0)

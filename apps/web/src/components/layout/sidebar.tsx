@@ -98,6 +98,7 @@ const navItems: NavItem[] = [
       { label: 'General Schedule',        href: '/scheduling',                   icon: CalendarRange, badge: 'Gantt', badgeVariant: 'default' },
       { label: 'Production Schedule',     href: '/scheduling/production',        icon: Factory,       badge: 'APS',   badgeVariant: 'outline' },
       { label: 'Order Scheduling',        href: '/production/scheduling',        icon: Calendar       },
+      { label: 'Reschedule Requests',     href: '/scheduling/reschedule-requests', icon: CalendarClock, dynamicKey: 'pendingReschedules', badgeVariant: 'destructive' },
       { label: 'Planned Downtime',        href: '/scheduling/planned-downtime',  icon: CalendarClock  },
       { label: 'Unplanned Downtime',      href: '/scheduling/unplanned-downtime', icon: AlertTriangle },
       { label: 'Shift Configuration',     href: '/production/shifts',            icon: Clock,         badge: 'NCC', badgeVariant: 'outline' },
@@ -252,23 +253,26 @@ function useSidebarCounts(): Record<string, number> {
   const { data } = useQuery({
     queryKey: ['sidebar-counts'],
     queryFn: async () => {
-      const [downtime, workOrders, ncr, maintenance] = await Promise.all([
+      const [downtime, workOrders, ncr, maintenance, reschedules] = await Promise.all([
         api.get('/production/downtime/events?isOpen=true&limit=1').catch(() => null),
         api.get('/production/work-orders?status=IN_PROGRESS&limit=1').catch(() => null),
         api.get('/quality/ncr?status=OPEN&limit=1').catch(() => null),
         api.get('/maintenance/work-orders?status=OPEN&limit=1').catch(() => null),
+        api.get('/production/reschedule-requests?status=PENDING').catch(() => null),
       ]);
       return {
         openDowntime:    (downtime    as any)?.total ?? 0,
         workOrders:      (workOrders  as any)?.total ?? 0,
         openNcr:         (ncr         as any)?.total ?? 0,
         openMaintenance: (maintenance as any)?.total ?? 0,
+        // List endpoint returns a plain array → use its length
+        pendingReschedules: Array.isArray(reschedules) ? reschedules.length : 0,
       };
     },
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
-  return data ?? { openDowntime: 0, workOrders: 0, openNcr: 0, openMaintenance: 0 };
+  return data ?? { openDowntime: 0, workOrders: 0, openNcr: 0, openMaintenance: 0, pendingReschedules: 0 };
 }
 
 // ── SidebarItem ─────────────────────────────────────────────────

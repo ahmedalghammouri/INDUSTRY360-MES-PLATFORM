@@ -13,6 +13,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityPicker } from '@/components/ui/entity-picker';
@@ -65,6 +66,7 @@ interface WorkOrderDetail extends WorkOrder {
 const EMPTY_FORM = {
   skuId: '__none__', operatorId: '__none__',
   plannedQty: '', plannedStart: '', plannedEnd: '', priority: 'MEDIUM', notes: '',
+  autoStart: false,
 };
 
 function MetricCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
@@ -437,6 +439,7 @@ export function ProductionWorkOrdersView() {
       plannedStart: form.plannedStart ? new Date(form.plannedStart).toISOString() : new Date().toISOString(),
       plannedEnd: form.plannedEnd ? new Date(form.plannedEnd).toISOString() : new Date(Date.now() + 86400000).toISOString(),
       notes: form.notes || undefined,
+      autoStart: form.autoStart,
     });
   };
 
@@ -964,6 +967,15 @@ export function ProductionWorkOrdersView() {
             <Label>Notes</Label>
             <Input value={form.notes} onChange={e => setForm(v => ({ ...v, notes: e.target.value }))} placeholder="Optional notes…" className="mt-1" />
           </div>
+          <label className="col-span-2 flex items-start gap-2.5 p-3 rounded-lg border border-border/60 bg-muted/20 cursor-pointer">
+            <Checkbox checked={form.autoStart} onCheckedChange={v => setForm(f => ({ ...f, autoStart: !!v }))} className="mt-0.5" />
+            <span className="text-xs">
+              <span className="font-medium">Start automatically when due</span>
+              <span className="block text-muted-foreground mt-0.5">
+                The work order and its job orders begin on their own once the planned start time arrives — no operator action needed.
+              </span>
+            </span>
+          </label>
         </div>
       </FormDialog>
 

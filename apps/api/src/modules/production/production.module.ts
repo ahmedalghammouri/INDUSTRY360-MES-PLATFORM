@@ -10,11 +10,12 @@ import { RecipeController } from './recipe.controller';
 import { RecipeService } from './recipe.service';
 import { TraceabilityService } from './traceability.service';
 import { TraceabilityController } from './traceability.controller';
+import { WorkOrderSchedulerService } from './work-order-scheduler.service';
 
 @Module({
   imports: [ApsModule],
   controllers: [ProductionController, DowntimeController, RecipeController, TraceabilityController],
-  providers: [ProductionService, OEEService, KpiService, DowntimeService, RecipeService, TraceabilityService],
+  providers: [ProductionService, OEEService, KpiService, DowntimeService, RecipeService, TraceabilityService, WorkOrderSchedulerService],
   exports: [ProductionService, OEEService, KpiService, DowntimeService, RecipeService, TraceabilityService],
 })
 export class ProductionModule {}

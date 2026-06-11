@@ -65,6 +65,11 @@ export class CreateWorkOrderDto {
   @IsString()
   @MaxLength(1000)
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'Start the WO + its job orders automatically when plannedStart arrives' })
+  @IsOptional()
+  @IsBoolean()
+  autoStart?: boolean;
 }
 
 export class UpdateWorkOrderDto {
@@ -377,6 +382,11 @@ export class AutoGenerateWOsDto {
   @IsOptional()
   @IsUUID('4')
   rescheduleRequestId?: string;
+
+  @ApiPropertyOptional({ description: 'Start the WO + its job orders automatically when plannedStart arrives' })
+  @IsOptional()
+  @IsBoolean()
+  autoStart?: boolean;
 }
 
 export class CreateRescheduleRequestDto {

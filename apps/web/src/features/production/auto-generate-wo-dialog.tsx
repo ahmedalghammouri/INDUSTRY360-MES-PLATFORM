@@ -9,7 +9,7 @@
  *   • 1 Work Order → N Job Orders (ISA-95 dispatch list)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Zap, Layers, CheckCircle2, AlertCircle, BarChart3, Info, Cpu,
@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -54,6 +55,7 @@ export function AutoGenerateWODialog({ po, open, onClose, onDone }: Props) {
   const qc = useQueryClient();
   const [plannedStart, setStart] = useState(toLocalInput(po.plannedStart));
   const [plannedEnd, setEnd] = useState(toLocalInput(po.plannedEnd ?? new Date(Date.now() + 86_400_000).toISOString()));
+  const [autoStart, setAutoStart] = useState(false);
 
   const fromIso = plannedStart ? new Date(plannedStart).toISOString() : undefined;
 
@@ -79,6 +81,15 @@ export function AutoGenerateWODialog({ po, open, onClose, onDone }: Props) {
   const latestReschedule = (reschedData as any[])?.[0] ?? null;
   const approvedReschedule = latestReschedule?.status === 'APPROVED' ? latestReschedule : null;
   const pendingReschedule = latestReschedule?.status === 'PENDING' ? latestReschedule : null;
+
+  // Once a reschedule is approved, reset the Production Start/End inputs to the
+  // approved window so the form reflects the authoritative dates everywhere.
+  useEffect(() => {
+    if (approvedReschedule) {
+      setStart(toLocalInput(approvedReschedule.proposedStart));
+      setEnd(toLocalInput(approvedReschedule.proposedEnd));
+    }
+  }, [approvedReschedule?.id, approvedReschedule?.proposedStart, approvedReschedule?.proposedEnd]);
 
   const requestResched = useMutation({
     mutationFn: () => api.post(`/production/production-orders/${po.id}/reschedule-requests`, {
@@ -109,6 +120,7 @@ export function AutoGenerateWODialog({ po, open, onClose, onDone }: Props) {
     mutationFn: () => api.post(`/production/production-orders/${po.id}/auto-generate-work-orders`, {
       plannedStart: new Date(plannedStart).toISOString(),
       plannedEnd: new Date(plannedEnd).toISOString(),
+      autoStart,
       ...(approvedReschedule ? { rescheduleRequestId: approvedReschedule.id } : {}),
     }),
     onSuccess: (res: any) => {
@@ -161,6 +173,17 @@ export function AutoGenerateWODialog({ po, open, onClose, onDone }: Props) {
               <Input type="datetime-local" value={plannedEnd} onChange={e => setEnd(e.target.value)} />
             </div>
           </div>
+
+          {/* Auto-start toggle */}
+          <label className="flex items-start gap-2.5 p-3 rounded-lg border border-border/60 bg-muted/20 cursor-pointer">
+            <Checkbox checked={autoStart} onCheckedChange={v => setAutoStart(!!v)} className="mt-0.5" />
+            <span className="text-xs">
+              <span className="font-medium">Start automatically when due</span>
+              <span className="block text-muted-foreground mt-0.5">
+                The work order and its job orders begin on their own once the production start time arrives — no operator action needed.
+              </span>
+            </span>
+          </label>
 
           {previewLoading ? (
             <div className="space-y-2">
