@@ -1,11 +1,15 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { useQuery } from '@tanstack/react-query';
 import {
   Clock, CalendarDays, Gauge, Target, Plus, Pencil, Trash2,
   CalendarPlus, Moon, Sun, AlertTriangle, Coffee, Sparkles, ShieldOff, Timer,
 } from 'lucide-react';
+
+import { api } from '@/services/api.client';
+import { TablePagination } from '@/components/ui/table-pagination';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -106,14 +110,91 @@ function DayChips({ days }: { days: number[] }) {
   );
 }
 
+// ── 24h coverage timeline: where every active shift sits in the day ─────────
+function CoverageBar({ templates }: { templates: ShiftTemplate[] }) {
+  const active = templates.filter((t) => t.isActive);
+  if (active.length === 0) return null;
+  const toMin = (hhmm: string) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
+  };
+  const palette = ['bg-amber-500/70', 'bg-indigo-500/70', 'bg-emerald-500/70', 'bg-rose-500/70'];
+  return (
+    <div className="rounded-xl border border-border/60 bg-card p-4">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">24h Coverage</span>
+        <span className="text-[10px] text-muted-foreground">
+          {active.length} active shift{active.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+      <div className="relative h-9 rounded-lg bg-muted/30 overflow-hidden">
+        {/* hour ticks */}
+        {[0, 6, 12, 18, 24].map((h) => (
+          <div key={h} className="absolute top-0 bottom-0 border-l border-border/40" style={{ left: `${(h / 24) * 100}%` }} />
+        ))}
+        {active.map((t, i) => {
+          const s = toMin(t.startTime);
+          const e = toMin(t.endTime);
+          const color = palette[i % palette.length];
+          const seg = (left: number, width: number, rounded: string) => (
+            <div
+              key={`${t.id}-${left}`}
+              title={`${t.name} ${t.startTime}–${t.endTime}`}
+              className={cn('absolute top-1 bottom-1 flex items-center justify-center text-[9px] font-bold text-white/90 truncate px-1', color, rounded)}
+              style={{ left: `${(left / 1440) * 100}%`, width: `${(width / 1440) * 100}%` }}
+            >
+              {width > 150 ? t.code : ''}
+            </div>
+          );
+          // crosses midnight → two segments
+          return e <= s
+            ? [seg(s, 1440 - s, 'rounded-l-md'), seg(0, e, 'rounded-r-md')]
+            : seg(s, e - s, 'rounded-md');
+        })}
+      </div>
+      <div className="flex justify-between text-[9px] text-muted-foreground mt-1 px-0.5">
+        {['00:00', '06:00', '12:00', '18:00', '24:00'].map((l) => <span key={l}>{l}</span>)}
+      </div>
+    </div>
+  );
+}
+
+const INSTANCE_STATUSES = ['ALL', 'SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const;
+
 // ── Main view ────────────────────────────────────────────────────────────────
 export function ShiftConfigView() {
   const { data: config } = useShiftConfig();
   const { data: templates, isLoading } = useShiftTemplates(true);
-  const { data: instancesResp } = useShiftInstances({ limit: 20 });
+
+  // Scheduled-shifts filters + server pagination
+  const [instPage, setInstPage] = useState(1);
+  const [instStatus, setInstStatus] = useState<(typeof INSTANCE_STATUSES)[number]>('ALL');
+  useEffect(() => { setInstPage(1); }, [instStatus]);
+  const { data: instancesResp } = useShiftInstances({
+    limit: 15,
+    page: instPage,
+    status: instStatus === 'ALL' ? undefined : (instStatus as any),
+  });
 
   const { data: causes } = usePlannedCauses();
-  const { data: plannedResp } = usePlannedDowntime({ limit: 30 });
+
+  // Planned-downtime filters + server pagination
+  const [pdPage, setPdPage] = useState(1);
+  const [pdMachine, setPdMachine] = useState('ALL');
+  useEffect(() => { setPdPage(1); }, [pdMachine]);
+  const { data: plannedResp } = usePlannedDowntime({
+    limit: 15,
+    page: pdPage,
+    machineId: pdMachine === 'ALL' ? undefined : pdMachine,
+  });
+
+  const { data: machinesData } = useQuery({
+    queryKey: ['machines-list'],
+    queryFn: () => api.get('/hierarchy/machines?limit=50'),
+    staleTime: 60_000,
+  });
+  const machines: Array<{ id: string; name: string; code: string }> =
+    ((machinesData as any)?.data ?? (Array.isArray(machinesData) ? machinesData : [])) as any[];
 
   const createMut = useCreateTemplate();
   const updateMut = useUpdateTemplate();
@@ -242,6 +323,7 @@ export function ShiftConfigView() {
 
         {/* Templates */}
         <TabsContent value="templates" className="space-y-3 mt-4">
+          <CoverageBar templates={templates ?? []} />
           {isLoading ? (
             <div className="text-sm text-muted-foreground">Loading shifts…</div>
           ) : (templates ?? []).length === 0 ? (
@@ -294,7 +376,27 @@ export function ShiftConfigView() {
         </TabsContent>
 
         {/* Instances */}
-        <TabsContent value="instances" className="mt-4">
+        <TabsContent value="instances" className="mt-4 space-y-3">
+          {/* Status filter */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {INSTANCE_STATUSES.map((s) => (
+              <button
+                key={s}
+                onClick={() => setInstStatus(s)}
+                className={cn(
+                  'px-2.5 py-1 rounded-lg border text-xs font-medium transition-colors',
+                  instStatus === s
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {s === 'ALL' ? 'All' : s.replace('_', ' ').toLowerCase()}
+              </button>
+            ))}
+            <span className="ml-auto text-xs text-muted-foreground">
+              {(instancesResp as any)?.total ?? instances.length} shift instance{(((instancesResp as any)?.total ?? instances.length) !== 1) ? 's' : ''}
+            </span>
+          </div>
           <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-muted-foreground">
@@ -330,6 +432,11 @@ export function ShiftConfigView() {
                 ))}
               </tbody>
             </table>
+            {(((instancesResp as any)?.total ?? 0) > 15) && (
+              <div className="border-t border-border/50 px-4 py-2">
+                <TablePagination page={instPage} total={(instancesResp as any)?.total ?? 0} limit={15} onPageChange={setInstPage} />
+              </div>
+            )}
           </div>
         </TabsContent>
 
@@ -375,6 +482,21 @@ export function ShiftConfigView() {
             </div>
           </div>
 
+          {/* Machine filter */}
+          <div className="flex items-center gap-2">
+            <select
+              value={pdMachine}
+              onChange={(e) => setPdMachine(e.target.value)}
+              className="h-8 text-xs rounded-md border border-input bg-background px-2 focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="ALL">All machines</option>
+              {machines.map((m) => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
+            </select>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {(plannedResp as any)?.total ?? plannedEvents.length} event{(((plannedResp as any)?.total ?? plannedEvents.length) !== 1) ? 's' : ''}
+            </span>
+          </div>
+
           <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-muted-foreground">
@@ -417,6 +539,11 @@ export function ShiftConfigView() {
                 })}
               </tbody>
             </table>
+            {(((plannedResp as any)?.total ?? 0) > 15) && (
+              <div className="border-t border-border/50 px-4 py-2">
+                <TablePagination page={pdPage} total={(plannedResp as any)?.total ?? 0} limit={15} onPageChange={setPdPage} />
+              </div>
+            )}
           </div>
         </TabsContent>
       </Tabs>

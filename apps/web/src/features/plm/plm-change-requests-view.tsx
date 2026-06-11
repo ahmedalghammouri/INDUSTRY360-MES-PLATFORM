@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { TablePagination } from '@/components/ui/table-pagination';
 import {
   GitPullRequest,
   Plus,
@@ -261,6 +262,12 @@ export default function PlmChangeRequestsView() {
     return matchSearch && matchType && matchStatus && matchPriority;
   });
 
+  // Client-side pagination — keeps the table light even with hundreds of ECRs
+  const PAGE_LIMIT = 15;
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, priorityFilter]);
+  const paged = filtered.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT);
+
   // ── Pie data ──────────────────────────────────────────────────
   const typeCounts = (['BOM_CHANGE', 'RECIPE_CHANGE', 'PROCESS_CHANGE', 'DESIGN_CHANGE'] as const).map((t) => ({
     name: TYPE_LABELS[t],
@@ -306,7 +313,7 @@ export default function PlmChangeRequestsView() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-foreground">Engineering Change Requests</h1>
-            <p className="text-xs text-muted-foreground">ISA-95 PLM — Manage product & process change lifecycle</p>
+            <p className="text-xs text-muted-foreground">PLM — Manage product & process change lifecycle</p>
           </div>
         </div>
 
@@ -513,7 +520,7 @@ export default function PlmChangeRequestsView() {
             </thead>
             <tbody>
               <AnimatePresence>
-                {filtered.map((cr, i) => (
+                {paged.map((cr, i) => (
                   <motion.tr
                     key={cr.id}
                     initial={{ opacity: 0 }}
@@ -633,6 +640,11 @@ export default function PlmChangeRequestsView() {
             </tbody>
           </table>
         </div>
+        {filtered.length > PAGE_LIMIT && (
+          <div className="border-t border-border/50 px-4 py-2">
+            <TablePagination page={page} total={filtered.length} limit={PAGE_LIMIT} onPageChange={setPage} />
+          </div>
+        )}
       </div>
 
       {/* ── Type Distribution Chart ──────────────────────────────── */}

@@ -269,7 +269,7 @@ export function HierarchyView() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Plant Hierarchy</h1>
-          <p className="text-muted-foreground text-sm mt-1">ISA-95 enterprise hierarchy structure</p>
+          <p className="text-muted-foreground text-sm mt-1">Enterprise hierarchy structure</p>
         </div>
         <Button onClick={openCreate} className="gap-2">
           <Plus className="w-4 h-4" /> Add Node
@@ -304,9 +304,11 @@ export function HierarchyView() {
             <p className="text-sm">No hierarchy configured yet</p>
           </div>
         ) : (
-          nodes.map(node => (
-            <TreeNode key={node.id} node={node} depth={0} onEdit={openEdit} onDelete={setDeleteNode} />
-          ))
+          <div className="max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+            {nodes.map(node => (
+              <TreeNode key={node.id} node={node} depth={0} onEdit={openEdit} onDelete={setDeleteNode} />
+            ))}
+          </div>
         )}
       </div>
 

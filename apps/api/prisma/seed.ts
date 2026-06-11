@@ -634,6 +634,76 @@ async function main() {
   console.log(`✅ SIDCO product master data: 1 category, ${brandNames.length} brands, ${packTypes.length} packaging types, ${baseUnits.length} base units, ${baseWeightVals.length} base weights — all ${skuData.length} SKUs linked`);
 
   // ============================================================
+  // SIDCO — UNIFIED UNITS OF MEASURE (canonical units + conversions)
+  // Single source of truth for units on raw materials, BOM lines,
+  // routing-step materials and material lots.
+  // ============================================================
+  const uomDefs: Array<{ code: string; name: string; nameAr?: string; category: 'WEIGHT' | 'VOLUME' | 'COUNT' | 'PACKAGING' | 'LENGTH'; baseUnitCode?: string; factor?: number; decimals?: number }> = [
+    { code: 'KG', name: 'Kilogram', nameAr: 'كيلوجرام', category: 'WEIGHT', baseUnitCode: 'KG', factor: 1 },
+    { code: 'G', name: 'Gram', nameAr: 'جرام', category: 'WEIGHT', baseUnitCode: 'KG', factor: 0.001 },
+    { code: 'TON', name: 'Metric Ton', nameAr: 'طن', category: 'WEIGHT', baseUnitCode: 'KG', factor: 1000 },
+    { code: 'L', name: 'Liter', nameAr: 'لتر', category: 'VOLUME', baseUnitCode: 'L', factor: 1 },
+    { code: 'ML', name: 'Milliliter', nameAr: 'مليلتر', category: 'VOLUME', baseUnitCode: 'L', factor: 0.001 },
+    { code: 'PCS', name: 'Pieces', nameAr: 'قطعة', category: 'COUNT', baseUnitCode: 'PCS', factor: 1, decimals: 0 },
+    { code: 'EA', name: 'Each', category: 'COUNT', baseUnitCode: 'PCS', factor: 1, decimals: 0 },
+    { code: 'ROLL', name: 'Roll', nameAr: 'لفة', category: 'COUNT', baseUnitCode: 'PCS', factor: 1, decimals: 0 },
+    { code: 'INNER', name: 'Inner Bag', nameAr: 'كيس داخلي', category: 'PACKAGING', decimals: 0 },
+    { code: 'CARTON', name: 'Carton', nameAr: 'كرتونة', category: 'PACKAGING', decimals: 0 },
+    { code: 'PALLET', name: 'Pallet', nameAr: 'طبلية', category: 'PACKAGING', decimals: 0 },
+    { code: 'M', name: 'Meter', nameAr: 'متر', category: 'LENGTH', baseUnitCode: 'M', factor: 1 },
+  ];
+  const uomIds: Record<string, string> = {};
+  for (let i = 0; i < uomDefs.length; i++) {
+    const u = uomDefs[i];
+    const row = await prisma.unitOfMeasure.upsert({
+      where: { factoryId_code: { factoryId: sidco.id, code: u.code } },
+      update: { category: u.category as any, baseUnitCode: u.baseUnitCode ?? null, conversionFactor: u.factor ?? 1 },
+      create: {
+        factoryId: sidco.id, code: u.code, name: u.name, nameAr: u.nameAr ?? null,
+        category: u.category as any, baseUnitCode: u.baseUnitCode ?? null,
+        conversionFactor: u.factor ?? 1, decimals: u.decimals ?? 3, sortOrder: i + 1,
+      },
+    });
+    uomIds[u.code] = row.id;
+  }
+
+  // Backfill unitId FKs from legacy unit strings (idempotent — only rows still null)
+  const normUnit = (raw: string): string | null => {
+    const x = (raw || '').trim().toUpperCase();
+    if (uomIds[x]) return x;
+    if (x === 'KGS' || x === 'KILOGRAM') return 'KG';
+    if (x === 'PIECE' || x === 'PIECES' || x === 'UNIT') return 'PCS';
+    if (x === 'LTR' || x === 'LITER') return 'L';
+    return null;
+  };
+  for (const table of ['rawMaterial', 'materialLot', 'routingStepMaterial', 'bOMItem'] as const) {
+    const delegate = prisma[table] as any;
+    const pending = await delegate.findMany({ where: { unitId: null }, select: { id: true, unit: true } });
+    for (const row of pending) {
+      const code = normUnit(row.unit);
+      if (code) await delegate.update({ where: { id: row.id }, data: { unitId: uomIds[code] } });
+    }
+  }
+
+  // Backfill MaterialLot.rawMaterialId by materialCode (traceability joins need the FK)
+  const orphanLots = await prisma.materialLot.findMany({ where: { rawMaterialId: null }, select: { id: true, materialCode: true, factoryId: true } });
+  for (const lot of orphanLots) {
+    const rm = await prisma.rawMaterial.findFirst({ where: { factoryId: lot.factoryId, code: lot.materialCode } });
+    if (rm) await prisma.materialLot.update({ where: { id: lot.id }, data: { rawMaterialId: rm.id } });
+  }
+
+  // Backfill RoutingStepMachineOption: every step's current machine becomes the primary option
+  const stepsWithMachine = await prisma.routingStep.findMany({ where: { machineId: { not: null } }, select: { id: true, machineId: true } });
+  for (const st of stepsWithMachine) {
+    await prisma.routingStepMachineOption.upsert({
+      where: { stepId_machineId: { stepId: st.id, machineId: st.machineId! } },
+      update: { isDefault: true, priority: 0 },
+      create: { stepId: st.id, machineId: st.machineId!, priority: 0, isDefault: true },
+    });
+  }
+  console.log(`✅ Units of measure: ${uomDefs.length} seeded; unit FKs backfilled; ${stepsWithMachine.length} primary machine options ensured`);
+
+  // ============================================================
   // SIDCO — MACHINE CYCLE TIMES (from NCC Prerequisites)
   // Big Betti (M1): 1.5kg=30s, 2kg=31s, 2.25kg=35s per INNER
   // Cartomac (M2): 1.5kg=30s, 2kg=25s, 2.25kg=40s per CARTON

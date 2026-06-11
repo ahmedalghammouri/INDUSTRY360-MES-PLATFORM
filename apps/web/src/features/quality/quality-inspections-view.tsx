@@ -248,7 +248,7 @@ export function QualityInspectionsView() {
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
         <div>
           <h1 className="text-lg font-bold">Quality Inspections</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Incoming, in-process, and final inspection results · linked to Work Orders (ISA-95)</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Incoming, in-process, and final inspection results · linked to Work Orders</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
@@ -460,7 +460,7 @@ export function QualityInspectionsView() {
               <Input type="number" value={form.failQty} onChange={e => setForm(v => ({ ...v, failQty: e.target.value }))} className="mt-1" />
             </div>
             <div>
-              <Label>Work Order (ISA-95 link)</Label>
+              <Label>Work Order</Label>
               <Select value={form.workOrderId} onValueChange={v => setForm(f => ({ ...f, workOrderId: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Link to work order..." /></SelectTrigger>
                 <SelectContent className="max-h-52">
@@ -480,7 +480,7 @@ export function QualityInspectionsView() {
           <div>
             <Label className="flex items-center gap-1.5">
               <ClipboardList size={12} className="text-primary" />
-              Quality Plan (ISA-95 QualityTest)
+              Quality Plan
             </Label>
             <Select value={form.planId || '__none__'} onValueChange={handlePlanSelect}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="Select plan..." /></SelectTrigger>

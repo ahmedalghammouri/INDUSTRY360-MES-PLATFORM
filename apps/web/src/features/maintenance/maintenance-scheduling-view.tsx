@@ -306,7 +306,7 @@ export default function MaintenanceSchedulingView() {
           <Calendar size={18} className="text-brand-400" />
           <div>
             <h1 className="text-lg font-bold">Maintenance Scheduling</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">ISA-95 MES — Maintenance work order calendar and schedule</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Maintenance work order calendar and schedule</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

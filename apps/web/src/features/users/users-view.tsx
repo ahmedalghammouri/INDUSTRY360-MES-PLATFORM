@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { motion } from 'framer-motion';
 import {
   Users, UserPlus, Search, Shield, Mail, MoreHorizontal,
@@ -65,17 +66,21 @@ export function UsersView() {
     name: '', email: '', role: 'OPERATOR', department: '', jobTitle: '', phone: '', password: '',
   })
 
+  const [page, setPage] = useState(1)
+  const PAGE_LIMIT = 20
   const { data, isLoading } = useQuery({
-    queryKey: ['users', { search, role: roleFilter }],
+    queryKey: ['users', { search, role: roleFilter, page }],
     queryFn: () => api.get('/users', {
       params: {
         search: search || undefined,
         role: roleFilter === 'All Roles' ? undefined : roleFilter,
-        limit: 50,
+        page,
+        limit: PAGE_LIMIT,
       },
     }),
     staleTime: 30_000,
   })
+  useEffect(() => { setPage(1) }, [search, roleFilter])
 
   const createMutation = useMutation({
     mutationFn: (dto: any) => api.post('/users', dto),
@@ -286,6 +291,11 @@ export function UsersView() {
             )}
           </tbody>
         </table>
+        {(((data as any)?.total ?? 0) > PAGE_LIMIT) && (
+          <div className="border-t border-border/50 px-4 py-2">
+            <TablePagination page={page} total={(data as any)?.total ?? 0} limit={PAGE_LIMIT} onPageChange={setPage} isLoading={isLoading} />
+          </div>
+        )}
       </div>
 
       <FormDialog

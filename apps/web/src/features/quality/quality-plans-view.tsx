@@ -184,7 +184,7 @@ export function QualityPlansView() {
         <div>
           <h1 className="text-xl font-bold">Quality Plans</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            ISA-95 QualityTestSpecification — define check types, quality points, and SPC limits
+            Define check types, quality points, and SPC limits
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -243,7 +243,7 @@ export function QualityPlansView() {
         <div className="border rounded-xl p-16 text-center text-sm text-muted-foreground">
           <ClipboardList size={36} className="mx-auto mb-3 opacity-20" />
           <p className="font-medium">No quality plans found</p>
-          <p className="text-xs mt-1">Create a quality plan to define inspection check points per ISA-95.</p>
+          <p className="text-xs mt-1">Create a quality plan to define inspection check points.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -280,7 +280,7 @@ export function QualityPlansView() {
               <div className="p-5 border-b flex items-center justify-between">
                 <div>
                   <h2 className="font-semibold text-sm">{editPlan ? 'Edit Quality Plan' : 'New Quality Plan'}</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">ISA-95 QualityTestSpecification</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Quality test specification</p>
                 </div>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setPlanFormOpen(false); setEditPlan(null); }}>
                   <X size={14} />
@@ -670,7 +670,7 @@ function PlanDetailSheet({ planId, onClose, onEdit }: {
           )}
         </SheetHeader>
 
-        {/* ISA-95 Info bar */}
+        {/* Info bar */}
         {plan && (
           <div className="grid grid-cols-3 gap-px bg-border shrink-0">
             {[
@@ -686,11 +686,11 @@ function PlanDetailSheet({ planId, onClose, onEdit }: {
           </div>
         )}
 
-        {/* ISA-95 data flow legend */}
+        {/* Data flow legend */}
         {plan && (
           <div className="px-5 py-3 bg-muted/20 border-b shrink-0">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">ISA-95 Data Flow:</span>
+              <span className="font-medium text-foreground">Data Flow:</span>
               <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium border', cfg.cls)}>{cfg.label}</span>
               <span className="text-muted-foreground">→</span>
               <span className="text-[10px] bg-muted rounded px-1.5 py-0.5">Quality Plan</span>
@@ -715,7 +715,7 @@ function PlanDetailSheet({ planId, onClose, onEdit }: {
                 <div>
                   <h3 className="text-sm font-semibold">Quality Check Points</h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    ISA-95 QualityTestSpecificationProperty — define measured parameters with SPC control limits and product spec limits
+                    Define measured parameters with SPC control limits and product spec limits
                   </p>
                 </div>
                 <Button

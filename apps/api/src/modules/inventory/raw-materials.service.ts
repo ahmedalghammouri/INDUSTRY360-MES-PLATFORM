@@ -11,6 +11,7 @@ export interface CreateRawMaterialDto {
   description?: string;
   category?: string;
   unit?: string;
+  unitId?: string;
   unitCost?: number;
   minStock?: number;
   maxStock?: number;
@@ -117,6 +118,8 @@ export class RawMaterialsService {
       throw new BadRequestException(`Raw material with code '${dto.code}' already exists`);
     }
 
+    const unitRef = await this.resolveUnit(resolvedFactoryId, dto.unitId, dto.unit);
+
     const material = await this.prisma.rawMaterial.create({
       data: {
         factoryId: resolvedFactoryId,
@@ -125,7 +128,8 @@ export class RawMaterialsService {
         nameAr: dto.nameAr,
         description: dto.description,
         category: dto.category,
-        unit: dto.unit ?? 'KG',
+        unit: unitRef?.code ?? dto.unit ?? 'KG',
+        unitId: unitRef?.id ?? null,
         unitCost: dto.unitCost,
         minStock: dto.minStock ?? 0,
         maxStock: dto.maxStock,
@@ -170,6 +174,10 @@ export class RawMaterialsService {
     });
     if (!material) throw new NotFoundException('Raw material not found');
 
+    const unitRef = (dto.unitId !== undefined || dto.unit !== undefined)
+      ? await this.resolveUnit(material.factoryId, dto.unitId, dto.unit)
+      : undefined;
+
     const updated = await this.prisma.rawMaterial.update({
       where: { id },
       data: {
@@ -177,7 +185,7 @@ export class RawMaterialsService {
         ...(dto.nameAr !== undefined && { nameAr: dto.nameAr }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.category !== undefined && { category: dto.category }),
-        ...(dto.unit !== undefined && { unit: dto.unit }),
+        ...(unitRef !== undefined && { unit: unitRef?.code ?? dto.unit, unitId: unitRef?.id ?? null }),
         ...(dto.unitCost !== undefined && { unitCost: dto.unitCost }),
         ...(dto.minStock !== undefined && { minStock: dto.minStock }),
         ...(dto.maxStock !== undefined && { maxStock: dto.maxStock }),
@@ -333,6 +341,7 @@ export class RawMaterialsService {
       description: m.description,
       category: m.category,
       unit: m.unit,
+      unitId: m.unitId ?? null,
       unitCost: m.unitCost,
       currentStock: m.currentStock,
       reservedStock: m.reservedStock,
@@ -357,5 +366,19 @@ export class RawMaterialsService {
     const factory = await this.prisma.factory.findFirst({ where: { isActive: true } });
     if (!factory) throw new NotFoundException('No active factory found');
     return factory.id;
+  }
+
+  /** Resolve the unified UoM reference from an id or legacy unit code (null = no match). */
+  private async resolveUnit(factoryId: string, unitId?: string, unitCode?: string) {
+    if (unitId) {
+      return this.prisma.unitOfMeasure.findFirst({ where: { id: unitId, factoryId }, select: { id: true, code: true } });
+    }
+    if (unitCode) {
+      return this.prisma.unitOfMeasure.findFirst({
+        where: { factoryId, code: unitCode.trim().toUpperCase() },
+        select: { id: true, code: true },
+      });
+    }
+    return null;
   }
 }

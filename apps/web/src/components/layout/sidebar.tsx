@@ -85,40 +85,36 @@ interface NavItem {
 const navItems: NavItem[] = [
   // ═══════════════ OVERVIEW ═══════════════
   { section: 'Overview', label: 'Overview' },
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Home', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Dashboard Center', href: '/dashboard-center', icon: LayoutGrid, badge: 'New', badgeVariant: 'default' },
 
   // ═══════════════ PLANNING & EXECUTION ═══════════════
+  // One home per page: planning → orders pipeline → execution → trace → KPIs.
   { section: 'Planning & Execution', label: 'Planning & Execution' },
   {
     label: 'Planning & Scheduling',
     icon: CalendarRange,
     children: [
-      { label: 'General Schedule',       href: '/scheduling',                      icon: CalendarRange, badge: 'Gantt', badgeVariant: 'default' },
-      { label: 'Production Schedule',    href: '/scheduling/production',           icon: Factory        },
-      { label: 'Planned Downtime',       href: '/scheduling/planned-downtime',     icon: CalendarClock  },
-      { label: 'Shift Configuration',    href: '/production/shifts',               icon: Clock,         badge: 'NCC', badgeVariant: 'outline' },
+      { label: 'General Schedule',        href: '/scheduling',                   icon: CalendarRange, badge: 'Gantt', badgeVariant: 'default' },
+      { label: 'Production Schedule',     href: '/scheduling/production',        icon: Factory,       badge: 'APS',   badgeVariant: 'outline' },
+      { label: 'Order Scheduling',        href: '/production/scheduling',        icon: Calendar       },
+      { label: 'Planned Downtime',        href: '/scheduling/planned-downtime',  icon: CalendarClock  },
+      { label: 'Shift Configuration',     href: '/production/shifts',            icon: Clock,         badge: 'NCC', badgeVariant: 'outline' },
     ],
   },
   {
     label: 'Production',
     icon: Factory,
     children: [
-      { label: 'Overview',               href: '/production',                      icon: Gauge         },
-      { label: 'Prod. Orders (PO)',      href: '/production/production-orders',    icon: GitCommit,    badge: 'ISA-95', badgeVariant: 'outline' },
-      { label: 'Production Scheduling',  href: '/production/scheduling',           icon: Calendar      },
-      { label: 'Scrap Log Audit',        href: '/production/scrap-log',            icon: AlertTriangle, badge: 'Audit',  badgeVariant: 'outline' },
-      { label: 'Batches & Lots',         href: '/production/batches',              icon: Boxes         },
-      {
-        label: 'KPI Analytics',
-        icon: TrendingUp,
-        children: [
-          { label: 'Overview',           href: '/production/kpi',                  icon: Gauge         },
-          { label: 'OEE Analytics',      href: '/production/oee',                  icon: LineChart     },
-          { label: 'Downtime Analytics', href: '/production/downtime',             icon: AlertTriangle },
-        ],
-      },
-      { label: 'Reports & Analytics',    href: '/production/reports',              icon: BarChart3     },
+      { label: 'Overview',                href: '/production',                   icon: Gauge          },
+      { label: 'Control Panel',           href: '/manufacturing/control',        icon: SlidersHorizontal, badge: 'Live', badgeVariant: 'secondary' },
+      { label: 'Production Orders (PO)',  href: '/production/production-orders', icon: GitCommit      },
+      { label: 'Work Orders (WO)',        href: '/production/orders',            icon: ClipboardList, dynamicKey: 'workOrders', badgeVariant: 'secondary' },
+      { label: 'Dispatch List (JO)',      href: '/production/job-orders',        icon: Layers         },
+      { label: 'Shopfloor Live',          href: '/shop-floor',                   icon: Monitor,       badge: 'Live', badgeVariant: 'secondary', openNewTab: true },
+      { label: 'Downtime',                href: '/production/downtime',          icon: AlertTriangle, dynamicKey: 'openDowntime', badgeVariant: 'destructive' },
+      { label: 'Batches & Lots',          href: '/production/batches',           icon: Boxes          },
+      { label: 'Scrap Log Audit',         href: '/production/scrap-log',         icon: AlertTriangle, badge: 'Audit', badgeVariant: 'outline' },
     ],
   },
   {
@@ -131,30 +127,16 @@ const navItems: NavItem[] = [
     ],
   },
   {
-    label: 'Manufacturing',
-    icon: Cog,
-    badge: 'MRP',
-    badgeVariant: 'outline',
+    label: 'Performance & KPIs',
+    icon: TrendingUp,
     children: [
-      { label: 'Overview',               href: '/manufacturing',                   icon: Gauge         },
-      {
-        label: 'KPI Analytics',
-        icon: TrendingUp,
-        children: [
-          { label: 'Overview',           href: '/manufacturing/kpi',               icon: Gauge         },
-          { label: 'OEE Analytics',      href: '/manufacturing/oee',               icon: LineChart     },
-          { label: 'Downtime Analytics', href: '/production/downtime',             icon: AlertTriangle },
-        ],
-      },
-      { label: 'Mfg. Scheduling',        href: '/production/scheduling',           icon: Calendar      },
-      { label: 'Work Orders',            href: '/production/orders',               icon: ClipboardList, dynamicKey: 'workOrders', badgeVariant: 'secondary' },
-      { label: 'Dispatch List (JO)',     href: '/production/job-orders',           icon: Layers,        badge: 'ISA-95', badgeVariant: 'outline' },
-      { label: 'Shopfloor Live',         href: '/shop-floor',                      icon: Monitor,       badge: 'Live',   badgeVariant: 'secondary', openNewTab: true },
-      { label: 'Control Panel',          href: '/manufacturing/control',           icon: SlidersHorizontal },
-      { label: 'Downtime',               href: '/production/downtime',             icon: AlertTriangle, dynamicKey: 'openDowntime', badgeVariant: 'destructive' },
-      { label: 'Recipes',                href: '/production/recipes',              icon: FlaskConical  },
-      { label: 'Mfg. Processes',         href: '/production/processes',            icon: Workflow      },
-      { label: 'Reports & Analytics',    href: '/manufacturing/reports',           icon: BarChart3     },
+      { label: 'Production KPIs',         href: '/production/kpi',               icon: Gauge      },
+      { label: 'OEE Analytics',           href: '/production/oee',               icon: LineChart  },
+      { label: 'Machine KPIs',            href: '/manufacturing/kpi',            icon: Cpu        },
+      { label: 'Machine OEE',             href: '/manufacturing/oee',            icon: Activity   },
+      { label: 'Energy Dashboard',        href: '/energy',                       icon: Zap        },
+      { label: 'Energy Analytics',        href: '/energy/reports',               icon: BarChart3  },
+      { label: 'Manufacturing Hub',       href: '/manufacturing',                icon: Cog        },
     ],
   },
 
@@ -211,37 +193,22 @@ const navItems: NavItem[] = [
     ],
   },
   {
-    label: 'PLM',
+    label: 'PLM & Engineering',
     icon: BookOpen,
     children: [
-      { label: 'Overview',               href: '/plm',                             icon: Gauge         },
-      { label: 'Products (SKUs)',        href: '/inventory/products',              icon: BoxesIcon     },
-      {
-        label: 'Mfg. Design',
-        icon: Workflow,
-        children: [
-          { label: 'Overview',           href: '/plm/design',                      icon: Gauge         },
-          { label: 'Change Request',     href: '/plm/change-requests',             icon: GitPullRequest },
-          { label: 'Mfg. Processes',     href: '/production/processes',            icon: Workflow      },
-          { label: 'Bill of Materials',  href: '/inventory/bom',                   icon: GitMerge      },
-          { label: 'Recipes',            href: '/production/recipes',              icon: FlaskConical  },
-        ],
-      },
-      { label: 'Reports & Analytics',    href: '/plm/reports',                     icon: BarChart3     },
+      { label: 'Overview',               href: '/plm',                             icon: Gauge          },
+      { label: 'Change Requests',        href: '/plm/change-requests',             icon: GitPullRequest },
+      { label: 'Mfg. Processes',         href: '/production/processes',            icon: Workflow       },
+      { label: 'Bill of Materials',      href: '/inventory/bom',                   icon: GitMerge       },
+      { label: 'Recipes',                href: '/production/recipes',              icon: FlaskConical   },
+      { label: 'Design Studio',          href: '/plm/design',                      icon: Sparkles       },
+      { label: 'Reports & Analytics',    href: '/plm/reports',                     icon: BarChart3      },
     ],
   },
 
   // ═══════════════ PLANT & CONNECTIVITY ═══════════════
   { section: 'Plant & Connectivity', label: 'Plant & Connectivity' },
-  {
-    label: 'Energy',
-    icon: Zap,
-    children: [
-      { label: 'Overview',               href: '/energy',                          icon: Activity      },
-      { label: 'Reports & Analytics',    href: '/energy/reports',                  icon: BarChart3     },
-      { label: 'Meters',                 href: '/energy/meters',                   icon: Gauge         },
-    ],
-  },
+  { label: 'Energy Meters', href: '/energy/meters', icon: Zap },
   {
     label: 'IIoT & Connectivity',
     icon: Radio,
@@ -263,6 +230,8 @@ const navItems: NavItem[] = [
       { label: 'Overview',               href: '/reports',                         icon: Gauge         },
       { label: 'Report Builder',         href: '/reports/builder',                 icon: FileText      },
       { label: 'Production Reports',     href: '/reports/production',              icon: Factory       },
+      { label: 'Shift & Line Reports',   href: '/production/reports',              icon: Clock         },
+      { label: 'Manufacturing Reports',  href: '/manufacturing/reports',           icon: Cog           },
       { label: 'Quality Reports',        href: '/reports/quality',                 icon: ShieldCheck   },
       { label: 'Maintenance Reports',    href: '/reports/maintenance',             icon: Wrench        },
     ],

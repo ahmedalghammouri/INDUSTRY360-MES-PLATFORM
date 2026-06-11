@@ -354,7 +354,7 @@ export function ProductionSchedulingView() {
         <div>
           <h1 className="text-2xl font-bold">Production Scheduling</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            ISA-95 hierarchy — Production Orders → Work Orders, across all lines
+            Production Orders → Work Orders, across all lines
           </p>
         </div>
       </div>

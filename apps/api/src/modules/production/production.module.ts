@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ApsModule } from '../aps/aps.module';
 import { ProductionController } from './production.controller';
 import { ProductionService } from './production.service';
 import { OEEService } from './oee.service';
@@ -10,6 +11,7 @@ import { TraceabilityService } from './traceability.service';
 import { TraceabilityController } from './traceability.controller';
 
 @Module({
+  imports: [ApsModule],
   controllers: [ProductionController, DowntimeController, RecipeController, TraceabilityController],
   providers: [ProductionService, OEEService, DowntimeService, RecipeService, TraceabilityService],
   exports: [ProductionService, OEEService, DowntimeService, RecipeService, TraceabilityService],

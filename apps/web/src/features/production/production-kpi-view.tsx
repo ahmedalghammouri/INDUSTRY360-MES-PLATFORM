@@ -10,6 +10,7 @@ import {
   Factory,
   BarChart3,
   Gauge,
+  Download,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
@@ -375,27 +376,54 @@ export default function ProductionKpiView() {
           <div>
             <h1 className="text-lg font-bold">Production KPI Analytics</h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              ISA-95 MES — real-time KPI monitoring &amp; benchmarking
+              Real-time KPI monitoring &amp; benchmarking
             </p>
           </div>
         </div>
 
-        <Tabs
-          value={timeframe}
-          onValueChange={(v) => setTimeframe(v as Timeframe)}
-        >
-          <TabsList className="h-8">
-            <TabsTrigger value="today" className="text-xs px-3 h-7">
-              Today
-            </TabsTrigger>
-            <TabsTrigger value="week" className="text-xs px-3 h-7">
-              This Week
-            </TabsTrigger>
-            <TabsTrigger value="month" className="text-xs px-3 h-7">
-              This Month
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Tabs
+            value={timeframe}
+            onValueChange={(v) => setTimeframe(v as Timeframe)}
+          >
+            <TabsList className="h-8">
+              <TabsTrigger value="today" className="text-xs px-3 h-7">
+                Today
+              </TabsTrigger>
+              <TabsTrigger value="week" className="text-xs px-3 h-7">
+                This Week
+              </TabsTrigger>
+              <TabsTrigger value="month" className="text-xs px-3 h-7">
+                This Month
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button
+            variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
+            onClick={() => {
+              const recs = oeeRecords ?? [];
+              const rows = [
+                ['Date', 'Machine', 'OEE %', 'Availability %', 'Performance %', 'Quality %', 'Output'],
+                ...recs.map((r: any) => [
+                  (r.recordDate ?? r.createdAt ?? '').slice(0, 10),
+                  r.machine?.name ?? r.machineId ?? '—',
+                  (r.oee ?? 0).toFixed(1), (r.availability ?? 0).toFixed(1),
+                  (r.performance ?? 0).toFixed(1), (r.quality ?? 0).toFixed(1),
+                  r.totalOutput ?? 0,
+                ]),
+              ];
+              const blob = new Blob([rows.map(r => r.join(',')).join('\n')], { type: 'text/csv' });
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(blob);
+              a.download = `production-kpi-${timeframe}-${new Date().toISOString().slice(0, 10)}.csv`;
+              a.click();
+              URL.revokeObjectURL(a.href);
+            }}
+          >
+            <Download size={13} />
+            Export
+          </Button>
+        </div>
       </div>
 
       {/* Scrollable body */}

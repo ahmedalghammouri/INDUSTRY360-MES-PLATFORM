@@ -289,7 +289,7 @@ export default function ManufacturingKpiView() {
           <div>
             <h1 className="text-lg font-bold text-foreground">Manufacturing KPI Analytics</h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              ISA-95 OEE monitoring &amp; machine performance
+              OEE monitoring &amp; machine performance
             </p>
           </div>
         </div>

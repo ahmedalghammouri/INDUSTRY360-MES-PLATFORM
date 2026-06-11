@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { findProcessForSku, processCoveredSkusWhere } from '../../common/process-scope.util';
 import { type Prisma } from '@prisma/client';
 
 @Injectable()
@@ -443,14 +444,129 @@ export class InventoryService {
     const fid = factoryId ?? await this.getDefaultFactoryId();
     const where = { factoryId: fid, isActive: true };
     const order = [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }];
-    const [categories, brands, packagingTypes, baseUnits, baseWeights] = await Promise.all([
+    const [categories, brands, packagingTypes, baseUnits, baseWeights, units] = await Promise.all([
       this.prisma.productCategory.findMany({ where, orderBy: order }),
       this.prisma.productBrand.findMany({ where, orderBy: order }),
       this.prisma.packagingType.findMany({ where, orderBy: order }),
       this.prisma.baseUnit.findMany({ where, orderBy: order }),
       this.prisma.baseWeight.findMany({ where, orderBy: [{ value: 'asc' }] }),
+      this.prisma.unitOfMeasure.findMany({ where, orderBy: order }),
     ]);
-    return { categories, brands, packagingTypes, baseUnits, baseWeights };
+    return { categories, brands, packagingTypes, baseUnits, baseWeights, units };
+  }
+
+  /**
+   * Convert a quantity between two units of the SAME category via their
+   * canonical conversion factors (G → KG → TON …). PACKAGING units convert
+   * through the SKU ladder in production.service, not here.
+   */
+  async convertUom(factoryId: string | null, qty: number, fromCode: string, toCode: string) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const norm = (c: string) => (c || '').trim().toUpperCase();
+    const [from, to] = await Promise.all([
+      this.prisma.unitOfMeasure.findUnique({ where: { factoryId_code: { factoryId: fid, code: norm(fromCode) } } }),
+      this.prisma.unitOfMeasure.findUnique({ where: { factoryId_code: { factoryId: fid, code: norm(toCode) } } }),
+    ]);
+    if (!from || !to) throw new BadRequestException(`Unknown unit: ${!from ? fromCode : toCode}`);
+    if (from.category !== to.category) {
+      throw new BadRequestException(`Cannot convert ${from.code} (${from.category}) → ${to.code} (${to.category})`);
+    }
+    if (from.category === 'PACKAGING') {
+      throw new BadRequestException('PACKAGING units convert through the SKU packaging hierarchy (units per inner / carton / pallet)');
+    }
+    const result = (qty * from.conversionFactor) / to.conversionFactor;
+    return { qty, from: from.code, to: to.code, result: Number(result.toFixed(to.decimals)) };
+  }
+
+  /**
+   * Server-side auto-fetch for step input materials: a row linked to a raw
+   * material inherits code/name/unit (+ unified unitId) from the master, so the
+   * unit can never drift from the material record. Free-text rows resolve their
+   * unitId by code when one matches.
+   */
+  private async stepMaterialMapper(
+    factoryId: string,
+    steps?: Array<{ materials?: Array<{ rawMaterialId?: string; materialCode?: string; name: string; qtyPerOutputUnit: number; unit?: string }> }>,
+  ) {
+    const ids = Array.from(new Set(
+      (steps ?? []).flatMap((s) => (s.materials ?? []).map((m) => m.rawMaterialId).filter(Boolean)),
+    )) as string[];
+    const [masters, units] = await Promise.all([
+      ids.length
+        ? this.prisma.rawMaterial.findMany({
+            where: { id: { in: ids }, factoryId },
+            select: { id: true, code: true, name: true, unit: true, unitId: true },
+          })
+        : Promise.resolve([]),
+      this.prisma.unitOfMeasure.findMany({ where: { factoryId }, select: { id: true, code: true } }),
+    ]);
+    const byId = new Map(masters.map((m) => [m.id, m]));
+    const unitByCode = new Map(units.map((u) => [u.code, u.id]));
+    return (m: { rawMaterialId?: string; materialCode?: string; name: string; qtyPerOutputUnit: number; unit?: string }) => {
+      const master = m.rawMaterialId ? byId.get(m.rawMaterialId) : undefined;
+      const unit = master?.unit ?? m.unit ?? 'KG';
+      return {
+        rawMaterialId: master?.id ?? null,
+        materialCode: master?.code ?? m.materialCode ?? null,
+        name: master?.name ?? m.name,
+        qtyPerOutputUnit: m.qtyPerOutputUnit,
+        unit,
+        unitId: master?.unitId ?? unitByCode.get(unit.trim().toUpperCase()) ?? null,
+      };
+    };
+  }
+
+  /**
+   * Reverse of the legacy machine-from-workcenter heuristic: find the CELL
+   * work center that represents each step's default machine (name/code
+   * containment). The form now picks machines directly, but routing views and
+   * the downtime cascade still join on workCenterId — keep it auto-linked.
+   */
+  private async workCenterByMachineMap(
+    factoryId: string,
+    steps?: Array<{ machineId?: string | null; workCenterId?: string | null }>,
+  ): Promise<Map<string, string>> {
+    const ids = Array.from(new Set(
+      (steps ?? []).filter((s) => s.machineId && !s.workCenterId).map((s) => s.machineId!),
+    ));
+    const map = new Map<string, string>();
+    if (ids.length === 0) return map;
+    const [machines, wcs] = await Promise.all([
+      this.prisma.machine.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, code: true } }),
+      this.prisma.workCenter.findMany({ where: { factoryId, isActive: true }, select: { id: true, name: true, code: true } }),
+    ]);
+    for (const m of machines) {
+      const mName = m.name.toLowerCase();
+      const mCodeTail = m.code.replace(/^.*?-(M\d+)-?/i, '$1').toLowerCase();
+      const wc =
+        wcs.find((w) => w.name.toLowerCase().includes(mName)) ??
+        wcs.find((w) => mName.includes(w.name.replace(/\s+cell$/i, '').trim().toLowerCase())) ??
+        wcs.find((w) => mCodeTail && w.code.toLowerCase().includes(mCodeTail));
+      if (wc) map.set(m.id, wc.id);
+    }
+    return map;
+  }
+
+  /**
+   * Primary + alternative machine options for a step. The step's machineId is
+   * always the default (priority 0); alternatives keep their preference order.
+   */
+  private machineOptionRows(s: {
+    machineId?: string | null;
+    machineOptions?: Array<{ machineId: string; priority?: number; cycleTimeSec?: number; setupTimeMins?: number }>;
+  }) {
+    const rows: Array<{ machineId: string; priority: number; isDefault: boolean; cycleTimeSec: number | null; setupTimeMins: number | null }> = [];
+    if (s.machineId) rows.push({ machineId: s.machineId, priority: 0, isDefault: true, cycleTimeSec: null, setupTimeMins: null });
+    (s.machineOptions ?? [])
+      .filter((o) => o.machineId && o.machineId !== s.machineId)
+      .forEach((o, i) => rows.push({
+        machineId: o.machineId,
+        priority: o.priority ?? i + 1,
+        isDefault: false,
+        cycleTimeSec: o.cycleTimeSec ?? null,
+        setupTimeMins: o.setupTimeMins ?? null,
+      }));
+    return rows;
   }
 
   private masterDelegate(entity: string): { d: any; label: string } {
@@ -460,6 +576,7 @@ export class InventoryService {
       'packaging-types': { d: this.prisma.packagingType, label: 'Packaging type' },
       'base-units': { d: this.prisma.baseUnit, label: 'Base unit' },
       'base-weights': { d: this.prisma.baseWeight, label: 'Base weight' },
+      'units': { d: this.prisma.unitOfMeasure, label: 'Unit of measure' },
     };
     const found = map[entity];
     if (!found) throw new BadRequestException(`Unknown master-data entity: ${entity}`);
@@ -468,10 +585,33 @@ export class InventoryService {
 
   async createMasterItem(factoryId: string | null, entity: string, dto: {
     name?: string; nameAr?: string; code?: string; value?: number; unit?: string; sortOrder?: number;
+    category?: string; baseUnitCode?: string; conversionFactor?: number; decimals?: number;
   }) {
     const fid = factoryId ?? await this.getDefaultFactoryId();
     const { d, label } = this.masterDelegate(entity);
 
+    if (entity === 'units') {
+      const code = (dto.code ?? dto.name ?? '').trim().toUpperCase();
+      if (!code) throw new BadRequestException('Unit code is required');
+      const category = (dto.category ?? 'COUNT').toUpperCase();
+      return d.upsert({
+        where: { factoryId_code: { factoryId: fid, code } },
+        update: {
+          isActive: true,
+          ...(dto.name && { name: dto.name }),
+          ...(dto.nameAr !== undefined && { nameAr: dto.nameAr }),
+          ...(dto.category && { category }),
+          ...(dto.baseUnitCode !== undefined && { baseUnitCode: dto.baseUnitCode }),
+          ...(dto.conversionFactor !== undefined && { conversionFactor: dto.conversionFactor }),
+        },
+        create: {
+          factoryId: fid, code, name: dto.name ?? code, nameAr: dto.nameAr ?? null,
+          category, baseUnitCode: dto.baseUnitCode ?? null,
+          conversionFactor: dto.conversionFactor ?? 1, decimals: dto.decimals ?? 3,
+          sortOrder: dto.sortOrder ?? 0,
+        },
+      });
+    }
     if (entity === 'base-weights') {
       if (dto.value == null || dto.value <= 0) throw new BadRequestException('Base weight value is required');
       const unit = dto.unit ?? 'kg';
@@ -501,6 +641,7 @@ export class InventoryService {
 
   async updateMasterItem(factoryId: string | null, entity: string, id: string, dto: {
     name?: string; nameAr?: string; code?: string; value?: number; unit?: string; sortOrder?: number; isActive?: boolean;
+    category?: string; baseUnitCode?: string; conversionFactor?: number; decimals?: number;
   }) {
     const fid = factoryId ?? await this.getDefaultFactoryId();
     const { d, label } = this.masterDelegate(entity);
@@ -519,6 +660,15 @@ export class InventoryService {
       Object.assign(data,
         dto.code && { code: dto.code.trim().toUpperCase() },
         dto.name !== undefined && { name: dto.name });
+    } else if (entity === 'units') {
+      Object.assign(data,
+        dto.code && { code: dto.code.trim().toUpperCase() },
+        dto.name !== undefined && { name: dto.name },
+        dto.nameAr !== undefined && { nameAr: dto.nameAr },
+        dto.category && { category: dto.category.toUpperCase() },
+        dto.baseUnitCode !== undefined && { baseUnitCode: dto.baseUnitCode },
+        dto.conversionFactor !== undefined && { conversionFactor: dto.conversionFactor },
+        dto.decimals !== undefined && { decimals: dto.decimals });
     } else {
       Object.assign(data,
         dto.name && { name: dto.name.trim() },
@@ -532,12 +682,16 @@ export class InventoryService {
   async deleteMasterItem(factoryId: string | null, entity: string, id: string) {
     const fid = factoryId ?? await this.getDefaultFactoryId();
     const { d, label } = this.masterDelegate(entity);
-    const item = await d.findFirst({ where: { id, factoryId: fid }, include: { _count: { select: { skus: true } } } });
+    const usageSelect = entity === 'units'
+      ? { rawMaterials: true, bomItems: true, routingStepMaterials: true, materialLots: true }
+      : { skus: true };
+    const item = await d.findFirst({ where: { id, factoryId: fid }, include: { _count: { select: usageSelect } } });
     if (!item) throw new NotFoundException(`${label} not found`);
-    if (item._count.skus > 0) {
-      // In use → soft-disable so existing products keep their reference
+    const usedBy = Object.values(item._count as Record<string, number>).reduce((a, b) => a + b, 0);
+    if (usedBy > 0) {
+      // In use → soft-disable so existing records keep their reference
       await d.update({ where: { id }, data: { isActive: false } });
-      return { id, disabled: true, usedBy: item._count.skus };
+      return { id, disabled: true, usedBy };
     }
     await d.delete({ where: { id } });
     return { id, deleted: true };
@@ -555,6 +709,14 @@ export class InventoryService {
       await this.prisma.sKU.updateMany({ where: { baseUnitId: item.id }, data: { baseUnit: item.code } });
     } else if (entity === 'base-weights') {
       await this.prisma.sKU.updateMany({ where: { baseWeightId: item.id }, data: { weight: item.value, weightUnit: item.unit } });
+    } else if (entity === 'units') {
+      // Renaming a unit code propagates to every legacy text column referencing it
+      await Promise.all([
+        this.prisma.rawMaterial.updateMany({ where: { unitId: item.id }, data: { unit: item.code } }),
+        this.prisma.materialLot.updateMany({ where: { unitId: item.id }, data: { unit: item.code } }),
+        this.prisma.routingStepMaterial.updateMany({ where: { unitId: item.id }, data: { unit: item.code } }),
+        this.prisma.bOMItem.updateMany({ where: { unitId: item.id }, data: { unit: item.code } }),
+      ]);
     }
   }
 
@@ -795,10 +957,12 @@ export class InventoryService {
         where,
         include: {
           sku: { select: { id: true, code: true, name: true, itemNumber: true, category: true } },
+          process: { select: { id: true, name: true, version: true, scopeType: true } },
           _count: { select: { items: true } },
           items: {
             include: {
               rawMaterial: { select: { id: true, code: true, name: true, unit: true } },
+              routingStepRef: { select: { stepNumber: true, operationName: true } },
             },
             orderBy: { id: 'asc' },
           },
@@ -817,9 +981,11 @@ export class InventoryService {
       where: { id },
       include: {
         sku: { select: { id: true, code: true, name: true, itemNumber: true, category: true } },
+        process: { select: { id: true, name: true, version: true, scopeType: true } },
         items: {
           include: {
             rawMaterial: { select: { id: true, code: true, name: true, unit: true, unitCost: true } },
+            routingStepRef: { select: { stepNumber: true, operationName: true } },
           },
           orderBy: { id: 'asc' },
         },
@@ -956,6 +1122,456 @@ export class InventoryService {
   }
 
   // ────────────────────────────────────────────────────────────
+  // BOM ↔ PROCESS SMART LINKING
+  // Process = source of truth; the BOM is a derived summary of the
+  // routing-step materials, rolled up to per-1-finished-base-unit.
+  // ────────────────────────────────────────────────────────────
+
+  /** Pieces contained in 1 of the given packaging unit (exact, no rounding). */
+  private piecesPerUnit(unit: string, pkg: { unitsPerInner: number; innersPerCarton: number; cartonsPerPallet: number }): number {
+    const u = (unit || 'PIECE').toUpperCase();
+    const upi = Math.max(1, pkg.unitsPerInner);
+    const ipc = Math.max(1, pkg.innersPerCarton);
+    const cpp = Math.max(1, pkg.cartonsPerPallet);
+    if (u === 'INNER') return upi;
+    if (u === 'CARTON') return upi * ipc;
+    if (u === 'PALLET') return upi * ipc * cpp;
+    return 1; // PIECE / PCS / EA
+  }
+
+  /**
+   * Resolve the manufacturing process for a SKU by scope priority
+   * (PRODUCT → LIST → CATEGORY → BASE_WEIGHT) via the shared canonical util.
+   */
+  async resolveProcessForSku(factoryId: string | null, skuId: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const sku = await this.prisma.sKU.findFirst({ where: { id: skuId, ...factoryFilter }, select: { id: true } });
+    if (!sku) throw new NotFoundException('SKU not found');
+    const include = {
+      routingSteps: {
+        orderBy: { stepNumber: 'asc' as const },
+        include: { materials: true, machine: { select: { code: true, name: true } } },
+      },
+    } satisfies Prisma.ManufacturingProcessInclude;
+    return findProcessForSku<Prisma.ManufacturingProcessGetPayload<{ include: typeof include }>>(
+      this.prisma, factoryId, skuId, include,
+    );
+  }
+
+  /**
+   * Canonical covered-product list of a process — THE source for every consumer
+   * (BOM derivation, planning, JO generation, UI) that needs "which products
+   * does this routing apply to". Derived from the scope's product ids.
+   */
+  async getProcessProducts(factoryId: string | null, id: string) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const p = await this.prisma.manufacturingProcess.findFirst({
+      where: { id, factoryId: fid },
+      include: { skuLinks: { select: { skuId: true } } },
+    });
+    if (!p) throw new NotFoundException('Manufacturing process not found');
+
+    const products = await this.prisma.sKU.findMany({
+      where: processCoveredSkusWhere(p, fid),
+      select: {
+        id: true, itemNumber: true, code: true, name: true,
+        weight: true, weightUnit: true, baseUnit: true,
+        unitsPerInner: true, innersPerCarton: true, cartonsPerPallet: true,
+      },
+      orderBy: { itemNumber: 'asc' },
+    });
+    return { processId: p.id, name: p.name, version: p.version, scopeType: p.scopeType, count: products.length, products };
+  }
+
+  /**
+   * Derive a BOM from a manufacturing process: every routing-step material is
+   * rolled up to quantity per 1 finished base unit of the SKU (via the packaging
+   * ladder), grouped by raw material, each line remembering its source step.
+   */
+  async generateBomFromProcess(factoryId: string | null, userId: string, dto: { skuId: string; processId?: string; version?: string }) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const sku = await this.prisma.sKU.findFirst({ where: { id: dto.skuId, factoryId: fid } });
+    if (!sku) throw new NotFoundException('SKU not found');
+
+    const process = dto.processId
+      ? await this.prisma.manufacturingProcess.findFirst({
+          where: { id: dto.processId, factoryId: fid },
+          include: { routingSteps: { orderBy: { stepNumber: 'asc' }, include: { materials: true } } },
+        })
+      : await this.resolveProcessForSku(fid, dto.skuId);
+    if (!process) throw new BadRequestException('No manufacturing process found for this product — create one first or use the guided BOM flow.');
+    if (process.routingSteps.every((s) => s.materials.length === 0)) {
+      throw new BadRequestException(`Process '${process.name}' has no step input materials to derive a BOM from.`);
+    }
+
+    const pkg = { unitsPerInner: sku.unitsPerInner, innersPerCarton: sku.innersPerCarton, cartonsPerPallet: sku.cartonsPerPallet };
+    const basePieces = this.piecesPerUnit(sku.baseUnit, pkg);
+
+    // Roll up: qty per 1 SKU base unit = qtyPerOutputUnit × (step outUnits contained in 1 base unit)
+    const lines = new Map<string, { rawMaterialId: string; quantityPer: number; unit: string; unitId: string | null; routingStepId: string; steps: number[] }>();
+    const skipped: Array<{ name: string; step: number; reason: string }> = [];
+    for (const step of process.routingSteps) {
+      const outPieces = this.piecesPerUnit(step.outUnit ?? sku.baseUnit, pkg);
+      const outPerBase = basePieces / outPieces;
+      for (const m of step.materials) {
+        if (!m.rawMaterialId) {
+          skipped.push({ name: m.name, step: step.stepNumber, reason: 'free-text material (not linked to raw-materials master)' });
+          continue;
+        }
+        const qty = m.qtyPerOutputUnit * outPerBase;
+        const existing = lines.get(m.rawMaterialId);
+        if (existing) {
+          existing.quantityPer += qty;
+          existing.steps.push(step.stepNumber);
+        } else {
+          lines.set(m.rawMaterialId, {
+            rawMaterialId: m.rawMaterialId,
+            quantityPer: qty,
+            unit: m.unit,
+            unitId: m.unitId ?? null,
+            routingStepId: step.id,
+            steps: [step.stepNumber],
+          });
+        }
+      }
+    }
+    if (lines.size === 0) throw new BadRequestException('All step materials are free-text — link them to raw materials first.');
+
+    // Next free version for this SKU
+    let version = dto.version;
+    if (!version) {
+      const count = await this.prisma.bOMHeader.count({ where: { skuId: dto.skuId } });
+      version = `${count + 1}.0`;
+    }
+
+    const bom = await this.prisma.bOMHeader.create({
+      data: {
+        factoryId: fid,
+        skuId: dto.skuId,
+        version,
+        isActive: true,
+        processId: process.id,
+        sourceType: 'DERIVED_FROM_PROCESS',
+        isStale: false,
+        notes: `Derived from process '${process.name}' v${process.version} (${process.routingSteps.length} steps)`,
+        items: {
+          create: Array.from(lines.values()).map((l) => ({
+            rawMaterialId: l.rawMaterialId,
+            quantityPer: Math.round(l.quantityPer * 10000) / 10000,
+            unit: l.unit,
+            unitId: l.unitId,
+            routingStepId: l.routingStepId,
+            notes: `step${l.steps.length > 1 ? 's' : ''} ${l.steps.join(', ')}`,
+          })),
+        },
+      },
+      include: {
+        sku: { select: { id: true, code: true, name: true } },
+        process: { select: { id: true, name: true, version: true } },
+        items: { include: { rawMaterial: { select: { code: true, name: true, unit: true } }, routingStepRef: { select: { stepNumber: true, operationName: true } } } },
+      },
+    });
+    return { bom, skipped };
+  }
+
+  /**
+   * Guided flow inverse: generate a DRAFT manufacturing process from a manual BOM.
+   * Clones the steps of the closest scope-matched template process when one exists
+   * (materials distributed by category/name heuristic), otherwise creates a single
+   * "Production" step holding all materials. The BOM is back-linked DRAFT_FOR_PROCESS.
+   */
+  async generateProcessFromBom(factoryId: string | null, bomId: string) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const bom = await this.prisma.bOMHeader.findFirst({
+      where: { id: bomId, factoryId: fid },
+      include: { sku: true, items: { include: { rawMaterial: true } } },
+    });
+    if (!bom) throw new NotFoundException('BOM not found');
+    if (bom.processId) throw new BadRequestException('This BOM is already linked to a process.');
+    if (bom.items.length === 0) throw new BadRequestException('BOM has no items.');
+
+    const template = await this.resolveProcessForSku(fid, bom.skuId);
+    const pkg = { unitsPerInner: bom.sku.unitsPerInner, innersPerCarton: bom.sku.innersPerCarton, cartonsPerPallet: bom.sku.cartonsPerPallet };
+    const basePieces = this.piecesPerUnit(bom.sku.baseUnit, pkg);
+
+    // Which step should consume a material (category + name heuristic)
+    const stepFor = (rm: { category?: string | null; name: string }, operations: string[]): number => {
+      const hay = `${rm.category ?? ''} ${rm.name}`.toLowerCase();
+      const find = (re: RegExp) => operations.findIndex((op) => re.test(op.toLowerCase()));
+      let idx = -1;
+      if (/stretch|wrap/.test(hay)) idx = find(/wrap/);
+      else if (/pallet/.test(hay)) idx = find(/palletiz/);
+      else if (/carton|glue|box/.test(hay)) idx = find(/carton|pack/);
+      else if (/film|inner|bag/.test(hay)) idx = find(/fill/);
+      else if (/powder|raw|chemical|detergent/.test(hay)) idx = find(/fill|mix/);
+      return idx >= 0 ? idx : 0;
+    };
+
+    const existingVersions = await this.prisma.manufacturingProcess.count({ where: { skuId: bom.skuId } });
+    const version = `${existingVersions + 1}.0`;
+
+    const templateSteps = template?.routingSteps?.length
+      ? template.routingSteps.map((s) => ({
+          stepNumber: s.stepNumber,
+          operationName: s.operationName,
+          workCenter: s.workCenter,
+          workCenterId: s.workCenterId,
+          machineId: s.machineId,
+          cycleTimeSec: s.cycleTimeSec,
+          cycleTimeMins: s.cycleTimeMins,
+          setupTimeMins: s.setupTimeMins,
+          inUnit: s.inUnit,
+          outUnit: s.outUnit,
+        }))
+      : [{
+          stepNumber: 1, operationName: 'Production', workCenter: null as string | null, workCenterId: null as string | null,
+          machineId: null as string | null, cycleTimeSec: 60, cycleTimeMins: 1, setupTimeMins: null as number | null,
+          inUnit: 'PCS', outUnit: bom.sku.baseUnit,
+        }];
+    const operations = templateSteps.map((s) => s.operationName);
+
+    // Distribute BOM lines onto steps; convert per-base-unit qty → per-step-outUnit qty
+    const materialsByStep = new Map<number, Array<{ rawMaterialId: string; materialCode: string; name: string; qtyPerOutputUnit: number; unit: string; unitId: string | null }>>();
+    for (const item of bom.items) {
+      const idx = stepFor(item.rawMaterial, operations);
+      const step = templateSteps[idx];
+      const outPieces = this.piecesPerUnit(step.outUnit ?? bom.sku.baseUnit, pkg);
+      const qtyPerOut = item.quantityPer * (outPieces / basePieces);
+      const arr = materialsByStep.get(idx) ?? [];
+      arr.push({
+        rawMaterialId: item.rawMaterialId,
+        materialCode: item.rawMaterial.code,
+        name: item.rawMaterial.name,
+        qtyPerOutputUnit: Math.round(qtyPerOut * 10000) / 10000,
+        unit: item.unit,
+        unitId: item.unitId ?? item.rawMaterial.unitId ?? null,
+      });
+      materialsByStep.set(idx, arr);
+    }
+
+    const process = await this.prisma.manufacturingProcess.create({
+      data: {
+        factoryId: fid,
+        skuId: bom.skuId,
+        scopeType: 'PRODUCT',
+        version,
+        name: `${bom.sku.name} — Process (from BOM v${bom.version})`,
+        description: template
+          ? `Draft generated from BOM v${bom.version}; steps cloned from '${template.name}' v${template.version}. Review and activate.`
+          : `Draft generated from BOM v${bom.version}. Review steps, machines and cycle times, then activate.`,
+        isActive: false, // draft — must be reviewed/activated before scheduling picks it up
+        routingSteps: {
+          create: templateSteps.map((s, idx) => ({
+            stepNumber: s.stepNumber,
+            operationName: s.operationName,
+            workCenter: s.workCenter,
+            workCenterId: s.workCenterId,
+            machineId: s.machineId,
+            cycleTimeSec: s.cycleTimeSec,
+            cycleTimeMins: s.cycleTimeMins,
+            setupTimeMins: s.setupTimeMins,
+            inUnit: s.inUnit,
+            outUnit: s.outUnit,
+            ...(s.machineId && { machineOptions: { create: [{ machineId: s.machineId, priority: 0, isDefault: true }] } }),
+            ...(materialsByStep.get(idx)?.length && {
+              materials: { create: materialsByStep.get(idx)! },
+            }),
+          })),
+        },
+      },
+      include: { routingSteps: { orderBy: { stepNumber: 'asc' }, include: { materials: true } } },
+    });
+
+    await this.prisma.bOMHeader.update({
+      where: { id: bom.id },
+      data: { processId: process.id, sourceType: 'DRAFT_FOR_PROCESS', isStale: false },
+    });
+
+    return { process, linkedBom: { id: bom.id, version: bom.version } };
+  }
+
+  /**
+   * BOM-coverage report for a process: compares the union of its step materials
+   * against the SKU's active BOM — missing / extra / quantity deltas.
+   */
+  async processBomCoverage(factoryId: string | null, processId: string) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const process = await this.prisma.manufacturingProcess.findFirst({
+      where: { id: processId, factoryId: fid },
+      include: {
+        sku: true,
+        routingSteps: { orderBy: { stepNumber: 'asc' }, include: { materials: true } },
+      },
+    });
+    if (!process) throw new NotFoundException('Manufacturing process not found');
+
+    // Pick the reference SKU (direct, or first list member for list/scoped processes)
+    let sku = process.sku;
+    if (!sku) {
+      const link = await this.prisma.manufacturingProcessSku.findFirst({ where: { processId }, include: { sku: true } });
+      sku = link?.sku ?? null;
+      if (!sku && process.scopeType === 'CATEGORY' && process.categoryId) {
+        sku = await this.prisma.sKU.findFirst({ where: { categoryId: process.categoryId, factoryId: fid, isActive: true } });
+      }
+      if (!sku && process.scopeType === 'BASE_WEIGHT' && process.baseWeightId) {
+        sku = await this.prisma.sKU.findFirst({ where: { baseWeightId: process.baseWeightId, factoryId: fid, isActive: true } });
+      }
+    }
+    if (!sku) throw new BadRequestException('No SKU resolvable for this process scope');
+
+    const bom = await this.prisma.bOMHeader.findFirst({
+      where: { skuId: sku.id, isActive: true },
+      include: { items: { include: { rawMaterial: { select: { id: true, code: true, name: true } } } } },
+      orderBy: { version: 'desc' },
+    });
+
+    const pkg = { unitsPerInner: sku.unitsPerInner, innersPerCarton: sku.innersPerCarton, cartonsPerPallet: sku.cartonsPerPallet };
+    const basePieces = this.piecesPerUnit(sku.baseUnit, pkg);
+
+    // Process side rolled up per base unit
+    const procTotals = new Map<string, { qty: number; unit: string; name: string; steps: number[] }>();
+    const unlinked: Array<{ name: string; step: number }> = [];
+    for (const step of process.routingSteps) {
+      const outPieces = this.piecesPerUnit(step.outUnit ?? sku.baseUnit, pkg);
+      for (const m of step.materials) {
+        if (!m.rawMaterialId) { unlinked.push({ name: m.name, step: step.stepNumber }); continue; }
+        const qty = m.qtyPerOutputUnit * (basePieces / outPieces);
+        const cur = procTotals.get(m.rawMaterialId);
+        if (cur) { cur.qty += qty; cur.steps.push(step.stepNumber); }
+        else procTotals.set(m.rawMaterialId, { qty, unit: m.unit, name: m.name, steps: [step.stepNumber] });
+      }
+    }
+
+    const TOLERANCE = 0.02; // 2% qty drift allowed
+    const covered: any[] = [];
+    const missing: any[] = [];
+    const extra: any[] = [];
+    const qtyDeltas: any[] = [];
+
+    for (const item of bom?.items ?? []) {
+      const proc = procTotals.get(item.rawMaterialId);
+      if (!proc) {
+        missing.push({ rawMaterialId: item.rawMaterialId, code: item.rawMaterial.code, name: item.rawMaterial.name, bomQtyPer: item.quantityPer, unit: item.unit });
+      } else {
+        const delta = item.quantityPer > 0 ? (proc.qty - item.quantityPer) / item.quantityPer : 0;
+        if (Math.abs(delta) > TOLERANCE) {
+          qtyDeltas.push({ rawMaterialId: item.rawMaterialId, code: item.rawMaterial.code, name: item.rawMaterial.name, bomQtyPer: item.quantityPer, processQtyPer: Math.round(proc.qty * 10000) / 10000, deltaPct: Math.round(delta * 1000) / 10, unit: item.unit, steps: proc.steps });
+        } else {
+          covered.push({ rawMaterialId: item.rawMaterialId, code: item.rawMaterial.code, name: item.rawMaterial.name, qtyPer: item.quantityPer, unit: item.unit, steps: proc.steps });
+        }
+        procTotals.delete(item.rawMaterialId);
+      }
+    }
+    for (const [rmId, p] of procTotals) {
+      extra.push({ rawMaterialId: rmId, name: p.name, processQtyPer: Math.round(p.qty * 10000) / 10000, unit: p.unit, steps: p.steps });
+    }
+
+    return {
+      process: { id: process.id, name: process.name, version: process.version },
+      sku: { id: sku.id, code: sku.code, name: sku.name },
+      bom: bom ? { id: bom.id, version: bom.version, isStale: bom.isStale, sourceType: bom.sourceType } : null,
+      covered, missing, extra, qtyDeltas, unlinked,
+      ok: !!bom && missing.length === 0 && extra.length === 0 && qtyDeltas.length === 0 && unlinked.length === 0,
+    };
+  }
+
+  /**
+   * One-click allocation: distribute the SKU's active BOM items onto the process
+   * steps (category/name heuristic), converting per-base-unit → per-step-outUnit.
+   * Skips materials already present on any step; never removes existing rows.
+   */
+  async allocateProcessMaterialsFromBom(factoryId: string | null, processId: string) {
+    const fid = factoryId ?? await this.getDefaultFactoryId();
+    const coverage = await this.processBomCoverage(fid, processId);
+    if (!coverage.bom) throw new BadRequestException('No active BOM for this product — derive one first or create it.');
+    if (coverage.missing.length === 0) return { allocated: 0, message: 'Every BOM material is already allocated to a step.' };
+
+    const process = await this.prisma.manufacturingProcess.findFirst({
+      where: { id: processId, factoryId: fid },
+      include: { routingSteps: { orderBy: { stepNumber: 'asc' } } },
+    });
+    const sku = await this.prisma.sKU.findFirst({ where: { id: coverage.sku.id } });
+    if (!process || !sku) throw new NotFoundException('Process or SKU not found');
+
+    const pkg = { unitsPerInner: sku.unitsPerInner, innersPerCarton: sku.innersPerCarton, cartonsPerPallet: sku.cartonsPerPallet };
+    const basePieces = this.piecesPerUnit(sku.baseUnit, pkg);
+    const operations = process.routingSteps.map((s) => s.operationName);
+    const stepFor = (hay: string): number => {
+      const find = (re: RegExp) => operations.findIndex((op) => re.test(op.toLowerCase()));
+      const h = hay.toLowerCase();
+      let idx = -1;
+      if (/stretch|wrap/.test(h)) idx = find(/wrap/);
+      else if (/pallet/.test(h)) idx = find(/palletiz/);
+      else if (/carton|glue|box/.test(h)) idx = find(/carton|pack/);
+      else if (/film|inner|bag/.test(h)) idx = find(/fill/);
+      else if (/powder|raw|chemical|detergent/.test(h)) idx = find(/fill|mix/);
+      return idx >= 0 ? idx : 0;
+    };
+
+    let allocated = 0;
+    for (const miss of coverage.missing) {
+      const rm = await this.prisma.rawMaterial.findUnique({ where: { id: miss.rawMaterialId } });
+      if (!rm) continue;
+      const idx = stepFor(`${rm.category ?? ''} ${rm.name}`);
+      const step = process.routingSteps[idx];
+      const outPieces = this.piecesPerUnit(step.outUnit ?? sku.baseUnit, pkg);
+      await this.prisma.routingStepMaterial.create({
+        data: {
+          stepId: step.id,
+          rawMaterialId: rm.id,
+          materialCode: rm.code,
+          name: rm.name,
+          qtyPerOutputUnit: Math.round(miss.bomQtyPer * (outPieces / basePieces) * 10000) / 10000,
+          unit: miss.unit,
+          unitId: rm.unitId ?? null,
+        },
+      });
+      allocated++;
+    }
+    return { allocated, message: `${allocated} BOM material(s) allocated to steps — review quantities.` };
+  }
+
+  /**
+   * Process materials changed → derived BOMs become stale and an ECR is raised
+   * through the PLM workflow so the change is reviewed.
+   */
+  private async markDerivedBomsStale(processId: string, factoryId: string) {
+    try {
+      const linked = await this.prisma.bOMHeader.findMany({
+        where: { processId, sourceType: { in: ['DERIVED_FROM_PROCESS', 'DRAFT_FOR_PROCESS'] }, isStale: false },
+        select: { id: true, version: true, skuId: true, sku: { select: { name: true } } },
+      });
+      if (linked.length === 0) return;
+      await this.prisma.bOMHeader.updateMany({
+        where: { id: { in: linked.map((b) => b.id) } },
+        data: { isStale: true },
+      });
+      // Raise one BOM_CHANGE ECR per affected product (PLM numbering convention)
+      const year = new Date().getFullYear();
+      for (const b of linked) {
+        const count = await this.prisma.changeRequest.count({ where: { factoryId, crNumber: { startsWith: `ECR-${year}-` } } });
+        await this.prisma.changeRequest.create({
+          data: {
+            factoryId,
+            crNumber: `ECR-${year}-${String(count + 1).padStart(3, '0')}`,
+            title: `BOM v${b.version} stale — source process changed`,
+            description: `Routing-step materials of the linked manufacturing process were modified. Re-derive BOM v${b.version} (${b.sku?.name ?? b.skuId}) to stay in sync.`,
+            type: 'BOM_CHANGE',
+            status: 'SUBMITTED',
+            priority: 'MEDIUM',
+            skuId: b.skuId,
+            reason: 'Process is the source of truth; derived BOM summary no longer matches.',
+          },
+        });
+      }
+    } catch (err) {
+      // Staleness flagging is advisory — never block the process update
+      // eslint-disable-next-line no-console
+      console.error('markDerivedBomsStale failed', err);
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
   // MANUFACTURING PROCESSES
   // ────────────────────────────────────────────────────────────
 
@@ -980,11 +1596,22 @@ export class InventoryService {
           categoryRef: { select: { id: true, name: true } },
           baseWeightRef: { select: { id: true, value: true, unit: true, label: true } },
           skuLinks: { include: { sku: { select: { id: true, code: true, name: true } } } },
+          // Latest governance ECR — gates the Approve action in the UI
+          changeRequests: {
+            orderBy: { createdAt: 'desc' as const },
+            take: 1,
+            select: { id: true, crNumber: true, status: true },
+          },
           routingSteps: {
             include: {
               machine: { select: { code: true, name: true } },
               workCenterRef: { select: { id: true, code: true, name: true, level: true } },
               materials: true,
+              machineOptions: {
+                where: { isActive: true },
+                orderBy: { priority: 'asc' },
+                include: { machine: { select: { id: true, code: true, name: true } } },
+              },
               predecessors: {
                 include: { fromStep: { select: { id: true, stepNumber: true, operationName: true } } },
               },
@@ -998,7 +1625,15 @@ export class InventoryService {
       }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    // Covered-product count derived from each process's scope product ids
+    const withCounts = await Promise.all(data.map(async (p) => ({
+      ...p,
+      coveredSkuCount: await this.prisma.sKU.count({
+        where: processCoveredSkusWhere(p as any, p.factoryId),
+      }),
+    })));
+
+    return { data: withCounts, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async createProcess(factoryId: string, dto: {
@@ -1023,6 +1658,7 @@ export class InventoryService {
       inUnit?: string;
       outUnit?: string;
       materials?: Array<{ rawMaterialId?: string; materialCode?: string; name: string; qtyPerOutputUnit: number; unit?: string }>;
+      machineOptions?: Array<{ machineId: string; priority?: number; cycleTimeSec?: number; setupTimeMins?: number }>;
       description?: string;
       parameters?: Record<string, unknown>;
       isOptional?: boolean;
@@ -1031,6 +1667,8 @@ export class InventoryService {
   }) {
     const version = dto.version ?? '1.0';
     const scopeType = dto.scopeType ?? 'PRODUCT';
+    const mapMaterial = await this.stepMaterialMapper(factoryId, dto.steps);
+    const wcByMachine = await this.workCenterByMachineMap(factoryId, dto.steps);
 
     // Scope validation
     if (scopeType === 'PRODUCT' && !dto.skuId) throw new BadRequestException('skuId is required for PRODUCT scope');
@@ -1073,7 +1711,7 @@ export class InventoryService {
               stepNumber: s.stepNumber,
               operationName: s.operationName,
               workCenter: s.workCenter,
-              workCenterId: s.workCenterId ?? null,
+              workCenterId: s.workCenterId ?? (s.machineId ? wcByMachine.get(s.machineId) ?? null : null),
               machineId: s.machineId ?? null,
               cycleTimeSec: sec,
               cycleTimeMins: sec != null ? sec / 60 : null,
@@ -1084,15 +1722,10 @@ export class InventoryService {
               parameters: (s.parameters as any) ?? undefined,
               isOptional: s.isOptional ?? false,
               ...(s.materials?.length && {
-                materials: {
-                  create: s.materials.map((m) => ({
-                    rawMaterialId: m.rawMaterialId ?? null,
-                    materialCode: m.materialCode ?? null,
-                    name: m.name,
-                    qtyPerOutputUnit: m.qtyPerOutputUnit,
-                    unit: m.unit ?? 'KG',
-                  })),
-                },
+                materials: { create: s.materials.map(mapMaterial) },
+              }),
+              ...(this.machineOptionRows(s).length && {
+                machineOptions: { create: this.machineOptionRows(s) },
               }),
             };
           }),
@@ -1126,7 +1759,15 @@ export class InventoryService {
       await (this.prisma as any).stepDependency.createMany({ data: depData, skipDuplicates: true });
     }
 
-    return process;
+    // Governance: every new process raises a linked PROCESS_CHANGE ECR that
+    // must be approved before the process itself can be approved.
+    const cr = await this.raiseProcessChangeRequest(process.id, factoryId, {
+      skuId: process.skuId,
+      title: `New process '${process.name}' v${process.version} — awaiting approval`,
+      description: `Manufacturing process created with ${dto.steps.length} routing step(s). Review the routing, machines, unit flow and input materials, approve this change request, then approve the process.`,
+    });
+
+    return { ...process, changeRequest: cr };
   }
 
   async updateProcess(id: string, dto: {
@@ -1151,6 +1792,7 @@ export class InventoryService {
       inUnit?: string;
       outUnit?: string;
       materials?: Array<{ rawMaterialId?: string; materialCode?: string; name: string; qtyPerOutputUnit: number; unit?: string }>;
+      machineOptions?: Array<{ machineId: string; priority?: number; cycleTimeSec?: number; setupTimeMins?: number }>;
       description?: string;
       parameters?: Record<string, unknown>;
       isOptional?: boolean;
@@ -1161,6 +1803,8 @@ export class InventoryService {
     if (!p) throw new NotFoundException('Manufacturing process not found');
 
     const { steps, skuIds, scopeType, skuId, categoryId, baseWeightId, ...headerDto } = dto;
+    const mapMaterial = await this.stepMaterialMapper(p.factoryId, steps);
+    const wcByMachine = await this.workCenterByMachineMap(p.factoryId, steps);
 
     // Scope change handling
     const scopeData: Record<string, unknown> = {};
@@ -1185,6 +1829,10 @@ export class InventoryService {
     await this.prisma.manufacturingProcess.update({ where: { id }, data: { ...headerDto, ...scopeData } });
 
     if (steps && steps.length > 0) {
+      // Steps (and their materials) are being replaced → any BOM derived from
+      // this process is now stale; flag it and raise a BOM_CHANGE ECR.
+      await this.markDerivedBomsStale(id, p.factoryId);
+
       // Delete all existing steps (cascades to StepDependency via onDelete: Cascade)
       await this.prisma.routingStep.deleteMany({ where: { processId: id } });
 
@@ -1204,7 +1852,7 @@ export class InventoryService {
                 stepNumber: s.stepNumber,
                 operationName: s.operationName,
                 workCenter: s.workCenter,
-                workCenterId: s.workCenterId ?? null,
+                workCenterId: s.workCenterId ?? (s.machineId ? wcByMachine.get(s.machineId) ?? null : null),
                 machineId: s.machineId ?? null,
                 cycleTimeSec: sec,
                 cycleTimeMins: sec != null ? sec / 60 : null,
@@ -1215,15 +1863,10 @@ export class InventoryService {
                 parameters: (s.parameters as any) ?? undefined,
                 isOptional: s.isOptional ?? false,
                 ...(s.materials?.length && {
-                  materials: {
-                    create: s.materials.map((m) => ({
-                      rawMaterialId: m.rawMaterialId ?? null,
-                      materialCode: m.materialCode ?? null,
-                      name: m.name,
-                      qtyPerOutputUnit: m.qtyPerOutputUnit,
-                      unit: m.unit ?? 'KG',
-                    })),
-                  },
+                  materials: { create: s.materials.map(mapMaterial) },
+                }),
+                ...(this.machineOptionRows(s).length && {
+                  machineOptions: { create: this.machineOptionRows(s) },
                 }),
               };
             }),
@@ -1254,7 +1897,23 @@ export class InventoryService {
         await (this.prisma as any).stepDependency.createMany({ data: depData, skipDuplicates: true });
       }
 
-      return process;
+      // Governance: editing routing steps requires a fresh approval cycle —
+      // raise a linked PROCESS_CHANGE ECR and (if previously approved) revert
+      // the process to draft until the ECR and the process are re-approved.
+      const wasApproved = !!p.approvedAt;
+      if (wasApproved) {
+        await this.prisma.manufacturingProcess.update({
+          where: { id },
+          data: { approvedAt: null, approvedById: null },
+        });
+      }
+      const cr = await this.raiseProcessChangeRequest(id, p.factoryId, {
+        skuId: p.skuId,
+        title: `Process '${p.name}' v${p.version} modified — awaiting re-approval`,
+        description: `Routing steps were replaced (${steps.length} step(s)).${wasApproved ? ' The process was approved and has been reverted to draft.' : ''} Approve this change request, then re-approve the process — its product BOMs will regenerate automatically.`,
+      });
+
+      return { ...process, ...(wasApproved && { approvedAt: null }), changeRequest: cr };
     }
 
     return this.prisma.manufacturingProcess.findUnique({
@@ -1266,19 +1925,135 @@ export class InventoryService {
     });
   }
 
+  /** Linked PROCESS_CHANGE ECR (SUBMITTED) — the approval gate for the process. */
+  private async raiseProcessChangeRequest(
+    processId: string,
+    factoryId: string,
+    info: { skuId?: string | null; title: string; description: string },
+  ) {
+    try {
+      const year = new Date().getFullYear();
+      const count = await this.prisma.changeRequest.count({
+        where: { factoryId, crNumber: { startsWith: `ECR-${year}-` } },
+      });
+      return await this.prisma.changeRequest.create({
+        data: {
+          factoryId,
+          crNumber: `ECR-${year}-${String(count + 1).padStart(3, '0')}`,
+          title: info.title,
+          description: info.description,
+          type: 'PROCESS_CHANGE',
+          status: 'SUBMITTED',
+          priority: 'MEDIUM',
+          skuId: info.skuId ?? null,
+          processId,
+          reason: 'Process create/update governance — routing changes require PLM review.',
+        },
+      });
+    } catch (err) {
+      // Governance bookkeeping must never block saving the process itself
+      // eslint-disable-next-line no-console
+      console.error('raiseProcessChangeRequest failed', err);
+      return null;
+    }
+  }
+
   async approveProcess(id: string, userId: string) {
     const p = await this.prisma.manufacturingProcess.findUnique({ where: { id } });
     if (!p) throw new NotFoundException('Manufacturing process not found');
 
-    await this.prisma.manufacturingProcess.updateMany({
-      where: { skuId: p.skuId, id: { not: id } },
-      data: { isActive: false },
+    // Gate: the latest linked PROCESS_CHANGE ECR must be approved first
+    const latestCr = await this.prisma.changeRequest.findFirst({
+      where: { processId: id, type: 'PROCESS_CHANGE' },
+      orderBy: { createdAt: 'desc' },
     });
+    if (latestCr && ['DRAFT', 'SUBMITTED', 'UNDER_REVIEW'].includes(latestCr.status)) {
+      throw new BadRequestException(
+        `Change request ${latestCr.crNumber} is still ${latestCr.status.replace('_', ' ').toLowerCase()} — approve it in PLM › Change Requests first.`,
+      );
+    }
+    if (latestCr && latestCr.status === 'REJECTED') {
+      throw new BadRequestException(
+        `Change request ${latestCr.crNumber} was rejected — revise the process (a new ECR will be raised) before approving.`,
+      );
+    }
 
-    return this.prisma.manufacturingProcess.update({
+    // Deactivate only COMPETING versions (same scope target) — never sibling
+    // scoped processes (e.g. approving the 2 Kg routing must not touch 1.5 Kg).
+    const competingWhere =
+      p.scopeType === 'PRODUCT' && p.skuId ? { scopeType: p.scopeType, skuId: p.skuId }
+      : p.scopeType === 'CATEGORY' && p.categoryId ? { scopeType: p.scopeType, categoryId: p.categoryId }
+      : p.scopeType === 'BASE_WEIGHT' && p.baseWeightId ? { scopeType: p.scopeType, baseWeightId: p.baseWeightId }
+      : null;
+    if (competingWhere) {
+      await this.prisma.manufacturingProcess.updateMany({
+        where: { ...competingWhere, id: { not: id } },
+        data: { isActive: false },
+      });
+    }
+
+    const approved = await this.prisma.manufacturingProcess.update({
       where: { id },
       data: { approvedAt: new Date(), approvedById: userId, isActive: true },
     });
+
+    // Close the loop: mark the approved ECR implemented
+    if (latestCr && latestCr.status === 'APPROVED') {
+      await this.prisma.changeRequest.update({
+        where: { id: latestCr.id },
+        data: { status: 'IMPLEMENTED', implementedAt: new Date() },
+      });
+    }
+
+    // Auto-regenerate (and auto-approve) the BOM of every covered product
+    const boms = await this.regenerateBomsForProcess(id, userId);
+
+    return { ...approved, regeneratedBoms: boms };
+  }
+
+  /**
+   * Derive a fresh, approved BOM for every product the process covers —
+   * called automatically on process approval so BOMs never drift from the
+   * approved routing. Per-product failures (e.g. free-text-only materials)
+   * are reported, never thrown.
+   */
+  private async regenerateBomsForProcess(processId: string, userId: string) {
+    const results: Array<{ skuId: string; itemNumber: string; bomVersion?: string; error?: string }> = [];
+    try {
+      const p = await this.prisma.manufacturingProcess.findUnique({
+        where: { id: processId },
+        include: { skuLinks: { select: { skuId: true } }, routingSteps: { include: { materials: true } } },
+      });
+      if (!p) return results;
+      if (p.routingSteps.every((s) => s.materials.length === 0)) return results; // nothing to derive
+
+      const products = await this.prisma.sKU.findMany({
+        where: processCoveredSkusWhere(p, p.factoryId),
+        select: { id: true, itemNumber: true },
+      });
+
+      for (const sku of products) {
+        try {
+          const { bom } = await this.generateBomFromProcess(p.factoryId, userId, { skuId: sku.id, processId });
+          // The routing is approved → its derived BOM summary is too
+          await this.prisma.bOMHeader.updateMany({
+            where: { skuId: sku.id, id: { not: bom.id } },
+            data: { isActive: false },
+          });
+          await this.prisma.bOMHeader.update({
+            where: { id: bom.id },
+            data: { approvedAt: new Date(), approvedById: userId, isActive: true },
+          });
+          results.push({ skuId: sku.id, itemNumber: sku.itemNumber, bomVersion: bom.version });
+        } catch (err: any) {
+          results.push({ skuId: sku.id, itemNumber: sku.itemNumber, error: err?.message ?? 'derivation failed' });
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('regenerateBomsForProcess failed', err);
+    }
+    return results;
   }
 
   async revertToDraft(id: string) {

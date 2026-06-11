@@ -7,6 +7,7 @@ import {
   Plus, Search, ChevronDown, ChevronRight, CheckCircle2,
   Workflow, Clock, X, FileCheck2, Pencil, Trash2,
   ArrowRight, Timer, Info, Link2, MoreVertical, RotateCcw, GripVertical,
+  Box, Boxes, Package, Layers, MoveRight, Wand2, FlaskConical, Lock, FileClock,
 } from 'lucide-react';
 import { api } from '@/services/api.client';
 import { Button } from '@/components/ui/button';
@@ -18,7 +19,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { useSortedData } from '@/lib/use-sorted-data';
-import { WorkCenterPicker } from '@/components/ui/workcenter-picker';
+import { MachinePicker } from '@/components/ui/machine-picker';
 import { useProductMasterData } from '@/components/ui/master-data-select';
 
 // ── Types ─────────────────────────────────────────────────────
@@ -44,6 +45,8 @@ interface StepForm {
   operationName: string;
   workCenterId: string;
   workCenterName: string;
+  machineId: string;        // primary/default machine — auto-assignment prefers it when idle
+  altMachineIds: string[];  // ready-to-use alternatives, in preference order
   cycleTimeSec: string;   // seconds per ONE output unit — THE reference for JO cycle/duration
   setupTimeMins: string;
   inUnit: string;         // consumed unit (PCS/INNER/CARTON/PALLET)
@@ -54,6 +57,178 @@ interface StepForm {
 }
 
 const FLOW_UNITS = ['PCS', 'INNER', 'CARTON', 'PALLET'] as const;
+
+const UNIT_META: Record<string, { icon: React.ElementType; label: string }> = {
+  PCS: { icon: Box, label: 'Piece' },
+  INNER: { icon: Package, label: 'Inner bag' },
+  CARTON: { icon: Boxes, label: 'Carton' },
+  PALLET: { icon: Layers, label: 'Pallet' },
+};
+
+interface RawMaterialOpt {
+  id: string;
+  code: string;
+  name: string;
+  unit: string;
+  category?: string | null;
+  currentStock?: number;
+}
+
+/** Searchable raw-material combobox for step input materials (code + name + unit + stock). */
+function MaterialCombobox({
+  materials,
+  value,
+  onSelect,
+}: {
+  materials: RawMaterialOpt[];
+  value: string; // rawMaterialId or '' (free text)
+  onSelect: (m: RawMaterialOpt | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const ddRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const selected = materials.find(m => m.id === value) ?? null;
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? materials.filter(m => m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+    : materials;
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!wrapRef.current?.contains(t) && !ddRef.current?.contains(t)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 300) });
+    }
+    setOpen(o => !o);
+  };
+
+  return (
+    <div ref={wrapRef} className="relative w-full">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        className={cn(
+          'w-full h-7 px-2 flex items-center gap-1.5 rounded-md border bg-background text-xs text-left transition-colors',
+          'hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary',
+          open && 'ring-1 ring-primary border-primary/50',
+        )}
+      >
+        <FlaskConical size={11} className={selected ? 'text-emerald-400 shrink-0' : 'text-muted-foreground/50 shrink-0'} />
+        <span className={cn('flex-1 truncate', !selected && 'text-muted-foreground')}>
+          {selected ? <><span className="font-mono text-muted-foreground">{selected.code}</span> — {selected.name}</> : 'Search material… (or free text)'}
+        </span>
+        {selected && (
+          <span onClick={e => { e.stopPropagation(); onSelect(null); }} className="p-0.5 rounded hover:bg-muted">
+            <X size={10} />
+          </span>
+        )}
+        <ChevronDown size={11} className="shrink-0 text-muted-foreground" />
+      </button>
+
+      {open && pos && (
+        <div
+          ref={ddRef}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
+          className="rounded-lg border bg-background shadow-xl"
+        >
+          <div className="p-1.5 border-b">
+            <div className="relative">
+              <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                autoFocus
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search by code or name…"
+                className="w-full h-7 pl-6 pr-2 text-xs rounded-md border bg-muted/50 outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          </div>
+          <div className="p-1 max-h-56 overflow-y-auto">
+            <div
+              onClick={() => { onSelect(null); setOpen(false); setSearch(''); }}
+              className="flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer text-xs text-muted-foreground hover:bg-muted"
+            >
+              <Pencil size={10} /> Free text (not in raw-materials master)
+            </div>
+            {filtered.length === 0 ? (
+              <div className="text-xs text-muted-foreground text-center py-3">No materials match “{search}”</div>
+            ) : filtered.map(m => (
+              <div
+                key={m.id}
+                onClick={() => { onSelect(m); setOpen(false); setSearch(''); }}
+                className={cn(
+                  'flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer text-xs hover:bg-muted',
+                  value === m.id && 'bg-primary text-primary-foreground',
+                )}
+              >
+                <span className={cn('font-mono shrink-0', value === m.id ? 'text-primary-foreground/80' : 'text-muted-foreground')}>{m.code}</span>
+                <span className="flex-1 truncate font-medium">{m.name}</span>
+                {m.currentStock != null && (
+                  <span className={cn('text-[10px] tabular-nums shrink-0', value === m.id ? 'text-primary-foreground/70' : m.currentStock > 0 ? 'text-emerald-400' : 'text-muted-foreground/50')}>
+                    {m.currentStock.toLocaleString()} {m.unit}
+                  </span>
+                )}
+                <Badge variant="outline" className={cn('text-[9px] h-4 shrink-0', value === m.id && 'border-primary-foreground/40 text-primary-foreground')}>{m.unit}</Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Box-style packaging-unit selector ("Auto" + PCS/INNER/CARTON/PALLET). */
+function UnitBoxGroup({
+  value,
+  onChange,
+  autoHint,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  autoHint: string;
+}) {
+  const options = ['', ...FLOW_UNITS];
+  return (
+    <div className="flex gap-1">
+      {options.map(u => {
+        const meta = UNIT_META[u];
+        const Icon = meta?.icon ?? Wand2;
+        const active = value === u;
+        return (
+          <button
+            key={u || 'auto'}
+            type="button"
+            onClick={() => onChange(u)}
+            title={u ? meta!.label : autoHint}
+            className={cn(
+              'flex flex-col items-center justify-center gap-0.5 w-[52px] h-11 rounded-lg border text-[9px] font-semibold tracking-wide transition-all',
+              active
+                ? 'border-primary bg-primary/15 text-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.35)]'
+                : 'border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground',
+            )}
+          >
+            <Icon size={14} />
+            {u || 'AUTO'}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 type ProcessScope = 'PRODUCT' | 'CATEGORY' | 'BASE_WEIGHT' | 'PRODUCT_LIST';
 
@@ -86,12 +261,14 @@ interface RoutingStep {
   workCenter?: string;
   workCenterId?: string;
   workCenterRef?: { id: string; code: string; name: string; level: string };
+  machineId?: string | null;
   cycleTimeSec?: number;
   cycleTimeMins?: number;
   setupTimeMins?: number;
   inUnit?: string | null;
   outUnit?: string | null;
   materials?: Array<{ id: string; rawMaterialId: string | null; materialCode: string | null; name: string; qtyPerOutputUnit: number; unit: string }>;
+  machineOptions?: Array<{ machineId: string; priority: number; isDefault: boolean; machine: { id: string; code: string; name: string } }>;
   description?: string;
   isOptional: boolean;
   machine?: { code: string; name: string };
@@ -112,6 +289,8 @@ interface ManufacturingProcess {
   categoryRef?: { id: string; name: string } | null;
   baseWeightRef?: { id: string; value: number; unit: string; label: string | null } | null;
   skuLinks?: Array<{ sku: { id: string; code: string; name: string } }>;
+  coveredSkuCount?: number;
+  changeRequests?: Array<{ id: string; crNumber: string; status: string }>;
   routingSteps: RoutingStep[];
 }
 
@@ -146,6 +325,8 @@ const EMPTY_STEP = (): StepForm => ({
   operationName: '',
   workCenterId: '',
   workCenterName: '',
+  machineId: '',
+  altMachineIds: [],
   cycleTimeSec: '',
   setupTimeMins: '',
   inUnit: '',
@@ -158,7 +339,7 @@ const EMPTY_STEP = (): StepForm => ({
 // ── PDM Layout ────────────────────────────────────────────────
 
 const BOX_W = 168;
-const BOX_H = 90;
+const BOX_H = 104;
 const COL_GAP = 72;
 const ROW_GAP = 20;
 const PAD = 16;
@@ -346,11 +527,33 @@ function PdmDiagram({ steps }: { steps: RoutingStep[] }) {
                 {(step.cycleTimeSec != null || step.cycleTimeMins != null) && step.setupTimeMins != null ? '  ' : ''}
                 {step.setupTimeMins != null && step.setupTimeMins > 0 ? `⚙ ${step.setupTimeMins}m setup` : ''}
               </text>
+              {/* Unit flow + materials + alternative machines */}
+              <text x={pos.x + 10} y={pos.y + 80} fontSize="9" fontWeight="600" fill="#7dd3fc" fontFamily="monospace">
+                {step.inUnit || step.outUnit
+                  ? `${step.inUnit ?? '·'} → ${step.outUnit ?? '·'}`
+                  : ''}
+              </text>
+              {(step.materials?.length ?? 0) > 0 && (
+                <>
+                  <rect x={pos.x + 10} y={pos.y + 86} width="46" height="12" rx="4" fill="#1e3a2f" />
+                  <text x={pos.x + 33} y={pos.y + 95} textAnchor="middle" fontSize="8" fill="#6ee7b7">
+                    🧪 {step.materials!.length} input{step.materials!.length > 1 ? 's' : ''}
+                  </text>
+                </>
+              )}
+              {(step.machineOptions?.filter(o => !o.isDefault).length ?? 0) > 0 && (
+                <>
+                  <rect x={pos.x + 60} y={pos.y + 86} width="36" height="12" rx="4" fill="#312e51" />
+                  <text x={pos.x + 78} y={pos.y + 95} textAnchor="middle" fontSize="8" fill="#a5b4fc">
+                    ⎇ {step.machineOptions!.filter(o => !o.isDefault).length} alt
+                  </text>
+                </>
+              )}
               {/* Optional badge */}
               {step.isOptional && (
                 <>
-                  <rect x={pos.x + BOX_W - 48} y={pos.y + 72} width="40" height="12" rx="4" fill="#374151" />
-                  <text x={pos.x + BOX_W - 28} y={pos.y + 81} textAnchor="middle" fontSize="8" fill="#9ca3af">Optional</text>
+                  <rect x={pos.x + BOX_W - 48} y={pos.y + 86} width="40" height="12" rx="4" fill="#374151" />
+                  <text x={pos.x + BOX_W - 28} y={pos.y + 95} textAnchor="middle" fontSize="8" fill="#9ca3af">Optional</text>
                 </>
               )}
               {/* Description tooltip indicator */}
@@ -413,8 +616,7 @@ function ProcessForm({
     queryFn: () => api.get('/inventory/raw-materials?limit=200'),
     staleTime: 120_000,
   });
-  const rawMaterials: Array<{ id: string; code: string; name: string; unit: string }> =
-    ((rawMatData as any)?.data ?? []);
+  const rawMaterials: RawMaterialOpt[] = ((rawMatData as any)?.data ?? []);
 
   // Drag state
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -602,6 +804,48 @@ function ProcessForm({
               <Input value={newProcess.version} onChange={e => setNewProcess(p => ({ ...p, version: e.target.value }))} placeholder="1.0" className="h-8 text-sm" />
             </div>
           </div>
+
+          {/* Covered products — resolved live from the scope's product ids.
+              This same list is what BOM derivation / planning / JO generation use. */}
+          {(() => {
+            const covered: any[] =
+              newProcess.scopeType === 'PRODUCT' ? skus.filter((s: any) => s.id === newProcess.skuId)
+              : newProcess.scopeType === 'CATEGORY' ? skus.filter((s: any) => s.categoryId === newProcess.categoryId)
+              : newProcess.scopeType === 'BASE_WEIGHT' ? skus.filter((s: any) => s.baseWeightId === newProcess.baseWeightId)
+              : skus.filter((s: any) => newProcess.skuIds.includes(s.id));
+            const hasScope =
+              newProcess.scopeType === 'PRODUCT' ? !!newProcess.skuId
+              : newProcess.scopeType === 'CATEGORY' ? !!newProcess.categoryId
+              : newProcess.scopeType === 'BASE_WEIGHT' ? !!newProcess.baseWeightId
+              : newProcess.skuIds.length > 0;
+            if (!hasScope) return null;
+            return (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Boxes size={13} className="text-primary" />
+                  <span className="text-xs font-semibold">
+                    Applies to {covered.length} product{covered.length !== 1 ? 's' : ''}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    — BOM, planning &amp; work-order generation resolve this routing for exactly these products
+                  </span>
+                </div>
+                {covered.length === 0 ? (
+                  <p className="text-[11px] text-amber-400">No active product matches this scope yet.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                    {covered.map((s: any) => (
+                      <Badge key={s.id} variant="outline" className="text-[10px] h-5 font-normal bg-background">
+                        <span className="font-mono text-muted-foreground mr-1">{s.itemNumber}</span>
+                        {s.name.length > 34 ? s.name.slice(0, 33) + '…' : s.name}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="flex flex-col gap-1.5">
             <Label>Process Name *</Label>
             <Input value={newProcess.name} onChange={e => setNewProcess(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Standard Production Routing — Line 1" className="h-8 text-sm" />
@@ -645,10 +889,14 @@ function ProcessForm({
                           {COMMON_OPERATIONS.map(op => <SelectItem key={op} value={op}>{op}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                      <WorkCenterPicker
-                        value={step.workCenterId || null}
-                        onChange={(id, node) => updateStep(i, { workCenterId: id ?? '', workCenterName: node?.name ?? '' })}
-                        placeholder="Work center..."
+                      <MachinePicker
+                        value={step.machineId || null}
+                        excludeIds={step.altMachineIds.filter(Boolean)}
+                        placeholder="Default machine..."
+                        onChange={id => updateStep(i, {
+                          machineId: id ?? '',
+                          altMachineIds: step.altMachineIds.filter(x => x !== id),
+                        })}
                         className="h-7 text-xs"
                       />
                     </div>
@@ -679,29 +927,76 @@ function ProcessForm({
                   </div>
 
                   {/* Unit flow — drives qty conversion + duration in scheduling */}
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[10px] text-muted-foreground">In unit (consumes)</span>
-                      <select
-                        className="h-7 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                        value={step.inUnit}
-                        onChange={e => updateStep(i, { inUnit: e.target.value })}
-                      >
-                        <option value="">— auto (previous step) —</option>
-                        {FLOW_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                      </select>
+                  <div className="mt-2 rounded-lg border border-border/50 bg-muted/20 p-2">
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                      Unit flow <span className="normal-case font-normal">(qty conversion + duration in scheduling)</span>
+                    </span>
+                    <div className="flex items-end gap-3 flex-wrap mt-1.5">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[9px] text-muted-foreground uppercase tracking-wide">In — consumes</span>
+                        <UnitBoxGroup
+                          value={step.inUnit}
+                          onChange={v => updateStep(i, { inUnit: v })}
+                          autoHint="Auto — previous step's output unit"
+                        />
+                      </div>
+                      <MoveRight size={18} className="text-primary/60 shrink-0 mb-3" />
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[9px] text-muted-foreground uppercase tracking-wide">Out — produces (cycle / 1 unit)</span>
+                        <UnitBoxGroup
+                          value={step.outUnit}
+                          onChange={v => updateStep(i, { outUnit: v })}
+                          autoHint="Auto — inferred from the operation"
+                        />
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[10px] text-muted-foreground">Out unit (produces · cycle is per 1)</span>
-                      <select
-                        className="h-7 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                        value={step.outUnit}
-                        onChange={e => updateStep(i, { outUnit: e.target.value })}
+                  </div>
+
+                  {/* Alternative machines — the default is the picker next to Operation;
+                      auto-assignment uses an alternative when the default is busy. */}
+                  <div className="mt-2 rounded-lg border border-border/50 bg-muted/20 p-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                        Alternative machines <span className="normal-case font-normal">(used when the default is busy)</span>
+                      </span>
+                      <Button
+                        size="sm" variant="ghost" className="h-5 px-1.5 text-[10px]"
+                        disabled={!step.machineId}
+                        title={step.machineId ? undefined : 'Pick the default machine first (next to the operation)'}
+                        onClick={() => updateStep(i, { altMachineIds: [...step.altMachineIds, ''] })}
                       >
-                        <option value="">— auto —</option>
-                        {FLOW_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                      </select>
+                        <Plus size={10} className="mr-0.5" />Add alternative
+                      </Button>
                     </div>
+                    {step.altMachineIds.length === 0 && (
+                      <p className="text-[10px] text-muted-foreground/60 px-1">
+                        {step.machineId
+                          ? 'No alternatives — jobs always wait for the default machine.'
+                          : 'Pick the default machine next to the operation, then add ready-to-use alternatives here.'}
+                      </p>
+                    )}
+                    {step.altMachineIds.map((altId, ai) => (
+                      <div key={ai} className="flex items-center gap-1.5 mb-1">
+                        <Badge variant="outline" className="h-7 px-1.5 text-[9px] shrink-0 text-muted-foreground">ALT {ai + 1}</Badge>
+                        <MachinePicker
+                          className="flex-1"
+                          value={altId || null}
+                          excludeIds={[step.machineId, ...step.altMachineIds.filter(x => x && x !== altId)].filter(Boolean)}
+                          placeholder="Select alternative machine..."
+                          onChange={id => {
+                            const next = [...step.altMachineIds];
+                            next[ai] = id ?? '';
+                            updateStep(i, { altMachineIds: next });
+                          }}
+                        />
+                        <button
+                          className="p-1 text-muted-foreground hover:text-red-400"
+                          onClick={() => updateStep(i, { altMachineIds: step.altMachineIds.filter((_, x) => x !== ai) })}
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ))}
                   </div>
 
                   {/* Input raw materials — feed Traceability & Genealogy on completion */}
@@ -719,44 +1014,65 @@ function ProcessForm({
                     </div>
                     {step.materials.length === 0 ? (
                       <p className="text-[10px] text-muted-foreground/60 px-1">No input materials for this step.</p>
-                    ) : step.materials.map((mat, mi) => (
-                      <div key={mi} className="flex items-center gap-1.5 mb-1">
-                        <select
-                          className="h-7 flex-[2] rounded-md border border-input bg-background px-2 text-xs focus:outline-none"
-                          value={mat.rawMaterialId}
-                          onChange={e => {
-                            const rm = rawMaterials.find(r => r.id === e.target.value);
-                            const next = [...step.materials];
-                            next[mi] = { ...mat, rawMaterialId: e.target.value, name: rm?.name ?? mat.name, unit: rm?.unit ?? mat.unit };
-                            updateStep(i, { materials: next });
-                          }}
-                        >
-                          <option value="">— free text —</option>
-                          {rawMaterials.map(r => <option key={r.id} value={r.id}>{r.code} — {r.name}</option>)}
-                        </select>
-                        <Input
-                          value={mat.name} placeholder="Material name"
-                          onChange={e => { const next = [...step.materials]; next[mi] = { ...mat, name: e.target.value }; updateStep(i, { materials: next }); }}
-                          className="h-7 flex-[2] text-xs" disabled={!!mat.rawMaterialId}
-                        />
-                        <Input
-                          type="number" min="0" step="0.001" value={mat.qty} placeholder="Qty"
-                          onChange={e => { const next = [...step.materials]; next[mi] = { ...mat, qty: e.target.value }; updateStep(i, { materials: next }); }}
-                          className="h-7 w-20 text-xs"
-                        />
-                        <Input
-                          value={mat.unit} placeholder="Unit"
-                          onChange={e => { const next = [...step.materials]; next[mi] = { ...mat, unit: e.target.value }; updateStep(i, { materials: next }); }}
-                          className="h-7 w-14 text-xs"
-                        />
-                        <button
-                          className="p-1 text-muted-foreground hover:text-red-400"
-                          onClick={() => updateStep(i, { materials: step.materials.filter((_, x) => x !== mi) })}
-                        >
-                          <X size={11} />
-                        </button>
-                      </div>
-                    ))}
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1.5 px-0.5 mb-1 text-[9px] uppercase tracking-wide text-muted-foreground/70">
+                          <span className="flex-[3]">Material</span>
+                          <span className="w-24 text-right">Qty / 1 {step.outUnit || 'out-unit'}</span>
+                          <span className="w-16 text-center">Unit</span>
+                          <span className="w-5" />
+                        </div>
+                        {step.materials.map((mat, mi) => (
+                          <div key={mi} className="flex items-center gap-1.5 mb-1">
+                            <div className={cn('min-w-0', mat.rawMaterialId ? 'flex-[3]' : 'flex-[1.4]')}>
+                              <MaterialCombobox
+                                materials={rawMaterials}
+                                value={mat.rawMaterialId}
+                                onSelect={rm => {
+                                  const next = [...step.materials];
+                                  next[mi] = rm
+                                    ? { ...mat, rawMaterialId: rm.id, name: rm.name, unit: rm.unit.toUpperCase() }
+                                    : { ...mat, rawMaterialId: '' };
+                                  updateStep(i, { materials: next });
+                                }}
+                              />
+                            </div>
+                            {!mat.rawMaterialId && (
+                              <Input
+                                value={mat.name} placeholder="Free-text material name"
+                                onChange={e => { const next = [...step.materials]; next[mi] = { ...mat, name: e.target.value }; updateStep(i, { materials: next }); }}
+                                className="h-7 flex-[1.6] text-xs"
+                              />
+                            )}
+                            <Input
+                              type="number" min="0" step="0.001" value={mat.qty} placeholder="0.000"
+                              onChange={e => { const next = [...step.materials]; next[mi] = { ...mat, qty: e.target.value }; updateStep(i, { materials: next }); }}
+                              className="h-7 w-24 text-xs text-right tabular-nums"
+                            />
+                            {mat.rawMaterialId ? (
+                              <div
+                                className="h-7 w-16 flex items-center justify-center gap-1 rounded-md border border-input bg-muted/40 text-[10px] font-medium text-muted-foreground"
+                                title="Unit comes from the raw-material master (unified UoM)"
+                              >
+                                <Lock size={8} />{mat.unit}
+                              </div>
+                            ) : (
+                              <Input
+                                value={mat.unit} placeholder="Unit"
+                                onChange={e => { const next = [...step.materials]; next[mi] = { ...mat, unit: e.target.value }; updateStep(i, { materials: next }); }}
+                                className="h-7 w-16 text-xs text-center"
+                              />
+                            )}
+                            <button
+                              className="p-1 text-muted-foreground hover:text-red-400"
+                              onClick={() => updateStep(i, { materials: step.materials.filter((_, x) => x !== mi) })}
+                            >
+                              <X size={11} />
+                            </button>
+                          </div>
+                        ))}
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -957,6 +1273,11 @@ export function ManufacturingProcessesView() {
       operationName: s.operationName,
       workCenterId: s.workCenterId ?? s.workCenterRef?.id ?? '',
       workCenterName: s.workCenterRef?.name ?? s.workCenter ?? '',
+      machineId: (s.machineOptions ?? []).find(o => o.isDefault)?.machineId ?? s.machineId ?? '',
+      altMachineIds: (s.machineOptions ?? [])
+        .filter(o => !o.isDefault)
+        .sort((a, b) => a.priority - b.priority)
+        .map(o => o.machineId),
       cycleTimeSec: String(s.cycleTimeSec ?? (s.cycleTimeMins != null ? s.cycleTimeMins * 60 : '')),
       setupTimeMins: String(s.setupTimeMins ?? ''),
       inUnit: s.inUnit ?? '',
@@ -987,6 +1308,10 @@ export function ManufacturingProcessesView() {
       operationName: s.operationName,
       workCenterId: s.workCenterId || undefined,
       workCenter: s.workCenterName || undefined,
+      machineId: s.machineId || undefined,
+      machineOptions: s.altMachineIds
+        .filter(Boolean)
+        .map((machineId, ai) => ({ machineId, priority: ai + 1 })),
       cycleTimeSec: parseFloat(s.cycleTimeSec || '0') || undefined,
       setupTimeMins: parseFloat(s.setupTimeMins || '0') || undefined,
       inUnit: s.inUnit || undefined,
@@ -1245,6 +1570,11 @@ function ProcessCard({ process, isExpanded, onToggle, onApprove, onEdit, onDelet
                 {process.scopeType === 'CATEGORY' ? 'Category scope' : process.scopeType === 'BASE_WEIGHT' ? 'Weight scope' : 'Product list'}
               </Badge>
             )}
+            {process.coveredSkuCount != null && (
+              <Badge variant="outline" className="text-[10px] h-4 text-emerald-400 border-emerald-500/30" title="Products this routing applies to (resolved from the scope) — used by BOM, planning and work-order generation">
+                <Boxes size={8} className="mr-1" />{process.coveredSkuCount} product{process.coveredSkuCount !== 1 ? 's' : ''}
+              </Badge>
+            )}
             <Badge variant="outline" className="text-[10px] h-4">v{process.version}</Badge>
             {process.approvedAt ? (
               <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
@@ -1253,6 +1583,32 @@ function ProcessCard({ process, isExpanded, onToggle, onApprove, onEdit, onDelet
             ) : (
               <Badge variant="outline" className="text-[10px] h-4 text-amber-500 border-amber-500/30">Draft</Badge>
             )}
+            {(() => {
+              const cr = process.changeRequests?.[0];
+              if (!cr) return null;
+              if (['DRAFT', 'SUBMITTED', 'UNDER_REVIEW'].includes(cr.status)) {
+                return (
+                  <Badge variant="outline" className="text-[10px] h-4 text-amber-400 border-amber-500/40" title="Approve this change request in PLM › Change Requests, then approve the process">
+                    <FileClock size={8} className="mr-1" />{cr.crNumber} awaiting PLM approval
+                  </Badge>
+                );
+              }
+              if (cr.status === 'APPROVED') {
+                return (
+                  <Badge variant="outline" className="text-[10px] h-4 text-emerald-400 border-emerald-500/40" title="The change request is approved — the process can now be approved (BOMs regenerate automatically)">
+                    <FileCheck2 size={8} className="mr-1" />{cr.crNumber} approved — ready
+                  </Badge>
+                );
+              }
+              if (cr.status === 'REJECTED') {
+                return (
+                  <Badge variant="outline" className="text-[10px] h-4 text-red-400 border-red-500/40" title="The change request was rejected — revise the process to raise a new one">
+                    <X size={8} className="mr-1" />{cr.crNumber} rejected
+                  </Badge>
+                );
+              }
+              return null;
+            })()}
             {hasParallel && (
               <Badge variant="outline" className="text-[10px] h-4 text-violet-400 border-violet-500/30">Parallel steps</Badge>
             )}
@@ -1264,11 +1620,22 @@ function ProcessCard({ process, isExpanded, onToggle, onApprove, onEdit, onDelet
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-          {!process.approvedAt && (
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onApprove}>
-              <FileCheck2 size={12} className="mr-1" />Approve
-            </Button>
-          )}
+          {!process.approvedAt && (() => {
+            const cr = process.changeRequests?.[0];
+            const gated = !!cr && ['DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'REJECTED'].includes(cr.status);
+            return (
+              <Button
+                size="sm" variant="outline" className="h-7 text-xs"
+                disabled={gated}
+                title={gated
+                  ? `${cr!.crNumber} must be approved in PLM › Change Requests first`
+                  : 'Approve the process — the BOM of every covered product regenerates automatically'}
+                onClick={onApprove}
+              >
+                <FileCheck2 size={12} className="mr-1" />Approve
+              </Button>
+            );
+          })()}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7">

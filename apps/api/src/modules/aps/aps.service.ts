@@ -89,8 +89,17 @@ export class ApsService {
     const fid = this.requireFactory(factoryId);
     const horizon = dto.startFrom ? new Date(dto.startFrom).getTime() : Date.now();
 
-    const jobs = await this.loadOpenJobs(fid);
-    if (jobs.length === 0) throw new BadRequestException('No open operations to schedule. Release work orders first.');
+    const allJobs = await this.loadOpenJobs(fid);
+    // Scoped mode: recalculate ONE work order only — every other open job keeps
+    // its plan and its window pre-occupies the machine.
+    const jobs = dto.workOrderId ? allJobs.filter((j) => j.workOrderId === dto.workOrderId) : allJobs;
+    if (jobs.length === 0) {
+      throw new BadRequestException(
+        dto.workOrderId
+          ? 'This work order has no open operations to schedule.'
+          : 'No open operations to schedule. Release work orders first.',
+      );
+    }
 
     // Group operations by work order, ordered by priority → due date.
     const byWo = new Map<string, JOWithRefs[]>();
@@ -108,39 +117,107 @@ export class ApsService {
     });
 
     const machineFree = new Map<string, number>(); // next free instant per machine
+    if (dto.workOrderId) {
+      for (const j of allJobs) {
+        if (j.workOrderId === dto.workOrderId || !j.machineId || !j.plannedEnd) continue;
+        const e = +j.plannedEnd;
+        if (e > horizon) machineFree.set(j.machineId, Math.max(machineFree.get(j.machineId) ?? horizon, e));
+      }
+    }
     const jobStart = new Map<string, number>();      // computed start per operation
     const jobEnd = new Map<string, number>();        // computed end per operation
     const updates: { id: string; start: number; end: number }[] = [];
 
     for (const woJobs of woOrder) {
-      // Within a WO, follow the routing sequence so precedence is naturally respected.
       const ops = woJobs.sort((a, b) => a.sequenceOrder - b.sequenceOrder);
-      for (const jo of ops) {
-        const mId = jo.machineId!;
-        const dur = this.durationMs(jo);
-        const lag = (jo.predecessorLagMins ?? 0) * 60_000;
+      const opById = new Map(ops.map((o) => [o.id, o]));
 
-        // Earliest start from the typed dependency (FS default).
-        let depEarliest = horizon;
-        if (jo.predecessorId) {
-          const pStart = jobStart.get(jo.predecessorId) ?? horizon;
-          const pEnd = jobEnd.get(jo.predecessorId) ?? horizon;
-          switch (jo.predecessorType) {
-            case DependencyType.START_TO_START:   depEarliest = pStart + lag; break;
-            case DependencyType.FINISH_TO_FINISH: depEarliest = pEnd + lag - dur; break;
-            case DependencyType.START_TO_FINISH:  depEarliest = pStart + lag - dur; break;
-            case DependencyType.FINISH_TO_START:
-            default:                              depEarliest = pEnd + lag; break;
+      // ── SS components: ops chained by START_TO_START form ONE synchronized
+      // line — they all start together and all end at the bottleneck end
+      // (the slowest member dictates the line speed).
+      const parent = new Map<string, string>();
+      const find = (x: string): string => {
+        let r = x;
+        while (parent.get(r) !== r) r = parent.get(r)!;
+        let c = x;
+        while (parent.get(c) !== c) { const n = parent.get(c)!; parent.set(c, r); c = n; }
+        return r;
+      };
+      for (const o of ops) parent.set(o.id, o.id);
+      for (const o of ops) {
+        if (o.predecessorId && o.predecessorType === DependencyType.START_TO_START && opById.has(o.predecessorId)) {
+          parent.set(find(o.id), find(o.predecessorId));
+        }
+      }
+      const comps = new Map<string, JOWithRefs[]>();
+      for (const o of ops) {
+        const r = find(o.id);
+        if (!comps.has(r)) comps.set(r, []);
+        comps.get(r)!.push(o);
+      }
+      const compList = [...comps.values()].sort(
+        (a, b) => Math.min(...a.map((o) => o.sequenceOrder)) - Math.min(...b.map((o) => o.sequenceOrder)),
+      );
+
+      for (const comp of compList) {
+        // SS-lag offset of each member relative to the component anchor
+        const offset = new Map<string, number>();
+        for (const m of comp) {
+          if (!(m.predecessorId && m.predecessorType === DependencyType.START_TO_START && opById.has(m.predecessorId))) {
+            offset.set(m.id, 0); // anchor
           }
         }
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const m of comp) {
+            if (offset.has(m.id)) continue;
+            const po = offset.get(m.predecessorId!);
+            if (po !== undefined) {
+              offset.set(m.id, po + (m.predecessorLagMins ?? 0) * 60_000);
+              changed = true;
+            }
+          }
+        }
+        for (const m of comp) if (!offset.has(m.id)) offset.set(m.id, 0);
 
-        const mFree = machineFree.get(mId) ?? horizon;
-        const start = Math.max(depEarliest, mFree, horizon);
-        const end = start + dur;
-        machineFree.set(mId, end);
-        jobStart.set(jo.id, start);
-        jobEnd.set(jo.id, end);
-        updates.push({ id: jo.id, start, end });
+        // Group start: every member's external constraints must hold at
+        // (groupStart + its offset) — cross-WO machine windows included.
+        let groupStart = horizon;
+        for (const m of comp) {
+          const off = offset.get(m.id)!;
+          const dur = this.durationMs(m);
+          let extEarliest = horizon;
+          if (m.predecessorId && m.predecessorType !== DependencyType.START_TO_START) {
+            const lag = (m.predecessorLagMins ?? 0) * 60_000;
+            const pStart = jobStart.get(m.predecessorId) ?? horizon;
+            const pEnd = jobEnd.get(m.predecessorId) ?? horizon;
+            switch (m.predecessorType) {
+              case DependencyType.FINISH_TO_FINISH: extEarliest = pEnd + lag - dur; break;
+              case DependencyType.START_TO_FINISH:  extEarliest = pStart + lag - dur; break;
+              case DependencyType.FINISH_TO_START:
+              default:                              extEarliest = pEnd + lag; break;
+            }
+          }
+          const mFree = machineFree.get(m.machineId!) ?? horizon;
+          groupStart = Math.max(groupStart, extEarliest - off, mFree - off);
+        }
+
+        // Bottleneck end: the longest member stretches the whole line —
+        // shorter SS members hold their machine until the line stops.
+        let groupEnd = groupStart;
+        for (const m of comp) {
+          groupEnd = Math.max(groupEnd, groupStart + offset.get(m.id)! + this.durationMs(m));
+        }
+
+        for (const m of comp) {
+          const s = groupStart + offset.get(m.id)!;
+          const e = comp.length > 1 ? groupEnd : s + this.durationMs(m);
+          jobStart.set(m.id, s);
+          jobEnd.set(m.id, e);
+          machineFree.set(m.machineId!, e);
+          updates.push({ id: m.id, start: s, end: e });
+        }
       }
     }
 
@@ -153,7 +230,7 @@ export class ApsService {
       ),
     );
 
-    return { scheduled: updates.length, ...this.metricsFrom(jobs, jobEnd, horizon) };
+    return { scheduled: updates.length, scopedToWorkOrder: dto.workOrderId ?? null, ...this.metricsFrom(jobs, jobEnd, horizon) };
   }
 
   /** Aggregate schedule KPIs from computed ends. */

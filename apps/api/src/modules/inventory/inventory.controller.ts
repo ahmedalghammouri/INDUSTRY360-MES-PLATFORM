@@ -240,6 +240,20 @@ export class InventoryController {
     return this.inventoryService.deleteMasterItem(user.factoryId, entity, id);
   }
 
+  @Get('uom/convert')
+  @ApiOperation({ summary: 'Convert a quantity between two units of the same category (unified UoM module)' })
+  @ApiQuery({ name: 'qty', required: true })
+  @ApiQuery({ name: 'from', required: true })
+  @ApiQuery({ name: 'to', required: true })
+  async convertUom(
+    @CurrentUser() user: RequestUser,
+    @Query('qty') qty: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    return this.inventoryService.convertUom(user.factoryId, parseFloat(qty), from, to);
+  }
+
   // ────────────────────────────────────────────────────────────
   // RAW MATERIALS
   // ────────────────────────────────────────────────────────────
@@ -418,10 +432,84 @@ export class InventoryController {
     });
   }
 
+  @Get('bom/resolve-process')
+  @ApiOperation({ summary: 'Find the manufacturing process a BOM would derive from (scope chain: product → list → category → base weight)' })
+  @ApiQuery({ name: 'skuId', required: true })
+  async resolveProcessForBom(
+    @CurrentUser() user: RequestUser,
+    @Query('skuId', ParseUUIDPipe) skuId: string,
+  ) {
+    const process = await this.inventoryService.resolveProcessForSku(user.factoryId, skuId);
+    if (!process) return { found: false, process: null };
+    return {
+      found: true,
+      process: {
+        id: process.id,
+        name: process.name,
+        version: process.version,
+        scopeType: process.scopeType,
+        steps: process.routingSteps.map((s) => ({
+          stepNumber: s.stepNumber,
+          operationName: s.operationName,
+          outUnit: s.outUnit,
+          materials: s.materials.length,
+        })),
+        totalMaterials: process.routingSteps.reduce((n, s) => n + s.materials.length, 0),
+      },
+    };
+  }
+
   @Get('bom/:id')
   @ApiOperation({ summary: 'Get BOM by ID with all items' })
   async getBOMById(@Param('id', ParseUUIDPipe) id: string) {
     return this.inventoryService.getBOMById(id);
+  }
+
+  @Post('bom/generate-from-process')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Derive a BOM from a manufacturing process (smart linking — BOM = process summary)' })
+  async generateBomFromProcess(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: { skuId: string; processId?: string; version?: string },
+  ) {
+    return this.inventoryService.generateBomFromProcess(user.factoryId, user.id, dto);
+  }
+
+  @Post('bom/:id/generate-process')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Generate a DRAFT manufacturing process from a manual BOM (guided flow inverse)' })
+  async generateProcessFromBom(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.generateProcessFromBom(user.factoryId, id);
+  }
+
+  @Get('manufacturing-processes/:id/products')
+  @ApiOperation({ summary: 'Canonical covered-product list of a process (resolved from its scope product ids)' })
+  async getProcessProducts(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.getProcessProducts(user.factoryId, id);
+  }
+
+  @Get('processes/:id/bom-coverage')
+  @ApiOperation({ summary: 'Compare process step materials against the active BOM (covered / missing / extra / qty deltas)' })
+  async processBomCoverage(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.processBomCoverage(user.factoryId, id);
+  }
+
+  @Post('processes/:id/allocate-from-bom')
+  @ApiOperation({ summary: 'Distribute unallocated BOM items onto routing steps (category heuristic)' })
+  async allocateFromBom(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inventoryService.allocateProcessMaterialsFromBom(user.factoryId, id);
   }
 
   @Post('bom')

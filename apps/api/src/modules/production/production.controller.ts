@@ -497,6 +497,15 @@ export class ProductionController {
     return this.productionService.getJobOrders(user.factoryId, id);
   }
 
+  @Get('work-orders/:id/machine-recommendations')
+  @ApiOperation({ summary: 'Per-step machine candidates ranked by earliest finish (default vs ready alternatives)' })
+  async machineRecommendations(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.recommendMachines(user.factoryId, id);
+  }
+
   @Post('work-orders/:id/job-orders/generate')
   @RequirePermissions('production:manage')
   @AuditLog('JOB_ORDERS_GENERATE')

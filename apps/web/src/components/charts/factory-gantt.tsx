@@ -154,7 +154,8 @@ export function FactoryGantt({
 
   const hasTree = !!tree && tree.length > 0;
   const [viewMode, setViewMode] = useState<'resource' | 'tree'>(hasTree ? 'tree' : 'resource');
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Collapsed by default: a node only expands when its id is in `expanded`.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showLinks, setShowLinks] = useState(true);
   const [showShading, setShowShading] = useState(true);
   const [hiddenOrders, setHiddenOrders] = useState<Set<string>>(new Set());
@@ -232,13 +233,13 @@ export function FactoryGantt({
           rows.push({ key: `n:${n.id}`, label: n.label, sub: n.sub, depth, kind: 'leaf', taskId: n.taskId, nodeId: n.id, taskIds: allTasks });
         } else {
           rows.push({ key: `n:${n.id}`, label: n.label, sub: n.sub, depth, kind: 'group', nodeId: n.id, hasChildren: kids.length > 0, taskIds: allTasks });
-          if (!collapsed.has(n.id)) walk(kids, depth + 1);
+          if (expanded.has(n.id)) walk(kids, depth + 1);
         }
       }
     };
     walk(tree!, 0);
     return rows;
-  }, [viewMode, hasTree, tree, resources, hiddenResources, visibleTasks, visibleTaskIds, collapsed]);
+  }, [viewMode, hasTree, tree, resources, hiddenResources, visibleTasks, visibleTaskIds, expanded]);
 
   // Layout
   const hasSupply = supply.length > 0;
@@ -374,7 +375,22 @@ export function FactoryGantt({
     next.has(key) ? next.delete(key) : next.add(key);
     setter(next);
   };
-  const toggleCollapse = (nodeId: string) => toggleSet(collapsed, nodeId, setCollapsed);
+  const toggleCollapse = (nodeId: string) => toggleSet(expanded, nodeId, setExpanded);
+
+  // All group node ids (for expand-all / collapse-all)
+  const allGroupIds = useMemo(() => {
+    const ids: string[] = [];
+    const walk = (nodes: GanttTreeNode[]) => {
+      for (const n of nodes) {
+        if (!n.taskId && (n.children ?? []).length > 0) ids.push(n.id);
+        walk(n.children ?? []);
+      }
+    };
+    if (hasTree) walk(tree!);
+    return ids;
+  }, [hasTree, tree]);
+  const expandAll = () => setExpanded(new Set(allGroupIds));
+  const collapseAll = () => setExpanded(new Set());
 
   const rowIcon = (r: FlatRow): React.ElementType => {
     if (r.kind === 'resource') return Cpu;
@@ -416,6 +432,16 @@ export function FactoryGantt({
                 <DropdownMenuCheckboxItem checked={viewMode === 'resource'} onCheckedChange={() => setViewMode('resource')} className="text-xs">
                   <Cpu size={12} className="mr-1.5" /> Machines
                 </DropdownMenuCheckboxItem>
+                {viewMode === 'tree' && (
+                  <>
+                    <DropdownMenuItem onClick={expandAll} className="text-xs">
+                      <ChevronDown size={12} className="mr-1.5" /> Expand all
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={collapseAll} className="text-xs">
+                      <ChevronRight size={12} className="mr-1.5" /> Collapse all
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
               </>
             )}
@@ -531,7 +557,7 @@ export function FactoryGantt({
                   style={{ top: rowY.get(r.key), height: ROW_H, paddingLeft: 8 + r.depth * 16 }}>
                   {r.kind === 'group' ? (
                     <button onClick={() => toggleCollapse(r.nodeId!)} className="w-4 h-4 flex items-center justify-center shrink-0 hover:bg-muted rounded">
-                      {collapsed.has(r.nodeId!) ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                      {expanded.has(r.nodeId!) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     </button>
                   ) : (
                     <span className="w-4 shrink-0" />

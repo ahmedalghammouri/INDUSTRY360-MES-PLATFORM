@@ -64,7 +64,7 @@ model Factory {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  enterprise             Enterprise           @relation(fields: [enterpriseId], references: [id])
+  enterprise             Enterprise             @relation(fields: [enterpriseId], references: [id])
   areas                  Area[]
   productionLines        ProductionLine[]
   machines               Machine[]
@@ -75,6 +75,7 @@ model Factory {
   packagingTypes         PackagingType[]
   baseUnits              BaseUnit[]
   baseWeights            BaseWeight[]
+  unitsOfMeasure         UnitOfMeasure[]
   changeRequests         ChangeRequest[]
   shifts                 ShiftTemplate[]
   shiftInstances         ShiftInstance[]
@@ -160,18 +161,18 @@ enum AreaType {
 // ============================================================
 
 model ProductionLine {
-  id          String       @id @default(uuid())
+  id          String   @id @default(uuid())
   factoryId   String
   areaId      String
   code        String
   name        String
   nameAr      String?
-  type        LineType     @default(PACKING)
+  type        LineType @default(PACKING)
   description String?
-  isActive    Boolean      @default(true)
-  sortOrder   Int          @default(0)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   factory        Factory         @relation(fields: [factoryId], references: [id])
   area           Area            @relation(fields: [areaId], references: [id])
@@ -199,57 +200,58 @@ enum LineType {
 // ============================================================
 
 model Machine {
-  id               String          @id @default(uuid())
-  factoryId        String
-  areaId           String?
-  lineId           String?
-  code             String
-  name             String
-  nameAr           String?
-  sortOrder        Int             @default(0)
-  machineType      MachineType     @default(MACHINE)
-  manufacturer     String?
-  model            String?
-  serialNumber     String?
-  installDate      DateTime?
-  warrantyExpiry   DateTime?
-  criticality      Criticality     @default(MEDIUM)
-  designCapacity   Float?          // units per hour
-  downtimeThreshold Int            @default(60) // seconds before classifying as downtime
-  isActive         Boolean         @default(true)
-  metadata         Json?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  id                String      @id @default(uuid())
+  factoryId         String
+  areaId            String?
+  lineId            String?
+  code              String
+  name              String
+  nameAr            String?
+  sortOrder         Int         @default(0)
+  machineType       MachineType @default(MACHINE)
+  manufacturer      String?
+  model             String?
+  serialNumber      String?
+  installDate       DateTime?
+  warrantyExpiry    DateTime?
+  criticality       Criticality @default(MEDIUM)
+  designCapacity    Float? // units per hour
+  downtimeThreshold Int         @default(60) // seconds before classifying as downtime
+  isActive          Boolean     @default(true)
+  metadata          Json?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
-  factory            Factory              @relation(fields: [factoryId], references: [id])
-  area               Area?                @relation(fields: [areaId], references: [id])
-  line               ProductionLine?      @relation(fields: [lineId], references: [id])
-  currentStatus      MachineCurrentStatus?
-  modules            MachineModule[]
-  cycleTimes         MachineCycleTime[]
-  downtimeCauses     DowntimeCause[]
-  stateRecords       MachineStateRecord[]
-  downtimeEvents     DowntimeEvent[]
-  oeeRecords         OEERecord[]
-  workOrders         WorkOrder[]
-  maintenanceWOs     MaintenanceWO[]
-  pmPlans            PMPlan[]
-  pmTasks            PMTask[]
-  runtimeHours       MachineRuntimeHours[]
-  failureModes       FailureMode[]
-  inspectionResults  InspectionResult[]
-  spcMeasurements    SPCMeasurement[]
-  devices            Device[]
-  tagDefinitions     TagDefinition[]
-  alarmEvents        AlarmEvent[]
-  energyMeters       EnergyMeter[]
-  routingSteps       RoutingStep[]
-  jobOrders          JobOrder[]
+  factory           Factory                    @relation(fields: [factoryId], references: [id])
+  area              Area?                      @relation(fields: [areaId], references: [id])
+  line              ProductionLine?            @relation(fields: [lineId], references: [id])
+  currentStatus     MachineCurrentStatus?
+  modules           MachineModule[]
+  cycleTimes        MachineCycleTime[]
+  downtimeCauses    DowntimeCause[]
+  stateRecords      MachineStateRecord[]
+  downtimeEvents    DowntimeEvent[]
+  oeeRecords        OEERecord[]
+  workOrders        WorkOrder[]
+  maintenanceWOs    MaintenanceWO[]
+  pmPlans           PMPlan[]
+  pmTasks           PMTask[]
+  runtimeHours      MachineRuntimeHours[]
+  failureModes      FailureMode[]
+  inspectionResults InspectionResult[]
+  spcMeasurements   SPCMeasurement[]
+  devices           Device[]
+  tagDefinitions    TagDefinition[]
+  alarmEvents       AlarmEvent[]
+  energyMeters      EnergyMeter[]
+  routingSteps      RoutingStep[]
+  jobOrders         JobOrder[]
+  stepOptions       RoutingStepMachineOption[]
 
   @@unique([factoryId, code])
-  @@map("machines")
   @@index([factoryId])
   @@index([lineId])
+  @@map("machines")
 }
 
 enum MachineType {
@@ -293,7 +295,7 @@ model MachineModule {
   machineId   String
   code        String
   name        String
-  type        String?  // DRIVE, SENSOR, VALVE, ACTUATOR, CONTROLLER
+  type        String? // DRIVE, SENSOR, VALVE, ACTUATOR, CONTROLLER
   description String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -315,7 +317,7 @@ model MachineCurrentStatus {
   availability    Float?
   performance     Float?
   quality         Float?
-  actualSpeed     Float?       // units/hour
+  actualSpeed     Float? // units/hour
   targetSpeed     Float?
   goodCount       Int          @default(0)
   rejectCount     Int          @default(0)
@@ -347,16 +349,16 @@ enum MachineState {
 // ============================================================
 
 model MachineCycleTime {
-  id              String   @id @default(uuid())
-  machineId       String
-  skuId           String
+  id               String   @id @default(uuid())
+  machineId        String
+  skuId            String
   cycleTimeSeconds Int
-  unitType        String   @default("UNIT") // UNIT, INNER, CARTON, PALLET
-  maxSpeed        Float?   // units per hour (theoretical max)
-  source          String   @default("NCC_DATA") // NCC_DATA, MEASURED, CALCULATED
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  unitType         String   @default("UNIT") // UNIT, INNER, CARTON, PALLET
+  maxSpeed         Float? // units per hour (theoretical max)
+  source           String   @default("NCC_DATA") // NCC_DATA, MEASURED, CALCULATED
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   machine Machine @relation(fields: [machineId], references: [id])
   sku     SKU     @relation(fields: [skuId], references: [id])
@@ -406,13 +408,14 @@ enum ChangeRequestStatus {
 model ChangeRequest {
   id            String              @id @default(uuid())
   factoryId     String
-  crNumber      String              // ECR-2026-001
+  crNumber      String // ECR-2026-001
   title         String
   description   String?
   type          ChangeRequestType
   status        ChangeRequestStatus @default(DRAFT)
   priority      Priority            @default(MEDIUM)
-  skuId         String?             // affected product
+  skuId         String? // affected product
+  processId     String? // affected manufacturing process (PROCESS_CHANGE governance)
   requestedById String?
   reviewedById  String?
   reason        String?
@@ -421,14 +424,15 @@ model ChangeRequest {
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
-  factory     Factory @relation(fields: [factoryId], references: [id])
-  sku         SKU?    @relation(fields: [skuId], references: [id])
-  requestedBy User?   @relation("CRRequestedBy", fields: [requestedById], references: [id])
-  reviewedBy  User?   @relation("CRReviewedBy", fields: [reviewedById], references: [id])
+  factory     Factory               @relation(fields: [factoryId], references: [id])
+  sku         SKU?                  @relation(fields: [skuId], references: [id])
+  process     ManufacturingProcess? @relation(fields: [processId], references: [id], onDelete: SetNull)
+  requestedBy User?                 @relation("CRRequestedBy", fields: [requestedById], references: [id])
+  reviewedBy  User?                 @relation("CRReviewedBy", fields: [reviewedById], references: [id])
 
   @@unique([factoryId, crNumber])
-  @@map("change_requests")
   @@index([factoryId, status])
+  @@map("change_requests")
 }
 
 // ── PRODUCT MASTER DATA (managed lookups powering the product form) ─────────
@@ -484,7 +488,7 @@ model PackagingType {
 model BaseUnit {
   id        String   @id @default(uuid())
   factoryId String
-  code      String   // PCS, CARTON, PALLET, KG …
+  code      String // PCS, CARTON, PALLET, KG …
   name      String
   sortOrder Int      @default(0)
   isActive  Boolean  @default(true)
@@ -500,9 +504,9 @@ model BaseUnit {
 model BaseWeight {
   id        String   @id @default(uuid())
   factoryId String
-  value     Float    // e.g. 2.25
+  value     Float // e.g. 2.25
   unit      String   @default("kg")
-  label     String?  // e.g. "2.25 Kg"
+  label     String? // e.g. "2.25 Kg"
   sortOrder Int      @default(0)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -515,49 +519,91 @@ model BaseWeight {
   @@map("base_weights")
 }
 
+// ============================================================
+// UNIFIED UNIT OF MEASURE (canonical units + conversion factors)
+// Single source of truth for units across raw materials, BOM lines,
+// routing-step materials and material lots. PACKAGING-category units
+// (INNER/CARTON/PALLET) convert through the SKU packaging ladder, not factors.
+// ============================================================
+
+enum UomCategory {
+  WEIGHT
+  VOLUME
+  COUNT
+  PACKAGING
+  LENGTH
+  AREA
+  TIME
+}
+
+model UnitOfMeasure {
+  id               String      @id @default(uuid())
+  factoryId        String
+  code             String // KG, G, TON, L, ML, PCS, INNER, CARTON, PALLET, ROLL, M
+  name             String
+  nameAr           String?
+  category         UomCategory
+  baseUnitCode     String? // canonical unit of the category (KG / L / PCS)
+  conversionFactor Float       @default(1) // 1 of this unit = factor × baseUnitCode (G = 0.001 KG)
+  decimals         Int         @default(3)
+  sortOrder        Int         @default(0)
+  isActive         Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  factory              Factory               @relation(fields: [factoryId], references: [id])
+  rawMaterials         RawMaterial[]
+  bomItems             BOMItem[]
+  routingStepMaterials RoutingStepMaterial[]
+  materialLots         MaterialLot[]
+
+  @@unique([factoryId, code])
+  @@map("units_of_measure")
+}
+
 model SKU {
-  id              String   @id @default(uuid())
-  factoryId       String
-  familyId        String?
-  itemNumber      String   // NCC SAP item number (e.g. 10310064)
-  code            String   // Internal code
-  name            String
-  nameAr          String?
-  shortName       String?
-  brand           String?  // legacy text (kept in sync with brandRef.name)
-  category        String?  // legacy text (kept in sync with categoryRef.name)
+  id               String   @id @default(uuid())
+  factoryId        String
+  familyId         String?
+  itemNumber       String // NCC SAP item number (e.g. 10310064)
+  code             String // Internal code
+  name             String
+  nameAr           String?
+  shortName        String?
+  brand            String? // legacy text (kept in sync with brandRef.name)
+  category         String? // legacy text (kept in sync with categoryRef.name)
   // Master-data relations (preferred; the legacy strings stay synced)
-  categoryId      String?
-  brandId         String?
-  packagingTypeId String?
-  baseUnitId      String?
-  baseWeightId    String?
-  weight          Float?
-  weightUnit      String   @default("kg")
-  length          Float?
-  width           Float?
-  height          Float?
-  dimensionUnit   String   @default("cm")
-  packagingType   String?  // legacy text (kept in sync with packagingTypeRef.name)
-  unitsPerInner   Int      @default(1)
-  innersPerCarton Int      @default(1)
-  cartonsPerPallet Int     @default(1)
-  baseUnit        String   @default("EA") // legacy text (kept in sync with baseUnitRef.code)
-  isActive        Boolean  @default(true)
-  metadata        Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  categoryId       String?
+  brandId          String?
+  packagingTypeId  String?
+  baseUnitId       String?
+  baseWeightId     String?
+  weight           Float?
+  weightUnit       String   @default("kg")
+  length           Float?
+  width            Float?
+  height           Float?
+  dimensionUnit    String   @default("cm")
+  packagingType    String? // legacy text (kept in sync with packagingTypeRef.name)
+  unitsPerInner    Int      @default(1)
+  innersPerCarton  Int      @default(1)
+  cartonsPerPallet Int      @default(1)
+  baseUnit         String   @default("EA") // legacy text (kept in sync with baseUnitRef.code)
+  isActive         Boolean  @default(true)
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  storageLocationId      String?  // FK to StorageLocation (finished goods / dispatch)
+  storageLocationId String? // FK to StorageLocation (finished goods / dispatch)
 
-  factory                Factory              @relation(fields: [factoryId], references: [id])
-  family                 ProductFamily?       @relation(fields: [familyId], references: [id])
-  storageLocationRef     StorageLocation?     @relation(fields: [storageLocationId], references: [id])
-  categoryRef            ProductCategory?     @relation(fields: [categoryId], references: [id])
-  brandRef               ProductBrand?        @relation(fields: [brandId], references: [id])
-  packagingTypeRef       PackagingType?       @relation(fields: [packagingTypeId], references: [id])
-  baseUnitRef            BaseUnit?            @relation(fields: [baseUnitId], references: [id])
-  baseWeightRef          BaseWeight?          @relation(fields: [baseWeightId], references: [id])
+  factory                Factory                   @relation(fields: [factoryId], references: [id])
+  family                 ProductFamily?            @relation(fields: [familyId], references: [id])
+  storageLocationRef     StorageLocation?          @relation(fields: [storageLocationId], references: [id])
+  categoryRef            ProductCategory?          @relation(fields: [categoryId], references: [id])
+  brandRef               ProductBrand?             @relation(fields: [brandId], references: [id])
+  packagingTypeRef       PackagingType?            @relation(fields: [packagingTypeId], references: [id])
+  baseUnitRef            BaseUnit?                 @relation(fields: [baseUnitId], references: [id])
+  baseWeightRef          BaseWeight?               @relation(fields: [baseWeightId], references: [id])
   cycleTimes             MachineCycleTime[]
   bomComponents          BOMComponent[]
   bomHeaders             BOMHeader[]
@@ -570,22 +616,22 @@ model SKU {
   changeRequests         ChangeRequest[]
 
   @@unique([factoryId, itemNumber])
-  @@map("skus")
   @@index([factoryId])
   @@index([categoryId])
   @@index([baseWeightId])
+  @@map("skus")
 }
 
 model BOMComponent {
-  id              String   @id @default(uuid())
-  skuId           String
-  componentCode   String
-  componentName   String
-  quantity        Float
-  unit            String
-  type            String   @default("RAW") // RAW, PACKAGING, CONSUMABLE
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
+  id            String   @id @default(uuid())
+  skuId         String
+  componentCode String
+  componentName String
+  quantity      Float
+  unit          String
+  type          String   @default("RAW") // RAW, PACKAGING, CONSUMABLE
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
 
   sku SKU @relation(fields: [skuId], references: [id])
 
@@ -598,35 +644,35 @@ model BOMComponent {
 
 // PRODUCTION ORDER (ERP / SAP level)
 model ProductionOrder {
-  id             String              @id @default(uuid())
+  id             String                @id @default(uuid())
   factoryId      String
-  orderNumber    String              @unique
+  orderNumber    String                @unique
   sapOrderNumber String?
   skuId          String?
   targetQty      Int
-  completedQty   Int                 @default(0)
-  unit           String              @default("CARTON")
+  completedQty   Int                   @default(0)
+  unit           String                @default("CARTON")
   status         ProductionOrderStatus @default(PLANNED)
-  priority       Priority            @default(MEDIUM)
+  priority       Priority              @default(MEDIUM)
   plannedStart   DateTime
   plannedEnd     DateTime
   actualStart    DateTime?
   actualEnd      DateTime?
   customer       String?
   notes          String?
-  sapSync        Boolean             @default(false)
+  sapSync        Boolean               @default(false)
   sapSyncedAt    DateTime?
   createdById    String?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
   deletedAt      DateTime?
 
-  factory    Factory    @relation(fields: [factoryId], references: [id])
-  sku        SKU?       @relation(fields: [skuId], references: [id])
+  factory    Factory     @relation(fields: [factoryId], references: [id])
+  sku        SKU?        @relation(fields: [skuId], references: [id])
   workOrders WorkOrder[]
 
-  @@map("production_orders")
   @@index([factoryId, status])
+  @@map("production_orders")
 }
 
 enum ProductionOrderStatus {
@@ -640,54 +686,54 @@ enum ProductionOrderStatus {
 
 // WORK ORDER (shop floor execution)
 model WorkOrder {
-  id                  String          @id @default(uuid())
-  factoryId           String
-  productionOrderId   String?
-  lineId              String?
-  machineId           String?
-  skuId               String?
-  shiftInstanceId     String?
-  orderNumber         String          @unique
-  status              WorkOrderStatus @default(PLANNED)
-  priority            Priority        @default(MEDIUM)
-  plannedQty          Int
-  actualQty           Int             @default(0)
-  goodQty             Int             @default(0)
-  scrapQty            Int             @default(0)
-  reworkQty           Int             @default(0)
-  plannedStart        DateTime
-  plannedEnd          DateTime
-  actualStart         DateTime?
-  actualEnd           DateTime?
-  oee                 Float?
-  availability        Float?
-  performance         Float?
-  quality             Float?
-  downtimeMinutes     Float           @default(0)
-  plannedCycleTime    Float?          // seconds per unit
-  recipeId            String?         // locked recipe at WO creation
-  recipeVersion       String?
-  notes               String?
-  createdById         String?
-  startedById         String?
-  completedById       String?
-  operatorId          String?
-  supervisorId        String?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  deletedAt           DateTime?
+  id                String          @id @default(uuid())
+  factoryId         String
+  productionOrderId String?
+  lineId            String?
+  machineId         String?
+  skuId             String?
+  shiftInstanceId   String?
+  orderNumber       String          @unique
+  status            WorkOrderStatus @default(PLANNED)
+  priority          Priority        @default(MEDIUM)
+  plannedQty        Int
+  actualQty         Int             @default(0)
+  goodQty           Int             @default(0)
+  scrapQty          Int             @default(0)
+  reworkQty         Int             @default(0)
+  plannedStart      DateTime
+  plannedEnd        DateTime
+  actualStart       DateTime?
+  actualEnd         DateTime?
+  oee               Float?
+  availability      Float?
+  performance       Float?
+  quality           Float?
+  downtimeMinutes   Float           @default(0)
+  plannedCycleTime  Float? // seconds per unit
+  recipeId          String? // locked recipe at WO creation
+  recipeVersion     String?
+  notes             String?
+  createdById       String?
+  startedById       String?
+  completedById     String?
+  operatorId        String?
+  supervisorId      String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  deletedAt         DateTime?
 
-  factory           Factory          @relation(fields: [factoryId], references: [id])
-  productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
-  line              ProductionLine?  @relation(fields: [lineId], references: [id])
-  machine           Machine?         @relation(fields: [machineId], references: [id])
-  sku               SKU?             @relation(fields: [skuId], references: [id])
-  shiftInstance     ShiftInstance?   @relation(fields: [shiftInstanceId], references: [id])
-  createdBy         User?            @relation("WOCreatedBy", fields: [createdById], references: [id])
-  startedBy         User?            @relation("WOStartedBy", fields: [startedById], references: [id])
-  completedBy       User?            @relation("WOCompletedBy", fields: [completedById], references: [id])
-  operator          User?            @relation("WOOperator", fields: [operatorId], references: [id])
-  supervisor        User?            @relation("WOSupervisor", fields: [supervisorId], references: [id])
+  factory              Factory               @relation(fields: [factoryId], references: [id])
+  productionOrder      ProductionOrder?      @relation(fields: [productionOrderId], references: [id])
+  line                 ProductionLine?       @relation(fields: [lineId], references: [id])
+  machine              Machine?              @relation(fields: [machineId], references: [id])
+  sku                  SKU?                  @relation(fields: [skuId], references: [id])
+  shiftInstance        ShiftInstance?        @relation(fields: [shiftInstanceId], references: [id])
+  createdBy            User?                 @relation("WOCreatedBy", fields: [createdById], references: [id])
+  startedBy            User?                 @relation("WOStartedBy", fields: [startedById], references: [id])
+  completedBy          User?                 @relation("WOCompletedBy", fields: [completedById], references: [id])
+  operator             User?                 @relation("WOOperator", fields: [operatorId], references: [id])
+  supervisor           User?                 @relation("WOSupervisor", fields: [supervisorId], references: [id])
   recipe               Recipe?               @relation(fields: [recipeId], references: [id])
   batchRecords         BatchRecord[]
   downtimeEvents       DowntimeEvent[]
@@ -699,10 +745,10 @@ model WorkOrder {
   jobOrders            JobOrder[]
   scrapLogs            ScrapLog[]
 
-  @@map("work_orders")
   @@index([factoryId, status])
   @@index([factoryId, plannedStart])
   @@index([machineId])
+  @@map("work_orders")
 }
 
 enum WorkOrderStatus {
@@ -716,22 +762,22 @@ enum WorkOrderStatus {
 
 // PRODUCTION EVENT (state changes, count updates, etc.)
 model ProductionEvent {
-  id            String             @id @default(uuid())
-  factoryId     String
-  workOrderId   String?
-  machineId     String?
-  shiftId       String?
-  eventType     ProductionEventType
-  timestamp     DateTime           @default(now())
-  value         Float?
-  skuId         String?
-  metadata      Json?
+  id          String              @id @default(uuid())
+  factoryId   String
+  workOrderId String?
+  machineId   String?
+  shiftId     String?
+  eventType   ProductionEventType
+  timestamp   DateTime            @default(now())
+  value       Float?
+  skuId       String?
+  metadata    Json?
 
   workOrder WorkOrder? @relation(fields: [workOrderId], references: [id])
 
-  @@map("production_events")
   @@index([factoryId, timestamp])
   @@index([machineId, timestamp])
+  @@map("production_events")
 }
 
 enum ProductionEventType {
@@ -771,7 +817,7 @@ model BatchRecord {
   expiryDate       DateTime?
   releaseDate      DateTime?
   releasedById     String?
-  electronicRecord Json?       // EBR — process parameters, checkpoints
+  electronicRecord Json? // EBR — process parameters, checkpoints
   notes            String?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
@@ -784,9 +830,9 @@ model BatchRecord {
   genealogyAsParent    GenealogyLink[]       @relation("ParentBatch")
   inspectionResults    InspectionResult[]
 
-  @@map("batch_records")
   @@index([factoryId])
   @@index([lotNumber])
+  @@map("batch_records")
 }
 
 enum BatchStatus {
@@ -796,35 +842,38 @@ enum BatchStatus {
   REJECTED
   ON_HOLD
   QUARANTINE
+  DEPLETED // material lot fully consumed (remainingQty = 0)
 }
 
 // MATERIAL LOT (incoming raw materials, packaging)
 model MaterialLot {
-  id                  String      @id @default(uuid())
-  factoryId           String
-  rawMaterialId       String?     // optional link to RawMaterial master
-  materialCode        String
-  materialName        String
-  lotNumber           String
-  supplierLot         String?
-  supplierId          String?
-  supplierName        String?
-  quantity            Float
-  remainingQty        Float
-  unit                String
-  status              BatchStatus @default(ACTIVE)
-  receivedAt          DateTime    @default(now())
-  expiryDate          DateTime?
-  storageLocation     String?     // free-text (legacy)
-  storageLocationId   String?     // FK to StorageLocation
-  binNumber           String?
-  notes               String?
-  createdAt           DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
+  id                String      @id @default(uuid())
+  factoryId         String
+  rawMaterialId     String? // optional link to RawMaterial master
+  materialCode      String
+  materialName      String
+  lotNumber         String
+  supplierLot       String?
+  supplierId        String?
+  supplierName      String?
+  quantity          Float
+  remainingQty      Float
+  unit              String // legacy text (kept in sync with unitRef.code)
+  unitId            String? // FK to UnitOfMeasure (preferred)
+  status            BatchStatus @default(ACTIVE)
+  receivedAt        DateTime    @default(now())
+  expiryDate        DateTime?
+  storageLocation   String? // free-text (legacy)
+  storageLocationId String? // FK to StorageLocation
+  binNumber         String?
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   factory            Factory               @relation(fields: [factoryId], references: [id])
   rawMaterial        RawMaterial?          @relation(fields: [rawMaterialId], references: [id])
   storageLocationRef StorageLocation?      @relation(fields: [storageLocationId], references: [id])
+  unitRef            UnitOfMeasure?        @relation(fields: [unitId], references: [id])
   consumptions       MaterialConsumption[]
   jobOrderMaterials  JobOrderMaterial[]
 
@@ -834,26 +883,26 @@ model MaterialLot {
 
 // MATERIAL CONSUMPTION (links batch to raw materials consumed)
 model MaterialConsumption {
-  id               String   @id @default(uuid())
-  factoryId        String
-  workOrderId      String?
-  batchRecordId    String?
-  materialLotId    String?
-  materialCode     String
-  materialName     String
-  quantityPlanned  Float
-  quantityActual   Float    @default(0)
-  unit             String
-  consumedAt       DateTime @default(now())
-  consumedById     String?
+  id              String   @id @default(uuid())
+  factoryId       String
+  workOrderId     String?
+  batchRecordId   String?
+  materialLotId   String?
+  materialCode    String
+  materialName    String
+  quantityPlanned Float
+  quantityActual  Float    @default(0)
+  unit            String
+  consumedAt      DateTime @default(now())
+  consumedById    String?
 
   workOrder   WorkOrder?   @relation(fields: [workOrderId], references: [id])
   batchRecord BatchRecord? @relation(fields: [batchRecordId], references: [id])
   materialLot MaterialLot? @relation(fields: [materialLotId], references: [id])
 
-  @@map("material_consumptions")
   @@index([batchRecordId])
   @@index([materialLotId])
+  @@map("material_consumptions")
 }
 
 // GENEALOGY LINK (parent-child batch relationships)
@@ -882,15 +931,15 @@ model ShiftTemplate {
   code                   String
   name                   String
   nameAr                 String?
-  startTime              String   // HH:mm (24h)
-  endTime                String   // HH:mm (24h)
+  startTime              String // HH:mm (24h)
+  endTime                String // HH:mm (24h)
   crossesMidnight        Boolean  @default(false)
-  plannedProductionHours Float    // e.g. 11.0
-  shiftDurationHours     Float    // e.g. 12.0
+  plannedProductionHours Float // e.g. 11.0
+  shiftDurationHours     Float // e.g. 12.0
   breakMinutes           Int      @default(30)
   cleaningMinutes        Int      @default(30)
-  days                   Json     // [0=Sun,1=Mon,...,6=Sat]
-  targetQtyPerShift      Int?     // default production target per shift per line (boxes/packs)
+  days                   Json // [0=Sun,1=Mon,...,6=Sat]
+  targetQtyPerShift      Int? // default production target per shift per line (boxes/packs)
   isActive               Boolean  @default(true)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
@@ -903,41 +952,41 @@ model ShiftTemplate {
 }
 
 model ShiftInstance {
-  id               String        @id @default(uuid())
-  factoryId        String
-  shiftTemplateId  String
-  lineId           String?
-  shiftDate        DateTime      // the calendar date (start date)
-  startTime        DateTime
-  endTime          DateTime?
-  targetQty        Int?
-  actualQty        Int           @default(0)
-  goodQty          Int           @default(0)
-  scrapQty         Int           @default(0)
-  oee              Float?
-  availability     Float?
-  performance      Float?
-  quality          Float?
-  downtimeMinutes  Float         @default(0)
-  plannedDowntime  Float         @default(0)
-  operatorId       String?
-  supervisorId     String?
-  handoverNotes    String?
-  status           ShiftStatus   @default(PLANNED)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  id              String      @id @default(uuid())
+  factoryId       String
+  shiftTemplateId String
+  lineId          String?
+  shiftDate       DateTime // the calendar date (start date)
+  startTime       DateTime
+  endTime         DateTime?
+  targetQty       Int?
+  actualQty       Int         @default(0)
+  goodQty         Int         @default(0)
+  scrapQty        Int         @default(0)
+  oee             Float?
+  availability    Float?
+  performance     Float?
+  quality         Float?
+  downtimeMinutes Float       @default(0)
+  plannedDowntime Float       @default(0)
+  operatorId      String?
+  supervisorId    String?
+  handoverNotes   String?
+  status          ShiftStatus @default(PLANNED)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
-  factory        Factory         @relation(fields: [factoryId], references: [id])
-  shiftTemplate  ShiftTemplate   @relation(fields: [shiftTemplateId], references: [id])
-  line           ProductionLine? @relation(fields: [lineId], references: [id])
-  operator       User?           @relation("ShiftOperator", fields: [operatorId], references: [id])
-  supervisor     User?           @relation("ShiftSupervisor", fields: [supervisorId], references: [id])
-  workOrders     WorkOrder[]
-  stateRecords   MachineStateRecord[]
-  oeeRecords     OEERecord[]
+  factory       Factory              @relation(fields: [factoryId], references: [id])
+  shiftTemplate ShiftTemplate        @relation(fields: [shiftTemplateId], references: [id])
+  line          ProductionLine?      @relation(fields: [lineId], references: [id])
+  operator      User?                @relation("ShiftOperator", fields: [operatorId], references: [id])
+  supervisor    User?                @relation("ShiftSupervisor", fields: [supervisorId], references: [id])
+  workOrders    WorkOrder[]
+  stateRecords  MachineStateRecord[]
+  oeeRecords    OEERecord[]
 
-  @@map("shift_instances")
   @@index([factoryId, shiftDate])
+  @@map("shift_instances")
 }
 
 enum ShiftStatus {
@@ -951,7 +1000,7 @@ enum ShiftStatus {
 // ============================================================
 
 model MachineStateRecord {
-  id              String        @id @default(uuid())
+  id              String       @id @default(uuid())
   factoryId       String
   machineId       String
   shiftInstanceId String?
@@ -960,51 +1009,51 @@ model MachineStateRecord {
   state           MachineState
   startTime       DateTime
   endTime         DateTime?
-  durationMinutes Float?        // calculated on endTime set
-  isPlannedStop   Boolean       @default(false)
+  durationMinutes Float? // calculated on endTime set
+  isPlannedStop   Boolean      @default(false)
   downtimeCauseId String?
   notes           String?
-  source          String        @default("SYSTEM") // SYSTEM, OPERATOR, MAINTENANCE
+  source          String       @default("SYSTEM") // SYSTEM, OPERATOR, MAINTENANCE
 
-  factory        Factory        @relation(fields: [factoryId], references: [id])
-  machine        Machine        @relation(fields: [machineId], references: [id])
-  shiftInstance  ShiftInstance? @relation(fields: [shiftInstanceId], references: [id])
-  downtimeCause  DowntimeCause? @relation(fields: [downtimeCauseId], references: [id])
+  factory       Factory        @relation(fields: [factoryId], references: [id])
+  machine       Machine        @relation(fields: [machineId], references: [id])
+  shiftInstance ShiftInstance? @relation(fields: [shiftInstanceId], references: [id])
+  downtimeCause DowntimeCause? @relation(fields: [downtimeCauseId], references: [id])
 
-  @@map("machine_state_records")
   @@index([factoryId, startTime])
   @@index([machineId, startTime])
+  @@map("machine_state_records")
 }
 
 // DOWNTIME CAUSE (NCC pre-loaded codes per machine)
 model DowntimeCause {
-  id          String          @id @default(uuid())
-  factoryId   String
-  machineId   String?         // null = applicable to all machines
-  code        String
-  name        String
-  nameAr      String?
-  category    DowntimeCategory
-  isPlanned   Boolean         @default(false)
-  sortOrder   Int             @default(0)
-  isActive    Boolean         @default(true)
-  createdAt   DateTime        @default(now())
+  id        String           @id @default(uuid())
+  factoryId String
+  machineId String? // null = applicable to all machines
+  code      String
+  name      String
+  nameAr    String?
+  category  DowntimeCategory
+  isPlanned Boolean          @default(false)
+  sortOrder Int              @default(0)
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
 
   // 3-level PDM tree: level 1 = top category, 2 = sub-category, 3 = specific reason (leaf)
-  level       Int             @default(3)
-  parentId    String?
-  parent      DowntimeCause?  @relation("DowntimeCauseTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children    DowntimeCause[] @relation("DowntimeCauseTree")
+  level    Int             @default(3)
+  parentId String?
+  parent   DowntimeCause?  @relation("DowntimeCauseTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children DowntimeCause[] @relation("DowntimeCauseTree")
 
-  factory       Factory              @relation(fields: [factoryId], references: [id])
-  machine       Machine?             @relation(fields: [machineId], references: [id])
-  stateRecords  MachineStateRecord[]
+  factory        Factory              @relation(fields: [factoryId], references: [id])
+  machine        Machine?             @relation(fields: [machineId], references: [id])
+  stateRecords   MachineStateRecord[]
   downtimeEvents DowntimeEvent[]
 
-  @@map("downtime_causes")
   @@index([factoryId])
   @@index([machineId])
   @@index([parentId])
+  @@map("downtime_causes")
 }
 
 enum DowntimeCategory {
@@ -1026,54 +1075,54 @@ enum DowntimeCategory {
 // DOWNTIME EVENT (logged, can be linked to maintenance WO)
 // ISA-95 standardized 5-category downtime reason codes
 enum DowntimeReasonCode {
-  PLANNED_MAINTENANCE    // PM, calibration, CIP — excluded from OEE Availability loss
-  CHANGEOVER             // format/product change — planned stop, reduces net production time
-  UNPLANNED_BREAKDOWN    // mechanical / electrical / process failure → Availability Loss
-  MICRO_STOP             // <5 min interruption → Performance Loss (speed loss category)
-  STARVED                // waiting for upstream material or step to deliver
-  BLOCKED                // waiting for downstream step / buffer to clear
-  EXTERNAL               // utilities, power, external cause beyond line control
+  PLANNED_MAINTENANCE // PM, calibration, CIP — excluded from OEE Availability loss
+  CHANGEOVER // format/product change — planned stop, reduces net production time
+  UNPLANNED_BREAKDOWN // mechanical / electrical / process failure → Availability Loss
+  MICRO_STOP // <5 min interruption → Performance Loss (speed loss category)
+  STARVED // waiting for upstream material or step to deliver
+  BLOCKED // waiting for downstream step / buffer to clear
+  EXTERNAL // utilities, power, external cause beyond line control
 }
 
 model DowntimeEvent {
-  id              String              @id @default(uuid())
-  factoryId       String
-  machineId       String
-  workCenterId    String?             // ISA-95 WorkCenter link (replaces raw machine where routing is used)
-  workOrderId     String?
-  shiftInstanceId String?
-  causeId         String?
-  operatorId      String?             // operator on shift who reported / triggered
-  reason          String?             // free text override / root cause description
-  category        DowntimeCategory
-  reasonCode      DowntimeReasonCode  @default(UNPLANNED_BREAKDOWN)
-  startTime       DateTime
-  endTime         DateTime?
-  durationMinutes Float?
-  affectsOEE      Boolean             @default(true)   // false for PLANNED_MAINTENANCE, EXTERNAL
-  isPlanned       Boolean             @default(false)
-  reportedById    String?
-  acknowledged    Boolean             @default(false)
-  acknowledgedById String?
-  acknowledgedAt  DateTime?
-  maintenanceWOId String?
-  schedulingImpactMins Float?         // computed cascade delay pushed to dependent WO steps
-  notes           String?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  id                   String             @id @default(uuid())
+  factoryId            String
+  machineId            String
+  workCenterId         String? // ISA-95 WorkCenter link (replaces raw machine where routing is used)
+  workOrderId          String?
+  shiftInstanceId      String?
+  causeId              String?
+  operatorId           String? // operator on shift who reported / triggered
+  reason               String? // free text override / root cause description
+  category             DowntimeCategory
+  reasonCode           DowntimeReasonCode @default(UNPLANNED_BREAKDOWN)
+  startTime            DateTime
+  endTime              DateTime?
+  durationMinutes      Float?
+  affectsOEE           Boolean            @default(true) // false for PLANNED_MAINTENANCE, EXTERNAL
+  isPlanned            Boolean            @default(false)
+  reportedById         String?
+  acknowledged         Boolean            @default(false)
+  acknowledgedById     String?
+  acknowledgedAt       DateTime?
+  maintenanceWOId      String?
+  schedulingImpactMins Float? // computed cascade delay pushed to dependent WO steps
+  notes                String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
-  factory     Factory        @relation(fields: [factoryId], references: [id])
-  machine     Machine        @relation(fields: [machineId], references: [id])
-  workCenter  WorkCenter?    @relation("WCDowntimes", fields: [workCenterId], references: [id])
-  workOrder   WorkOrder?     @relation(fields: [workOrderId], references: [id])
-  cause       DowntimeCause? @relation(fields: [causeId], references: [id])
-  operator    User?          @relation("DowntimeOperator", fields: [operatorId], references: [id])
+  factory    Factory        @relation(fields: [factoryId], references: [id])
+  machine    Machine        @relation(fields: [machineId], references: [id])
+  workCenter WorkCenter?    @relation("WCDowntimes", fields: [workCenterId], references: [id])
+  workOrder  WorkOrder?     @relation(fields: [workOrderId], references: [id])
+  cause      DowntimeCause? @relation(fields: [causeId], references: [id])
+  operator   User?          @relation("DowntimeOperator", fields: [operatorId], references: [id])
 
-  @@map("downtime_events")
   @@index([factoryId, startTime])
   @@index([machineId, startTime])
   @@index([workCenterId, startTime])
   @@index([reasonCode])
+  @@map("downtime_events")
 }
 
 // OEE RECORD (calculated and stored for reporting)
@@ -1085,40 +1134,40 @@ model OEERecord {
   recordDate           DateTime
   shiftCode            String?
   skuId                String?
-  plannedProductionMin Float    // minutes
-  actualProductionMin  Float    // minutes (excl planned stops)
-  uptimeMin            Float    // minutes actually running
-  downtimeMin          Float    // minutes unplanned downtime
+  plannedProductionMin Float // minutes
+  actualProductionMin  Float // minutes (excl planned stops)
+  uptimeMin            Float // minutes actually running
+  downtimeMin          Float // minutes unplanned downtime
   plannedDowntimeMin   Float    @default(0)
   totalOutput          Int
   goodOutput           Int
   scrapOutput          Int      @default(0)
-  idealCycleTime       Float?   // seconds per unit
-  availability         Float    // %
-  performance          Float    // %
-  quality              Float    // %
-  oee                  Float    // %
+  idealCycleTime       Float? // seconds per unit
+  availability         Float // %
+  performance          Float // %
+  quality              Float // %
+  oee                  Float // %
   calculatedAt         DateTime @default(now())
 
   factory       Factory        @relation(fields: [factoryId], references: [id])
   machine       Machine        @relation(fields: [machineId], references: [id])
   shiftInstance ShiftInstance? @relation(fields: [shiftInstanceId], references: [id])
 
-  @@map("oee_records")
   @@index([factoryId, recordDate])
   @@index([machineId, recordDate])
+  @@map("oee_records")
 }
 
 // MACHINE RUNTIME HOURS (for PM scheduling)
 model MachineRuntimeHours {
-  id               String   @id @default(uuid())
-  machineId        String
-  factoryId        String
-  recordDate       DateTime @db.Date
-  dailyHours       Float
-  cumulativeHours  Float
-  source           String   @default("CALCULATED") // CALCULATED, MANUAL
-  createdAt        DateTime @default(now())
+  id              String   @id @default(uuid())
+  machineId       String
+  factoryId       String
+  recordDate      DateTime @db.Date
+  dailyHours      Float
+  cumulativeHours Float
+  source          String   @default("CALCULATED") // CALCULATED, MANUAL
+  createdAt       DateTime @default(now())
 
   machine Machine @relation(fields: [machineId], references: [id])
 
@@ -1131,23 +1180,23 @@ model MachineRuntimeHours {
 // ============================================================
 
 model QualityPlan {
-  id                  String   @id @default(uuid())
-  factoryId           String
-  skuId               String?
-  machineId           String?
-  code                String
-  name                String
-  type                String   @default("IN_PROCESS") // INCOMING, IN_PROCESS, FINAL
-  samplingFrequency   String?  // EVERY_BATCH, HOURLY, etc.
-  samplingQty         Int      @default(1)
-  version             String   @default("1")
-  isActive            Boolean  @default(true)
-  approvedAt          DateTime?
-  approvedById        String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                String    @id @default(uuid())
+  factoryId         String
+  skuId             String?
+  machineId         String?
+  code              String
+  name              String
+  type              String    @default("IN_PROCESS") // INCOMING, IN_PROCESS, FINAL
+  samplingFrequency String? // EVERY_BATCH, HOURLY, etc.
+  samplingQty       Int       @default(1)
+  version           String    @default("1")
+  isActive          Boolean   @default(true)
+  approvedAt        DateTime?
+  approvedById      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  factory    Factory              @relation(fields: [factoryId], references: [id])
+  factory    Factory            @relation(fields: [factoryId], references: [id])
   parameters QualityParameter[]
   results    InspectionResult[]
 
@@ -1155,18 +1204,18 @@ model QualityPlan {
 }
 
 model QualityParameter {
-  id           String   @id @default(uuid())
+  id           String  @id @default(uuid())
   planId       String
   name         String
   unit         String?
   nominalValue Float?
-  ucl          Float?   // upper control limit
-  lcl          Float?   // lower control limit
-  usl          Float?   // upper spec limit
-  lsl          Float?   // lower spec limit
+  ucl          Float? // upper control limit
+  lcl          Float? // lower control limit
+  usl          Float? // upper spec limit
+  lsl          Float? // lower spec limit
   checkMethod  String?
-  isKPI        Boolean  @default(false)
-  sortOrder    Int      @default(0)
+  isKPI        Boolean @default(false)
+  sortOrder    Int     @default(0)
 
   plan QualityPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
@@ -1174,28 +1223,28 @@ model QualityParameter {
 }
 
 model InspectionResult {
-  id               String    @id @default(uuid())
+  id               String            @id @default(uuid())
   factoryId        String
   planId           String?
   workOrderId      String?
   batchRecordId    String?
   machineId        String?
-  inspectionNumber String    @unique
+  inspectionNumber String            @unique
   type             InspectionType
   result           InspectionResult2 @default(PENDING)
   totalQty         Int
-  passQty          Int       @default(0)
-  failQty          Int       @default(0)
-  measurements     Json?     // [{parameterId, value, pass}]
+  passQty          Int               @default(0)
+  failQty          Int               @default(0)
+  measurements     Json? // [{parameterId, value, pass}]
   checklistData    Json?
   attachments      Json?
   inspectorId      String
-  inspectedAt      DateTime  @default(now())
+  inspectedAt      DateTime          @default(now())
   approvedById     String?
   approvedAt       DateTime?
   notes            String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   factory     Factory      @relation(fields: [factoryId], references: [id])
   plan        QualityPlan? @relation(fields: [planId], references: [id])
@@ -1204,8 +1253,8 @@ model InspectionResult {
   machine     Machine?     @relation(fields: [machineId], references: [id])
   inspector   User         @relation("InspectionInspector", fields: [inspectorId], references: [id])
 
-  @@map("inspection_results")
   @@index([factoryId, inspectedAt])
+  @@map("inspection_results")
 }
 
 enum InspectionType {
@@ -1224,40 +1273,40 @@ enum InspectionResult2 {
 }
 
 model NCR {
-  id             String      @id @default(uuid())
-  factoryId      String
-  ncrNumber      String      @unique
-  title          String
-  description    String
-  severity       Severity    @default(MAJOR)
-  status         NCRStatus   @default(OPEN)
-  skuId          String?
-  batchRecordId  String?
-  machineId      String?
-  defectCategory String
-  defectCode     String?
-  quantity       Int
-  disposition    String?     // USE_AS_IS, REWORK, SCRAP, RETURN_TO_SUPPLIER
-  detectedById   String
-  detectedAt     DateTime
-  dueDate        DateTime
-  rootCause      String?
+  id               String    @id @default(uuid())
+  factoryId        String
+  ncrNumber        String    @unique
+  title            String
+  description      String
+  severity         Severity  @default(MAJOR)
+  status           NCRStatus @default(OPEN)
+  skuId            String?
+  batchRecordId    String?
+  machineId        String?
+  defectCategory   String
+  defectCode       String?
+  quantity         Int
+  disposition      String? // USE_AS_IS, REWORK, SCRAP, RETURN_TO_SUPPLIER
+  detectedById     String
+  detectedAt       DateTime
+  dueDate          DateTime
+  rootCause        String?
   correctiveAction String?
   preventiveAction String?
-  resolvedAt     DateTime?
-  resolvedById   String?
-  closedAt       DateTime?
-  closedById     String?
-  attachments    Json?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  resolvedAt       DateTime?
+  resolvedById     String?
+  closedAt         DateTime?
+  closedById       String?
+  attachments      Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   factory    Factory @relation(fields: [factoryId], references: [id])
   detectedBy User    @relation("NCRDetectedBy", fields: [detectedById], references: [id])
   capas      CAPA[]
 
-  @@map("ncrs")
   @@index([factoryId, status])
+  @@map("ncrs")
 }
 
 enum NCRStatus {
@@ -1275,27 +1324,27 @@ enum Severity {
 }
 
 model CAPA {
-  id          String     @id @default(uuid())
-  factoryId   String
-  capaNumber  String     @unique
-  ncrId       String?
-  type        CAPAType
-  title       String
-  description String
-  status      CAPAStatus @default(OPEN)
-  priority    Priority   @default(MEDIUM)
-  assignedToId String?
-  dueDate     DateTime?
-  completedAt DateTime?
-  verifiedAt  DateTime?
-  verifiedById String?
+  id            String     @id @default(uuid())
+  factoryId     String
+  capaNumber    String     @unique
+  ncrId         String?
+  type          CAPAType
+  title         String
+  description   String
+  status        CAPAStatus @default(OPEN)
+  priority      Priority   @default(MEDIUM)
+  assignedToId  String?
+  dueDate       DateTime?
+  completedAt   DateTime?
+  verifiedAt    DateTime?
+  verifiedById  String?
   effectiveness String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
-  factory    Factory @relation(fields: [factoryId], references: [id])
-  ncr        NCR?    @relation(fields: [ncrId], references: [id])
-  assignedTo User?   @relation("CAPAAssignedTo", fields: [assignedToId], references: [id])
+  factory    Factory      @relation(fields: [factoryId], references: [id])
+  ncr        NCR?         @relation(fields: [ncrId], references: [id])
+  assignedTo User?        @relation("CAPAAssignedTo", fields: [assignedToId], references: [id])
   actions    CAPAAction[]
 
   @@map("capas")
@@ -1314,15 +1363,15 @@ enum CAPAStatus {
 }
 
 model CAPAAction {
-  id          String   @id @default(uuid())
-  capaId      String
-  description String
+  id           String    @id @default(uuid())
+  capaId       String
+  description  String
   assignedToId String?
-  dueDate     DateTime?
-  completedAt DateTime?
-  status      String   @default("OPEN")
-  evidence    String?
-  createdAt   DateTime @default(now())
+  dueDate      DateTime?
+  completedAt  DateTime?
+  status       String    @default("OPEN")
+  evidence     String?
+  createdAt    DateTime  @default(now())
 
   capa CAPA @relation(fields: [capaId], references: [id], onDelete: Cascade)
 
@@ -1331,33 +1380,33 @@ model CAPAAction {
 
 // SPC — Statistical Process Control
 model SPCMeasurement {
-  id              String   @id @default(uuid())
-  factoryId       String
-  machineId       String
-  skuId           String?
-  parameterName   String
-  parameterUnit   String?
-  value           Float
-  sampleSize      Int      @default(1)
-  subgroupNumber  Int?
-  workOrderId     String?
-  shiftInstanceId String?
-  measuredAt      DateTime @default(now())
-  measuredById    String?
-  isOutOfControl  Boolean  @default(false)
-  controlViolation String?  // RULE_1, RULE_2, etc.
-  ucl             Float?
-  lcl             Float?
-  cl              Float?
-  usl             Float?
-  lsl             Float?
+  id               String   @id @default(uuid())
+  factoryId        String
+  machineId        String
+  skuId            String?
+  parameterName    String
+  parameterUnit    String?
+  value            Float
+  sampleSize       Int      @default(1)
+  subgroupNumber   Int?
+  workOrderId      String?
+  shiftInstanceId  String?
+  measuredAt       DateTime @default(now())
+  measuredById     String?
+  isOutOfControl   Boolean  @default(false)
+  controlViolation String? // RULE_1, RULE_2, etc.
+  ucl              Float?
+  lcl              Float?
+  cl               Float?
+  usl              Float?
+  lsl              Float?
 
   factory Factory @relation(fields: [factoryId], references: [id])
   machine Machine @relation(fields: [machineId], references: [id])
 
-  @@map("spc_measurements")
   @@index([factoryId, measuredAt])
   @@index([machineId, parameterName, measuredAt])
+  @@map("spc_measurements")
 }
 
 // ============================================================
@@ -1365,51 +1414,51 @@ model SPCMeasurement {
 // ============================================================
 
 model FailureMode {
-  id                 String   @id @default(uuid())
-  factoryId          String
-  machineId          String
-  code               String
-  description        String
-  category           DowntimeCategory @default(MECHANICAL)
-  causeDescription   String?
-  effectDescription  String?
-  severityScore      Int      @default(1) // 1-10 RPN
-  occurrenceScore    Int      @default(1)
-  detectionScore     Int      @default(1)
-  rpn                Int      @default(1) // severity × occurrence × detection
-  recommendedAction  String?
-  isActive           Boolean  @default(true)
-  createdAt          DateTime @default(now())
+  id                String           @id @default(uuid())
+  factoryId         String
+  machineId         String
+  code              String
+  description       String
+  category          DowntimeCategory @default(MECHANICAL)
+  causeDescription  String?
+  effectDescription String?
+  severityScore     Int              @default(1) // 1-10 RPN
+  occurrenceScore   Int              @default(1)
+  detectionScore    Int              @default(1)
+  rpn               Int              @default(1) // severity × occurrence × detection
+  recommendedAction String?
+  isActive          Boolean          @default(true)
+  createdAt         DateTime         @default(now())
 
   machine Machine @relation(fields: [machineId], references: [id])
 
-  @@map("failure_modes")
   @@index([machineId])
+  @@map("failure_modes")
 }
 
 model PMPlan {
-  id               String          @id @default(uuid())
-  factoryId        String
-  machineId        String
-  code             String
-  name             String
-  type             PMType
-  description      String?
-  frequencyDays    Int?
-  runtimeHours     Float?
-  estimatedHours   Float?
-  instructions     String?
+  id                String    @id @default(uuid())
+  factoryId         String
+  machineId         String
+  code              String
+  name              String
+  type              PMType
+  description       String?
+  frequencyDays     Int?
+  runtimeHours      Float?
+  estimatedHours    Float?
+  instructions      String?
   checklistTemplate Json?
-  lastExecutedAt   DateTime?
-  nextDueAt        DateTime?
-  isActive         Boolean         @default(true)
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  lastExecutedAt    DateTime?
+  nextDueAt         DateTime?
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  factory   Factory          @relation(fields: [factoryId], references: [id])
-  machine   Machine          @relation(fields: [machineId], references: [id])
+  factory    Factory           @relation(fields: [factoryId], references: [id])
+  machine    Machine           @relation(fields: [machineId], references: [id])
   spareParts PMPlanSparePart[]
-  tasks     PMTask[]
+  tasks      PMTask[]
 
   @@map("pm_plans")
 }
@@ -1422,11 +1471,11 @@ enum PMType {
 }
 
 model PMPlanSparePart {
-  id          String  @id @default(uuid())
+  id          String @id @default(uuid())
   pmPlanId    String
   sparePartId String
   quantity    Float
-  unit        String  @default("PCS")
+  unit        String @default("PCS")
 
   pmPlan    PMPlan    @relation(fields: [pmPlanId], references: [id], onDelete: Cascade)
   sparePart SparePart @relation(fields: [sparePartId], references: [id])
@@ -1435,27 +1484,27 @@ model PMPlanSparePart {
 }
 
 model PMTask {
-  id            String   @id @default(uuid())
+  id            String       @id @default(uuid())
   factoryId     String
   planId        String
   machineId     String
-  scheduledDate DateTime @db.Date
+  scheduledDate DateTime     @db.Date
   completedAt   DateTime?
   status        PMTaskStatus @default(SCHEDULED)
   assignedToId  String?
   actualHours   Float?
   notes         String?
   sparesUsed    Json?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
-  factory    Factory    @relation(fields: [factoryId], references: [id])
-  plan       PMPlan     @relation(fields: [planId], references: [id])
-  machine    Machine    @relation(fields: [machineId], references: [id])
-  assignedTo User?      @relation("PMTaskAssignedTo", fields: [assignedToId], references: [id])
+  factory    Factory @relation(fields: [factoryId], references: [id])
+  plan       PMPlan  @relation(fields: [planId], references: [id])
+  machine    Machine @relation(fields: [machineId], references: [id])
+  assignedTo User?   @relation("PMTaskAssignedTo", fields: [assignedToId], references: [id])
 
-  @@map("pm_tasks")
   @@index([factoryId, scheduledDate])
+  @@map("pm_tasks")
 }
 
 enum PMTaskStatus {
@@ -1467,46 +1516,46 @@ enum PMTaskStatus {
 }
 
 model MaintenanceWO {
-  id                   String       @id @default(uuid())
-  factoryId            String
-  woNumber             String       @unique
-  type                 MaintType
-  priority             Priority     @default(MEDIUM)
-  status               MaintStatus  @default(OPEN)
-  machineId            String
-  failureModeId        String?
+  id                    String      @id @default(uuid())
+  factoryId             String
+  woNumber              String      @unique
+  type                  MaintType
+  priority              Priority    @default(MEDIUM)
+  status                MaintStatus @default(OPEN)
+  machineId             String
+  failureModeId         String?
   triggeredByDowntimeId String?
-  title                String
-  description          String?
-  estimatedHours       Float?
-  actualHours          Float?
-  laborCost            Float?
-  partsCost            Float?
-  totalCost            Float?
-  assignedToId         String?
-  requestedById        String?
-  dueDate              DateTime?
-  startedAt            DateTime?
-  completedAt          DateTime?
+  title                 String
+  description           String?
+  estimatedHours        Float?
+  actualHours           Float?
+  laborCost             Float?
+  partsCost             Float?
+  totalCost             Float?
+  assignedToId          String?
+  requestedById         String?
+  dueDate               DateTime?
+  startedAt             DateTime?
+  completedAt           DateTime?
   runtimeHoursAtService Float?
-  checklistData        Json?
-  notes                String?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
-  deletedAt            DateTime?
+  checklistData         Json?
+  notes                 String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  deletedAt             DateTime?
 
   productionWOId String?
 
-  factory      Factory    @relation(fields: [factoryId], references: [id])
-  machine      Machine    @relation(fields: [machineId], references: [id])
-  assignedTo   User?      @relation("MaintAssignedTo", fields: [assignedToId], references: [id])
-  requestedBy  User?      @relation("MaintRequestedBy", fields: [requestedById], references: [id])
-  productionWO WorkOrder? @relation("MaintLinkedProdWO", fields: [productionWOId], references: [id])
+  factory      Factory            @relation(fields: [factoryId], references: [id])
+  machine      Machine            @relation(fields: [machineId], references: [id])
+  assignedTo   User?              @relation("MaintAssignedTo", fields: [assignedToId], references: [id])
+  requestedBy  User?              @relation("MaintRequestedBy", fields: [requestedById], references: [id])
+  productionWO WorkOrder?         @relation("MaintLinkedProdWO", fields: [productionWOId], references: [id])
   sparesUsed   MaintWOSparePart[]
 
-  @@map("maintenance_wos")
   @@index([factoryId, status])
   @@index([machineId])
+  @@map("maintenance_wos")
 }
 
 enum MaintType {
@@ -1520,7 +1569,7 @@ enum MaintType {
 
 enum MaintStatus {
   OPEN
-  AWAITING_PARTS  // waiting for inventory to issue requested spare parts
+  AWAITING_PARTS // waiting for inventory to issue requested spare parts
   ASSIGNED
   IN_PROGRESS
   ON_HOLD
@@ -1529,25 +1578,25 @@ enum MaintStatus {
 }
 
 model SparePart {
-  id                  String   @id @default(uuid())
-  factoryId           String
-  partNumber          String
-  name                String
-  description         String?
-  category            String?
-  manufacturer        String?
-  model               String?
-  supplier            String?
-  unitCost            Float?
-  stockQty            Float    @default(0)
-  minStockQty         Float    @default(0)
-  maxStockQty         Float?
-  storageLocation     String?  // free-text (legacy)
-  storageLocationId   String?  // FK to StorageLocation
-  binNumber           String?
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                String   @id @default(uuid())
+  factoryId         String
+  partNumber        String
+  name              String
+  description       String?
+  category          String?
+  manufacturer      String?
+  model             String?
+  supplier          String?
+  unitCost          Float?
+  stockQty          Float    @default(0)
+  minStockQty       Float    @default(0)
+  maxStockQty       Float?
+  storageLocation   String? // free-text (legacy)
+  storageLocationId String? // FK to StorageLocation
+  binNumber         String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   factory            Factory            @relation(fields: [factoryId], references: [id])
   storageLocationRef StorageLocation?   @relation(fields: [storageLocationId], references: [id])
@@ -1590,23 +1639,23 @@ model MaintWOSparePart {
 // ============================================================
 
 model EnergyMeter {
-  id          String      @id @default(uuid())
+  id          String     @id @default(uuid())
   factoryId   String
-  machineId   String?     // null = area-level meter
+  machineId   String? // null = area-level meter
   areaId      String?
   meterNumber String
   name        String
   type        EnergyType
-  unit        String      // kWh, m3, L, kW
+  unit        String // kWh, m3, L, kW
   brand       String?
   location    String?
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
-  factory   Factory        @relation(fields: [factoryId], references: [id])
-  machine   Machine?       @relation(fields: [machineId], references: [id])
-  area      Area?          @relation(fields: [areaId], references: [id])
+  factory   Factory         @relation(fields: [factoryId], references: [id])
+  machine   Machine?        @relation(fields: [machineId], references: [id])
+  area      Area?           @relation(fields: [areaId], references: [id])
   readings  EnergyReading[]
   summaries EnergySummary[]
 
@@ -1627,45 +1676,45 @@ model EnergyReading {
   id              String   @id @default(uuid())
   meterId         String
   factoryId       String
-  workCenterId    String?  // WorkCenter active at reading time (for production context)
-  workOrderId     String?  // WO active at reading time
-  machineId       String?  // specific machine if meter is machine-level
+  workCenterId    String? // WorkCenter active at reading time (for production context)
+  workOrderId     String? // WO active at reading time
+  machineId       String? // specific machine if meter is machine-level
   shiftInstanceId String?
   timestamp       DateTime
-  value           Float    // cumulative kWh / m³ (delta calculated at aggregation)
-  powerKw         Float?   // instantaneous power draw at this timestamp
+  value           Float // cumulative kWh / m³ (delta calculated at aggregation)
+  powerKw         Float? // instantaneous power draw at this timestamp
   unit            String
-  machineState    String?  // snapshot: RUNNING | IDLE | BREAKDOWN | PLANNED_STOP
+  machineState    String? // snapshot: RUNNING | IDLE | BREAKDOWN | PLANNED_STOP
   source          String   @default("AUTO") // AUTO (from IoT), MANUAL
   quality         String   @default("GOOD")
   createdAt       DateTime @default(now())
 
-  factory     Factory      @relation(fields: [factoryId], references: [id])
-  meter       EnergyMeter  @relation(fields: [meterId], references: [id])
-  workCenter  WorkCenter?  @relation("WCEnergyReadings", fields: [workCenterId], references: [id])
+  factory    Factory     @relation(fields: [factoryId], references: [id])
+  meter      EnergyMeter @relation(fields: [meterId], references: [id])
+  workCenter WorkCenter? @relation("WCEnergyReadings", fields: [workCenterId], references: [id])
 
-  @@map("energy_readings")
   @@index([meterId, timestamp])
   @@index([factoryId, timestamp])
   @@index([workOrderId])
   @@index([workCenterId, timestamp])
+  @@map("energy_readings")
 }
 
 // Aggregated energy consumption per Work Order (computed on WO close)
 model EnergyWOSummary {
-  id              String    @id @default(uuid())
-  workOrderId     String    @unique
-  factoryId       String
-  totalKwh        Float     // total electrical energy over WO duration
-  runningKwh      Float     @default(0) // energy while machineState = RUNNING
-  idleKwh         Float     @default(0) // energy while machineState = IDLE (waste)
-  downtimeKwh     Float     @default(0) // energy while machineState = BREAKDOWN (waste)
-  kwhPerUnit      Float?    // totalKwh / qtyProduced
-  kwhPerKgBatch   Float?    // totalKwh / batchSize (kg)
-  peakPowerKw     Float?    // maximum instantaneous power recorded
-  avgPowerKw      Float?    // average power over run period
-  anomalyCount    Int       @default(0) // #readings where powerKw > threshold during idle/down
-  computedAt      DateTime  @default(now())
+  id            String   @id @default(uuid())
+  workOrderId   String   @unique
+  factoryId     String
+  totalKwh      Float // total electrical energy over WO duration
+  runningKwh    Float    @default(0) // energy while machineState = RUNNING
+  idleKwh       Float    @default(0) // energy while machineState = IDLE (waste)
+  downtimeKwh   Float    @default(0) // energy while machineState = BREAKDOWN (waste)
+  kwhPerUnit    Float? // totalKwh / qtyProduced
+  kwhPerKgBatch Float? // totalKwh / batchSize (kg)
+  peakPowerKw   Float? // maximum instantaneous power recorded
+  avgPowerKw    Float? // average power over run period
+  anomalyCount  Int      @default(0) // #readings where powerKw > threshold during idle/down
+  computedAt    DateTime @default(now())
 
   factory   Factory   @relation(fields: [factoryId], references: [id])
   workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
@@ -1674,25 +1723,25 @@ model EnergyWOSummary {
 }
 
 model EnergySummary {
-  id                String         @id @default(uuid())
-  meterId           String
-  factoryId         String
-  periodType        EnergyPeriod
-  periodStart       DateTime
-  periodEnd         DateTime
-  totalConsumption  Float
-  unit              String
-  cost              Float?
-  costCurrency      String         @default("SAR")
-  productionQty     Float?
-  specificEnergy    Float?         // kWh/unit
-  createdAt         DateTime       @default(now())
+  id               String       @id @default(uuid())
+  meterId          String
+  factoryId        String
+  periodType       EnergyPeriod
+  periodStart      DateTime
+  periodEnd        DateTime
+  totalConsumption Float
+  unit             String
+  cost             Float?
+  costCurrency     String       @default("SAR")
+  productionQty    Float?
+  specificEnergy   Float? // kWh/unit
+  createdAt        DateTime     @default(now())
 
   factory Factory     @relation(fields: [factoryId], references: [id])
   meter   EnergyMeter @relation(fields: [meterId], references: [id])
 
-  @@map("energy_summaries")
   @@index([meterId, periodStart])
+  @@map("energy_summaries")
 }
 
 enum EnergyPeriod {
@@ -1708,52 +1757,52 @@ enum EnergyPeriod {
 // ============================================================
 
 model Device {
-  id             String   @id @default(uuid())
-  factoryId      String
-  machineId      String?
-  name           String
-  deviceCode     String   @unique
-  type           String   // PLC, HMI, GATEWAY, SENSOR, METER, DRIVE
-  protocol       String   // OPCUA, MODBUS, MQTT, FINS, S7, HTTP
-  ipAddress      String?
-  port           Int?
+  id               String    @id @default(uuid())
+  factoryId        String
+  machineId        String?
+  name             String
+  deviceCode       String    @unique
+  type             String // PLC, HMI, GATEWAY, SENSOR, METER, DRIVE
+  protocol         String // OPCUA, MODBUS, MQTT, FINS, S7, HTTP
+  ipAddress        String?
+  port             Int?
   connectionString String?
-  status         String   @default("DISCONNECTED") // CONNECTED, DISCONNECTED, ERROR
-  lastSeenAt     DateTime?
-  firmware       String?
-  config         Json?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  status           String    @default("DISCONNECTED") // CONNECTED, DISCONNECTED, ERROR
+  lastSeenAt       DateTime?
+  firmware         String?
+  config           Json?
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  factory        Factory          @relation(fields: [factoryId], references: [id])
-  machine        Machine?         @relation(fields: [machineId], references: [id])
+  factory        Factory         @relation(fields: [factoryId], references: [id])
+  machine        Machine?        @relation(fields: [machineId], references: [id])
   tagDefinitions TagDefinition[]
 
-  @@map("devices")
   @@index([factoryId])
+  @@map("devices")
 }
 
 model TagDefinition {
-  id                    String   @id @default(uuid())
-  factoryId             String
-  machineId             String?
-  deviceId              String?
-  code                  String
-  name                  String
-  description           String?
-  dataType              TagDataType
-  unit                  String?
-  minValue              Float?
-  maxValue              Float?
-  scaleFactor           Float?
-  offset                Float?
-  tagType               TagType  @default(MEASUREMENT)
-  historizationEnabled  Boolean  @default(true)
-  historizationRateSec  Int      @default(60)
-  isActive              Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                   String      @id @default(uuid())
+  factoryId            String
+  machineId            String?
+  deviceId             String?
+  code                 String
+  name                 String
+  description          String?
+  dataType             TagDataType
+  unit                 String?
+  minValue             Float?
+  maxValue             Float?
+  scaleFactor          Float?
+  offset               Float?
+  tagType              TagType     @default(MEASUREMENT)
+  historizationEnabled Boolean     @default(true)
+  historizationRateSec Int         @default(60)
+  isActive             Boolean     @default(true)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
 
   factory          Factory           @relation(fields: [factoryId], references: [id])
   machine          Machine?          @relation(fields: [machineId], references: [id])
@@ -1784,12 +1833,12 @@ enum TagType {
 }
 
 model TagCurrentValue {
-  id        String      @id @default(uuid())
-  tagId     String      @unique
+  id        String     @id @default(uuid())
+  tagId     String     @unique
   factoryId String
   value     String
-  quality   TagQuality  @default(GOOD)
-  timestamp DateTime    @default(now())
+  quality   TagQuality @default(GOOD)
+  timestamp DateTime   @default(now())
 
   tag TagDefinition @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
@@ -1811,7 +1860,7 @@ model AlarmDefinition {
   name         String
   severity     AlarmSeverity @default(HIGH)
   category     String        @default("PROCESS")
-  condition    String?       // GT, LT, EQ, NEQ
+  condition    String? // GT, LT, EQ, NEQ
   threshold    Float?
   deadband     Float?
   delaySeconds Int           @default(0)
@@ -1821,8 +1870,8 @@ model AlarmDefinition {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  factory Factory         @relation(fields: [factoryId], references: [id])
-  tag     TagDefinition?  @relation(fields: [tagId], references: [id])
+  factory Factory        @relation(fields: [factoryId], references: [id])
+  tag     TagDefinition? @relation(fields: [tagId], references: [id])
   events  AlarmEvent[]
 
   @@map("alarm_definitions")
@@ -1837,32 +1886,32 @@ enum AlarmSeverity {
 }
 
 model AlarmEvent {
-  id                 String        @id @default(uuid())
-  factoryId          String
-  alarmDefinitionId  String?
-  machineId          String?
-  code               String
-  description        String
-  severity           AlarmSeverity
-  category           String?
-  value              Float?
-  threshold          Float?
-  triggeredAt        DateTime
-  acknowledgedAt     DateTime?
-  acknowledgedById   String?
-  resolvedAt         DateTime?
-  resolvedById       String?
-  durationMinutes    Float?
-  notes              String?
-  metadata           Json?
+  id                String        @id @default(uuid())
+  factoryId         String
+  alarmDefinitionId String?
+  machineId         String?
+  code              String
+  description       String
+  severity          AlarmSeverity
+  category          String?
+  value             Float?
+  threshold         Float?
+  triggeredAt       DateTime
+  acknowledgedAt    DateTime?
+  acknowledgedById  String?
+  resolvedAt        DateTime?
+  resolvedById      String?
+  durationMinutes   Float?
+  notes             String?
+  metadata          Json?
 
   factory         Factory          @relation(fields: [factoryId], references: [id])
   machine         Machine?         @relation(fields: [machineId], references: [id])
   alarmDefinition AlarmDefinition? @relation(fields: [alarmDefinitionId], references: [id])
 
-  @@map("alarm_events")
   @@index([factoryId, triggeredAt])
   @@index([machineId, triggeredAt])
+  @@map("alarm_events")
 }
 
 // ============================================================
@@ -1872,7 +1921,7 @@ model AlarmEvent {
 model User {
   id                  String    @id @default(uuid())
   enterpriseId        String
-  factoryId           String?   // null = SUPER_ADMIN (access to all factories)
+  factoryId           String? // null = SUPER_ADMIN (access to all factories)
   email               String    @unique
   name                String
   nameAr              String?
@@ -1900,49 +1949,49 @@ model User {
   updatedAt           DateTime  @updatedAt
   deletedAt           DateTime?
 
-  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
-  factory      Factory?   @relation(fields: [factoryId], references: [id])
-  sessions     UserSession[]
-  auditLogs    AuditLog[]
+  enterprise    Enterprise     @relation(fields: [enterpriseId], references: [id])
+  factory       Factory?       @relation(fields: [factoryId], references: [id])
+  sessions      UserSession[]
+  auditLogs     AuditLog[]
   notifications Notification[]
 
   // Work Order relations
-  woCreated        WorkOrder[] @relation("WOCreatedBy")
-  woStarted        WorkOrder[] @relation("WOStartedBy")
-  woCompleted      WorkOrder[] @relation("WOCompletedBy")
-  woOperator       WorkOrder[] @relation("WOOperator")
-  woSupervisor     WorkOrder[] @relation("WOSupervisor")
-  shiftAsOperator  ShiftInstance[] @relation("ShiftOperator")
+  woCreated         WorkOrder[]     @relation("WOCreatedBy")
+  woStarted         WorkOrder[]     @relation("WOStartedBy")
+  woCompleted       WorkOrder[]     @relation("WOCompletedBy")
+  woOperator        WorkOrder[]     @relation("WOOperator")
+  woSupervisor      WorkOrder[]     @relation("WOSupervisor")
+  shiftAsOperator   ShiftInstance[] @relation("ShiftOperator")
   shiftAsSupervisor ShiftInstance[] @relation("ShiftSupervisor")
 
   // Quality
-  inspections   InspectionResult[] @relation("InspectionInspector")
-  ncrsDetected  NCR[]              @relation("NCRDetectedBy")
-  capaAssigned  CAPA[]             @relation("CAPAAssignedTo")
+  inspections  InspectionResult[] @relation("InspectionInspector")
+  ncrsDetected NCR[]              @relation("NCRDetectedBy")
+  capaAssigned CAPA[]             @relation("CAPAAssignedTo")
 
   // Maintenance
-  maintAssigned       MaintenanceWO[]    @relation("MaintAssignedTo")
-  maintRequested      MaintenanceWO[]    @relation("MaintRequestedBy")
-  pmTasksAssigned     PMTask[]           @relation("PMTaskAssignedTo")
-  sparePartsIssued    MaintWOSparePart[] @relation("SpareIssuedBy")
+  maintAssigned    MaintenanceWO[]    @relation("MaintAssignedTo")
+  maintRequested   MaintenanceWO[]    @relation("MaintRequestedBy")
+  pmTasksAssigned  PMTask[]           @relation("PMTaskAssignedTo")
+  sparePartsIssued MaintWOSparePart[] @relation("SpareIssuedBy")
 
   // Inventory & Traceability
-  stockMovements      StockMovement[]    @relation("StockMovementBy")
-  traceEvents         TraceEvent[]       @relation("TracePerformedBy")
+  stockMovements StockMovement[] @relation("StockMovementBy")
+  traceEvents    TraceEvent[]    @relation("TracePerformedBy")
 
   // Recipes
-  approvedRecipes     Recipe[]           @relation("RecipeApprovedBy")
+  approvedRecipes        Recipe[]        @relation("RecipeApprovedBy")
   // Downtime operator relation
-  operatedDowntimes   DowntimeEvent[]    @relation("DowntimeOperator")
-  jobOrdersAsOperator JobOrder[]         @relation("JOOperator")
-  scrapLogsAsOperator ScrapLog[]         @relation("ScrapLogOperator")
+  operatedDowntimes      DowntimeEvent[] @relation("DowntimeOperator")
+  jobOrdersAsOperator    JobOrder[]      @relation("JOOperator")
+  scrapLogsAsOperator    ScrapLog[]      @relation("ScrapLogOperator")
   changeRequestsRaised   ChangeRequest[] @relation("CRRequestedBy")
   changeRequestsReviewed ChangeRequest[] @relation("CRReviewedBy")
 
-  @@map("users")
   @@index([enterpriseId])
   @@index([factoryId])
   @@index([email])
+  @@map("users")
 }
 
 enum UserRole {
@@ -1966,15 +2015,15 @@ model UserSession {
   refreshToken String
   userAgent    String?
   ipAddress    String?
-  factoryId    String?  // which factory context was active
+  factoryId    String? // which factory context was active
   isRevoked    Boolean  @default(false)
   expiresAt    DateTime
   createdAt    DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("user_sessions")
   @@index([userId])
+  @@map("user_sessions")
 }
 
 // ============================================================
@@ -1982,27 +2031,27 @@ model UserSession {
 // ============================================================
 
 model Notification {
-  id          String           @id @default(uuid())
-  userId      String
-  factoryId   String?
-  type        NotificationType
-  title       String
-  message     String
-  data        Json?
-  priority    AlarmSeverity    @default(HIGH)
-  isRead      Boolean          @default(false)
-  readAt      DateTime?
-  emailSent   Boolean          @default(false)
-  smsSent     Boolean          @default(false)
-  pushSent    Boolean          @default(false)
-  createdAt   DateTime         @default(now())
+  id        String           @id @default(uuid())
+  userId    String
+  factoryId String?
+  type      NotificationType
+  title     String
+  message   String
+  data      Json?
+  priority  AlarmSeverity    @default(HIGH)
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  emailSent Boolean          @default(false)
+  smsSent   Boolean          @default(false)
+  pushSent  Boolean          @default(false)
+  createdAt DateTime         @default(now())
 
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   factory Factory? @relation(fields: [factoryId], references: [id])
 
-  @@map("notifications")
   @@index([userId, isRead])
   @@index([factoryId, createdAt])
+  @@map("notifications")
 }
 
 enum NotificationType {
@@ -2017,17 +2066,17 @@ enum NotificationType {
 }
 
 model NotificationRule {
-  id          String   @id @default(uuid())
-  factoryId   String
-  name        String
-  module      String
-  event       String
-  condition   Json?
-  channels    Json     // email, sms, whatsapp, push
-  recipients  Json     // userIds or roles
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  factoryId  String
+  name       String
+  module     String
+  event      String
+  condition  Json?
+  channels   Json // email, sms, whatsapp, push
+  recipients Json // userIds or roles
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   factory Factory @relation(fields: [factoryId], references: [id])
 
@@ -2056,10 +2105,10 @@ model AuditLog {
   factory Factory? @relation(fields: [factoryId], references: [id])
   user    User?    @relation(fields: [userId], references: [id])
 
-  @@map("audit_logs")
   @@index([factoryId, createdAt])
   @@index([userId])
   @@index([entityType, entityId])
+  @@map("audit_logs")
 }
 
 // ============================================================
@@ -2067,30 +2116,32 @@ model AuditLog {
 // ============================================================
 
 model RawMaterial {
-  id                  String   @id @default(uuid())
-  factoryId           String
-  code                String   // SAP / internal material code
-  name                String
-  nameAr              String?
-  description         String?
-  category            String?  // RAW, PACKAGING, CONSUMABLE, CHEMICAL, LABEL
-  unit                String   @default("KG")
-  unitCost            Float?
-  currentStock        Float    @default(0)
-  reservedStock       Float    @default(0)  // soft-reserved for active WOs
-  minStock            Float    @default(0)
-  maxStock            Float?
-  reorderPoint        Float?
-  storageLocation     String?  // free-text (legacy)
-  storageLocationId   String?  // FK to StorageLocation
-  supplierName        String?
-  leadTimeDays        Int?
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                String   @id @default(uuid())
+  factoryId         String
+  code              String // SAP / internal material code
+  name              String
+  nameAr            String?
+  description       String?
+  category          String? // RAW, PACKAGING, CONSUMABLE, CHEMICAL, LABEL
+  unit              String   @default("KG") // legacy text (kept in sync with unitRef.code)
+  unitId            String? // FK to UnitOfMeasure (preferred)
+  unitCost          Float?
+  currentStock      Float    @default(0)
+  reservedStock     Float    @default(0) // soft-reserved for active WOs
+  minStock          Float    @default(0)
+  maxStock          Float?
+  reorderPoint      Float?
+  storageLocation   String? // free-text (legacy)
+  storageLocationId String? // FK to StorageLocation
+  supplierName      String?
+  leadTimeDays      Int?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  factory            Factory            @relation(fields: [factoryId], references: [id])
-  storageLocationRef StorageLocation?   @relation(fields: [storageLocationId], references: [id])
+  factory            Factory               @relation(fields: [factoryId], references: [id])
+  storageLocationRef StorageLocation?      @relation(fields: [storageLocationId], references: [id])
+  unitRef            UnitOfMeasure?        @relation(fields: [unitId], references: [id])
   materialLots       MaterialLot[]
   bomItems           BOMItem[]
   recipeIngredients  RecipeIngredient[]
@@ -2104,37 +2155,53 @@ model RawMaterial {
 // BILL OF MATERIALS (proper BOM linking SKU → RawMaterials)
 // ============================================================
 
-model BOMHeader {
-  id          String   @id @default(uuid())
-  factoryId   String
-  skuId       String
-  version     String   @default("1.0")
-  isActive    Boolean  @default(true)
-  approvedAt  DateTime?
-  approvedById String?
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+// How a BOM came to exist — the BOM is a *summary* of the manufacturing process.
+enum BomSource {
+  MANUAL // hand-entered lines (legacy flow)
+  DERIVED_FROM_PROCESS // generated from RoutingStepMaterials of the linked process
+  DRAFT_FOR_PROCESS // BOM entered first; a draft process was generated from it
+}
 
-  sku   SKU       @relation(fields: [skuId], references: [id])
-  items BOMItem[]
+model BOMHeader {
+  id           String    @id @default(uuid())
+  factoryId    String
+  skuId        String
+  version      String    @default("1.0")
+  isActive     Boolean   @default(true)
+  approvedAt   DateTime?
+  approvedById String?
+  notes        String?
+  // Smart link: process = source of truth, BOM = derived summary
+  processId    String?
+  sourceType   BomSource @default(MANUAL)
+  isStale      Boolean   @default(false) // process materials changed after derivation
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sku     SKU                   @relation(fields: [skuId], references: [id])
+  process ManufacturingProcess? @relation(fields: [processId], references: [id], onDelete: SetNull)
+  items   BOMItem[]
 
   @@unique([skuId, version])
   @@map("bom_headers")
 }
 
 model BOMItem {
-  id              String   @id @default(uuid())
-  bomId           String
-  rawMaterialId   String
-  quantityPer     Float    // quantity needed per 1 unit of finished product
-  unit            String
-  scrapFactor     Float    @default(0)  // additional scrap % (0.05 = 5%)
-  isOptional      Boolean  @default(false)
-  notes           String?
+  id            String  @id @default(uuid())
+  bomId         String
+  rawMaterialId String
+  quantityPer   Float // quantity needed per 1 unit of finished product
+  unit          String // legacy text (kept in sync with unitRef.code)
+  unitId        String? // FK to UnitOfMeasure (preferred)
+  scrapFactor   Float   @default(0) // additional scrap % (0.05 = 5%)
+  isOptional    Boolean @default(false)
+  notes         String?
+  routingStepId String? // which routing step consumes this line (set when derived)
 
-  bom         BOMHeader   @relation(fields: [bomId], references: [id], onDelete: Cascade)
-  rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id])
+  bom            BOMHeader      @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  rawMaterial    RawMaterial    @relation(fields: [rawMaterialId], references: [id])
+  unitRef        UnitOfMeasure? @relation(fields: [unitId], references: [id])
+  routingStepRef RoutingStep?   @relation(fields: [routingStepId], references: [id], onDelete: SetNull)
 
   @@map("bom_items")
 }
@@ -2147,16 +2214,16 @@ model StockMovement {
   id              String          @id @default(uuid())
   factoryId       String
   entityType      StockEntityType
-  entityId        String          // sparePartId or rawMaterialId
+  entityId        String // sparePartId or rawMaterialId
   entityCode      String
   entityName      String
   movementType    MovementType
-  quantity        Float           // positive = in, negative = out (for ISSUE/CONSUMPTION)
+  quantity        Float // positive = in, negative = out (for ISSUE/CONSUMPTION)
   unitCost        Float?
   totalCost       Float?
   stockBefore     Float?
   stockAfter      Float?
-  referenceType   String?         // MAINTENANCE_WO, PRODUCTION_WO, PURCHASE_ORDER, ADJUSTMENT
+  referenceType   String? // MAINTENANCE_WO, PRODUCTION_WO, PURCHASE_ORDER, ADJUSTMENT
   referenceId     String?
   referenceNumber String?
   performedById   String?
@@ -2166,10 +2233,10 @@ model StockMovement {
   factory     Factory @relation(fields: [factoryId], references: [id])
   performedBy User?   @relation("StockMovementBy", fields: [performedById], references: [id])
 
-  @@map("stock_movements")
   @@index([factoryId, createdAt])
   @@index([entityType, entityId])
   @@index([referenceType, referenceId])
+  @@map("stock_movements")
 }
 
 enum StockEntityType {
@@ -2179,13 +2246,13 @@ enum StockEntityType {
 }
 
 enum MovementType {
-  RECEIPT      // incoming stock (purchase, transfer in)
-  ISSUE        // outgoing (to maintenance WO, to production)
-  RETURN       // returned unused stock
-  ADJUSTMENT   // manual count adjustment
-  RESERVATION  // soft reserve (pending approval)
-  RELEASE      // release reservation (WO cancelled)
-  CONSUMPTION  // production consumption
+  RECEIPT // incoming stock (purchase, transfer in)
+  ISSUE // outgoing (to maintenance WO, to production)
+  RETURN // returned unused stock
+  ADJUSTMENT // manual count adjustment
+  RESERVATION // soft reserve (pending approval)
+  RELEASE // release reservation (WO cancelled)
+  CONSUMPTION // production consumption
 }
 
 // ============================================================
@@ -2193,20 +2260,20 @@ enum MovementType {
 // ============================================================
 
 model TraceEvent {
-  id            String   @id @default(uuid())
-  factoryId     String?
+  id        String  @id @default(uuid())
+  factoryId String?
 
   // Entity this event concerns
-  entityType    String   // MAINT_WO, PROD_WO, BATCH, SPARE_PART, RAW_MATERIAL, MACHINE, PRODUCT
-  entityId      String
-  entityCode    String?  // human-readable code/number
+  entityType String // MAINT_WO, PROD_WO, BATCH, SPARE_PART, RAW_MATERIAL, MACHINE, PRODUCT
+  entityId   String
+  entityCode String? // human-readable code/number
 
   // Event description
-  eventType     String   // CREATED, STATUS_CHANGED, PARTS_REQUESTED, PARTS_ISSUED, STOCK_IN, STOCK_OUT, CONSUMED, RELEASED, etc.
-  fromValue     String?  // previous status / quantity
-  toValue       String?  // new status / quantity
-  quantity      Float?
-  eventData     Json?    // arbitrary extra metadata
+  eventType String // CREATED, STATUS_CHANGED, PARTS_REQUESTED, PARTS_ISSUED, STOCK_IN, STOCK_OUT, CONSUMED, RELEASED, etc.
+  fromValue String? // previous status / quantity
+  toValue   String? // new status / quantity
+  quantity  Float?
+  eventData Json? // arbitrary extra metadata
 
   // Who/when/where
   performedById String?
@@ -2214,16 +2281,16 @@ model TraceEvent {
   notes         String?
 
   // Optional cross-reference (e.g., spare part issued TO a maintenance WO)
-  relatedType   String?
-  relatedId     String?
+  relatedType String?
+  relatedId   String?
 
   factory     Factory? @relation(fields: [factoryId], references: [id])
   performedBy User?    @relation("TracePerformedBy", fields: [performedById], references: [id])
 
-  @@map("trace_events")
   @@index([entityType, entityId])
   @@index([factoryId, performedAt])
   @@index([performedAt])
+  @@map("trace_events")
 }
 
 // ============================================================
@@ -2232,27 +2299,27 @@ model TraceEvent {
 // ============================================================
 
 enum TraceEntityType {
-  MATERIAL_LOT       // incoming raw material / packaging lot
-  WORK_ORDER         // production work order
+  MATERIAL_LOT // incoming raw material / packaging lot
+  WORK_ORDER // production work order
   FINISHED_GOODS_LOT // completed product batch
-  RECIPE             // recipe version used
+  RECIPE // recipe version used
 }
 
 enum TraceLinkType {
-  CONSUMED_BY    // MATERIAL_LOT → WORK_ORDER (material was consumed in WO)
-  PRODUCED_FROM  // WORK_ORDER → FINISHED_GOODS_LOT (WO produced this FG lot)
-  GOVERNED_BY    // WORK_ORDER → RECIPE (WO was executed against this recipe)
+  CONSUMED_BY // MATERIAL_LOT → WORK_ORDER (material was consumed in WO)
+  PRODUCED_FROM // WORK_ORDER → FINISHED_GOODS_LOT (WO produced this FG lot)
+  GOVERNED_BY // WORK_ORDER → RECIPE (WO was executed against this recipe)
 }
 
 model TraceabilityLink {
   id         String          @id @default(uuid())
   factoryId  String
   parentType TraceEntityType // the source entity
-  parentId   String          // FK into the relevant table (materialLotId, workOrderId, etc.)
+  parentId   String // FK into the relevant table (materialLotId, workOrderId, etc.)
   childType  TraceEntityType // the destination entity
   childId    String
   linkType   TraceLinkType
-  qty        Float?          // quantity consumed/produced
+  qty        Float? // quantity consumed/produced
   unit       String?
   createdAt  DateTime        @default(now())
 
@@ -2269,22 +2336,22 @@ model TraceabilityLink {
 // ============================================================
 
 enum StorageZone {
-  RAW_MATERIAL      // RM warehouse
-  FINISHED_GOODS    // FG warehouse
-  SPARE_PARTS       // maintenance parts room
-  QUARANTINE        // QC hold / reject area
-  PRODUCTION        // line-side staging
-  DISPATCH          // shipping/dispatch bay
+  RAW_MATERIAL // RM warehouse
+  FINISHED_GOODS // FG warehouse
+  SPARE_PARTS // maintenance parts room
+  QUARANTINE // QC hold / reject area
+  PRODUCTION // line-side staging
+  DISPATCH // shipping/dispatch bay
 }
 
 model StorageLocation {
   id          String      @id @default(uuid())
   factoryId   String
-  code        String      // e.g. "RM-A01", "SP-B03"
+  code        String // e.g. "RM-A01", "SP-B03"
   name        String
   zone        StorageZone
   description String?
-  capacity    Float?      // max units / pallets / kg — optional
+  capacity    Float? // max units / pallets / kg — optional
   isActive    Boolean     @default(true)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
@@ -2304,41 +2371,43 @@ model StorageLocation {
 // ============================================================
 
 model ManufacturingProcess {
-  id          String   @id @default(uuid())
-  factoryId   String
-  skuId       String?  // set when scopeType = PRODUCT (legacy single-product routing)
-  version     String   @default("1.0")
-  name        String
-  description String?
+  id                 String    @id @default(uuid())
+  factoryId          String
+  skuId              String? // set when scopeType = PRODUCT (legacy single-product routing)
+  version            String    @default("1.0")
+  name               String
+  description        String?
   totalCycleTimeMins Float?
-  isActive    Boolean  @default(true)
-  approvedAt  DateTime?
-  approvedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isActive           Boolean   @default(true)
+  approvedAt         DateTime?
+  approvedById       String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   // Scope: which products this routing applies to
   scopeType    ProcessScope @default(PRODUCT)
-  categoryId   String?      // scopeType = CATEGORY → all SKUs of this category
-  baseWeightId String?      // scopeType = BASE_WEIGHT → all SKUs of this weight
+  categoryId   String? // scopeType = CATEGORY → all SKUs of this category
+  baseWeightId String? // scopeType = BASE_WEIGHT → all SKUs of this weight
 
-  factory      Factory          @relation(fields: [factoryId], references: [id])
-  sku          SKU?             @relation(fields: [skuId], references: [id])
-  categoryRef  ProductCategory? @relation(fields: [categoryId], references: [id])
-  baseWeightRef BaseWeight?     @relation(fields: [baseWeightId], references: [id])
-  skuLinks     ManufacturingProcessSku[]   // scopeType = PRODUCT_LIST
-  routingSteps RoutingStep[]
-  recipes      Recipe[]
+  factory       Factory                   @relation(fields: [factoryId], references: [id])
+  sku           SKU?                      @relation(fields: [skuId], references: [id])
+  categoryRef   ProductCategory?          @relation(fields: [categoryId], references: [id])
+  baseWeightRef BaseWeight?               @relation(fields: [baseWeightId], references: [id])
+  skuLinks       ManufacturingProcessSku[] // scopeType = PRODUCT_LIST
+  routingSteps   RoutingStep[]
+  recipes        Recipe[]
+  derivedBoms    BOMHeader[]
+  changeRequests ChangeRequest[]
 
   @@unique([skuId, version])
   @@map("manufacturing_processes")
 }
 
 enum ProcessScope {
-  PRODUCT       // one SKU
-  CATEGORY      // every SKU in a category
-  BASE_WEIGHT   // every SKU with the same base weight
-  PRODUCT_LIST  // explicit SKU list
+  PRODUCT // one SKU
+  CATEGORY // every SKU in a category
+  BASE_WEIGHT // every SKU with the same base weight
+  PRODUCT_LIST // explicit SKU list
 }
 
 // Join table for PRODUCT_LIST scope
@@ -2358,11 +2427,11 @@ model RoutingStep {
   id            String   @id @default(uuid())
   processId     String
   stepNumber    Int
-  operationName String   // e.g. "Mixing", "Filling", "Capping", "Labelling", "Packaging"
-  workCenter    String?  // machine / area code
+  operationName String // e.g. "Mixing", "Filling", "Capping", "Labelling", "Packaging"
+  workCenter    String? // machine / area code
   machineId     String?
-  cycleTimeSec  Float?   // PRIMARY reference for job-order cycle time & duration
-  cycleTimeMins Float?   // legacy (auto-derived = cycleTimeSec/60)
+  cycleTimeSec  Float? // PRIMARY reference for job-order cycle time & duration
+  cycleTimeMins Float? // legacy (auto-derived = cycleTimeSec/60)
   setupTimeMins Float?
   // Unit flow: what the step consumes/produces (BaseUnit codes: PCS/INNER/CARTON/PALLET).
   // cycleTimeSec is "seconds per ONE outUnit" — scheduling converts the order
@@ -2370,23 +2439,47 @@ model RoutingStep {
   inUnit        String?
   outUnit       String?
   description   String?
-  parameters    Json?    // process parameters: { temperature: 80, pressure: 2.5 }
+  parameters    Json? // process parameters: { temperature: 80, pressure: 2.5 }
   isOptional    Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  workCenterId  String?   // FK to WorkCenter (logical routing cell)
+  workCenterId String? // FK to WorkCenter (logical routing cell)
 
-  process         ManufacturingProcess  @relation(fields: [processId], references: [id], onDelete: Cascade)
-  machine         Machine?              @relation(fields: [machineId], references: [id])
-  workCenterRef   WorkCenter?           @relation(fields: [workCenterId], references: [id])
-  predecessors    StepDependency[]      @relation("DepTo")
-  successors      StepDependency[]      @relation("DepFrom")
-  jobOrders       JobOrder[]
-  materials       RoutingStepMaterial[]
+  process        ManufacturingProcess       @relation(fields: [processId], references: [id], onDelete: Cascade)
+  machine        Machine?                   @relation(fields: [machineId], references: [id])
+  workCenterRef  WorkCenter?                @relation(fields: [workCenterId], references: [id])
+  predecessors   StepDependency[]           @relation("DepTo")
+  successors     StepDependency[]           @relation("DepFrom")
+  jobOrders      JobOrder[]
+  materials      RoutingStepMaterial[]
+  machineOptions RoutingStepMachineOption[]
+  bomItems       BOMItem[]
 
   @@unique([processId, stepNumber])
   @@map("routing_steps")
+}
+
+// Primary + alternative machines for a routing step. priority 0 = primary/default;
+// 1+ = alternatives in preference order. Auto-assignment at WO generation picks the
+// default when idle, otherwise the earliest-finishing alternative (wait + setup + run).
+model RoutingStepMachineOption {
+  id            String   @id @default(uuid())
+  stepId        String
+  machineId     String
+  priority      Int      @default(1)
+  isDefault     Boolean  @default(false)
+  cycleTimeSec  Float? // override: this machine may run slower/faster than the step default
+  setupTimeMins Float? // changeover penalty when switching to this machine
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  step    RoutingStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  machine Machine     @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@unique([stepId, machineId])
+  @@index([stepId])
+  @@map("routing_step_machine_options")
 }
 
 // Input raw materials consumed by a routing step.
@@ -2394,20 +2487,22 @@ model RoutingStep {
 // completion writes real MaterialConsumption rows (qty × produced output)
 // feeding Traceability & Genealogy.
 model RoutingStepMaterial {
-  id            String   @id @default(uuid())
-  stepId        String
-  rawMaterialId String?  // optional link to the raw-materials master
-  materialCode  String?
-  name          String
+  id               String   @id @default(uuid())
+  stepId           String
+  rawMaterialId    String? // optional link to the raw-materials master
+  materialCode     String?
+  name             String
   qtyPerOutputUnit Float
-  unit          String   @default("KG")
-  createdAt     DateTime @default(now())
+  unit             String   @default("KG") // legacy text (kept in sync with unitRef.code)
+  unitId           String? // FK to UnitOfMeasure (preferred; auto-fetched from raw material)
+  createdAt        DateTime @default(now())
 
-  step        RoutingStep  @relation(fields: [stepId], references: [id], onDelete: Cascade)
-  rawMaterial RawMaterial? @relation(fields: [rawMaterialId], references: [id], onDelete: SetNull)
+  step        RoutingStep    @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  rawMaterial RawMaterial?   @relation(fields: [rawMaterialId], references: [id], onDelete: SetNull)
+  unitRef     UnitOfMeasure? @relation(fields: [unitId], references: [id])
 
-  @@map("routing_step_materials")
   @@index([stepId])
+  @@map("routing_step_materials")
 }
 
 // ============================================================
@@ -2426,21 +2521,21 @@ enum Priority {
 // ============================================================
 
 enum WorkCenterLevel {
-  PLANT   // Level 0 – entire site
-  AREA    // Level 1 – e.g. Mixing Hall, Filling Hall
-  LINE    // Level 2 – production line within an area
-  CELL    // Level 3 – individual station / work cell
+  PLANT // Level 0 – entire site
+  AREA // Level 1 – e.g. Mixing Hall, Filling Hall
+  LINE // Level 2 – production line within an area
+  CELL // Level 3 – individual station / work cell
 }
 
 model WorkCenter {
   id          String          @id @default(uuid())
   factoryId   String
-  parentId    String?         // null = root (PLANT level)
-  code        String          // e.g. "WC-MIX-A01"
-  name        String          // e.g. "Mixing Cell A"
+  parentId    String? // null = root (PLANT level)
+  code        String // e.g. "WC-MIX-A01"
+  name        String // e.g. "Mixing Cell A"
   level       WorkCenterLevel
   description String?
-  capacity    Float?          // units/hour capacity
+  capacity    Float? // units/hour capacity
   isActive    Boolean         @default(true)
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
@@ -2462,21 +2557,21 @@ model WorkCenter {
 // ============================================================
 
 enum DependencyType {
-  FINISH_TO_START   // B cannot start until A finishes (default)
-  START_TO_START    // B cannot start until A starts
-  START_TO_FINISH   // B cannot finish until A starts
-  FINISH_TO_FINISH  // B cannot finish until A finishes
+  FINISH_TO_START // B cannot start until A finishes (default)
+  START_TO_START // B cannot start until A starts
+  START_TO_FINISH // B cannot finish until A starts
+  FINISH_TO_FINISH // B cannot finish until A finishes
 }
 
 model StepDependency {
   id         String         @id @default(uuid())
-  fromStepId String         // predecessor step
-  toStepId   String         // successor step
+  fromStepId String // predecessor step
+  toStepId   String // successor step
   type       DependencyType @default(FINISH_TO_START)
   lagMins    Float          @default(0) // positive = lag, negative = lead
 
   fromStep RoutingStep @relation("DepFrom", fields: [fromStepId], references: [id], onDelete: Cascade)
-  toStep   RoutingStep @relation("DepTo",   fields: [toStepId],   references: [id], onDelete: Cascade)
+  toStep   RoutingStep @relation("DepTo", fields: [toStepId], references: [id], onDelete: Cascade)
 
   @@unique([fromStepId, toStepId])
   @@map("step_dependencies")
@@ -2487,28 +2582,28 @@ model StepDependency {
 // ============================================================
 
 enum RecipeStatus {
-  DRAFT      // being authored
-  REVIEW     // submitted for approval
-  APPROVED   // production-ready
-  OBSOLETE   // superseded by newer version
+  DRAFT // being authored
+  REVIEW // submitted for approval
+  APPROVED // production-ready
+  OBSOLETE // superseded by newer version
 }
 
 model Recipe {
   id                String       @id @default(uuid())
   factoryId         String
   skuId             String
-  processId         String?      // linked ManufacturingProcess (routing)
-  code              String       // e.g. "RCP-ALWATANI-001"
+  processId         String? // linked ManufacturingProcess (routing)
+  code              String // e.g. "RCP-ALWATANI-001"
   version           String       @default("1.0")
   name              String
   description       String?
   status            RecipeStatus @default(DRAFT)
-  batchSize         Float?       // target batch size (e.g. 1000 KG)
-  batchUnit         String?      // e.g. KG, L, PCS
-  yieldPct          Float?       // expected yield %
-  cycleTimeSecs     Float?       // target cycle time per batch
+  batchSize         Float? // target batch size (e.g. 1000 KG)
+  batchUnit         String? // e.g. KG, L, PCS
+  yieldPct          Float? // expected yield %
+  cycleTimeSecs     Float? // target cycle time per batch
   shelfLifeDays     Int?
-  storageConditions String?      // e.g. "Cool, dry, away from direct sunlight"
+  storageConditions String? // e.g. "Cool, dry, away from direct sunlight"
   approvedAt        DateTime?
   approvedById      String?
   effectiveFrom     DateTime?
@@ -2517,12 +2612,12 @@ model Recipe {
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
-  factory      Factory               @relation(fields: [factoryId], references: [id])
-  sku          SKU                   @relation(fields: [skuId], references: [id])
-  process      ManufacturingProcess? @relation(fields: [processId], references: [id])
-  approvedBy   User?                 @relation("RecipeApprovedBy", fields: [approvedById], references: [id])
-  ingredients  RecipeIngredient[]
-  workOrders   WorkOrder[]
+  factory     Factory               @relation(fields: [factoryId], references: [id])
+  sku         SKU                   @relation(fields: [skuId], references: [id])
+  process     ManufacturingProcess? @relation(fields: [processId], references: [id])
+  approvedBy  User?                 @relation("RecipeApprovedBy", fields: [approvedById], references: [id])
+  ingredients RecipeIngredient[]
+  workOrders  WorkOrder[]
 
   @@unique([skuId, version])
   @@map("recipes")
@@ -2532,13 +2627,13 @@ model RecipeIngredient {
   id            String  @id @default(uuid())
   recipeId      String
   rawMaterialId String
-  phase         String?  // e.g. "Premix A", "Main Mix", "Top-up"
-  quantityPer   Float    // quantity per batch
+  phase         String? // e.g. "Premix A", "Main Mix", "Top-up"
+  quantityPer   Float // quantity per batch
   unit          String
-  scrapFactor   Float    @default(0) // % waste allowance
-  isOptional    Boolean  @default(false)
+  scrapFactor   Float   @default(0) // % waste allowance
+  isOptional    Boolean @default(false)
   notes         String?
-  sortOrder     Int      @default(0)
+  sortOrder     Int     @default(0)
 
   recipe      Recipe      @relation(fields: [recipeId], references: [id], onDelete: Cascade)
   rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id])
@@ -2554,71 +2649,74 @@ model RecipeIngredient {
 // ============================================================
 
 enum JobOrderStatus {
-  SCHEDULED   // created, not yet ready to start (predecessor incomplete)
-  READY       // predecessor handover criteria met — operator can start
-  EXECUTING   // machine actively running this step
-  PAUSED      // temporarily interrupted
-  COMPLETE    // step finished, output confirmed
+  SCHEDULED // created, not yet ready to start (predecessor incomplete)
+  READY // predecessor handover criteria met — operator can start
+  EXECUTING // machine actively running this step
+  PAUSED // temporarily interrupted
+  COMPLETE // step finished, output confirmed
   CANCELLED
 }
 
 model JobOrder {
-  id                String         @id @default(uuid())
-  factoryId         String
-  workOrderId       String
-  routingStepId     String?        // link to ManufacturingProcess RoutingStep
-  machineId         String?
-  workCenterId      String?
-  sequenceOrder     Int            // mirrors RoutingStep.stepNumber
-  operationName     String         // e.g. "Filling", "Cartoning", "Check-weigh"
-  status            JobOrderStatus @default(SCHEDULED)
+  id            String         @id @default(uuid())
+  factoryId     String
+  workOrderId   String
+  routingStepId String? // link to ManufacturingProcess RoutingStep
+  machineId     String?
+  workCenterId  String?
+  sequenceOrder Int // mirrors RoutingStep.stepNumber
+  operationName String // e.g. "Filling", "Cartoning", "Check-weigh"
+  status        JobOrderStatus @default(SCHEDULED)
 
   // Predecessor chain — JO[N] becomes READY when JO[N-1] signals COMPLETE
-  predecessorId     String?
-  predecessorType   DependencyType @default(FINISH_TO_START) // FS/SS/SF/FF vs predecessor
-  predecessorLagMins Float         @default(0)               // +lag / −lead minutes
+  predecessorId      String?
+  predecessorType    DependencyType @default(FINISH_TO_START) // FS/SS/SF/FF vs predecessor
+  predecessorLagMins Float          @default(0) // +lag / −lead minutes
 
   // Schedule
-  plannedStart      DateTime?
-  plannedEnd        DateTime?
-  actualStart       DateTime?
-  actualEnd         DateTime?
+  plannedStart DateTime?
+  plannedEnd   DateTime?
+  actualStart  DateTime?
+  actualEnd    DateTime?
 
   // Quantities
-  plannedQtyIn      Float?         // input quantity planned
-  plannedQtyOut     Float?         // expected output quantity
-  actualQtyGood     Float          @default(0)
-  actualQtyRejected Float          @default(0)
-  handoverQty       Float          @default(0)   // qty actually transferred to next step
-  handoverCriteria  Float?         // min qty before successor becomes READY
-  outputUnit        String?        // PIECE, CARTON, PALLET — unit of plannedQtyOut / actualQtyGood
-  inputUnit         String?        // unit of plannedQtyIn (step's consumed unit)
+  plannedQtyIn      Float? // input quantity planned
+  plannedQtyOut     Float? // expected output quantity
+  actualQtyGood     Float   @default(0)
+  actualQtyRejected Float   @default(0)
+  handoverQty       Float   @default(0) // qty actually transferred to next step
+  handoverCriteria  Float? // min qty before successor becomes READY
+  outputUnit        String? // PIECE, CARTON, PALLET — unit of plannedQtyOut / actualQtyGood
+  inputUnit         String? // unit of plannedQtyIn (step's consumed unit)
 
   // OEE denominator — stamped from MachineCycleTime at JO creation
   idealCycleTimeSec Float?
 
-  operatorId        String?        // assigned shop floor operator
-  scrapReason       String?        // reason for actualQtyRejected
+  operatorId  String? // assigned shop floor operator
+  scrapReason String? // reason for actualQtyRejected
 
-  notes             String?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  // Intelligent machine allocation audit trail
+  assignmentReason String? // DEFAULT_IDLE | DEFAULT_BUSY_ALT_SELECTED | MANUAL | HEURISTIC
 
-  factory      Factory         @relation(fields: [factoryId], references: [id])
-  workOrder    WorkOrder       @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
-  routingStep  RoutingStep?    @relation(fields: [routingStepId], references: [id])
-  machine      Machine?        @relation(fields: [machineId], references: [id])
-  workCenter   WorkCenter?     @relation(fields: [workCenterId], references: [id])
-  predecessor  JobOrder?       @relation("JOChain", fields: [predecessorId], references: [id])
-  successors   JobOrder[]      @relation("JOChain")
-  materials    JobOrderMaterial[]
-  operator     User?           @relation("JOOperator", fields: [operatorId], references: [id])
-  scrapLogs    ScrapLog[]
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@map("job_orders")
+  factory     Factory            @relation(fields: [factoryId], references: [id])
+  workOrder   WorkOrder          @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  routingStep RoutingStep?       @relation(fields: [routingStepId], references: [id])
+  machine     Machine?           @relation(fields: [machineId], references: [id])
+  workCenter  WorkCenter?        @relation(fields: [workCenterId], references: [id])
+  predecessor JobOrder?          @relation("JOChain", fields: [predecessorId], references: [id])
+  successors  JobOrder[]         @relation("JOChain")
+  materials   JobOrderMaterial[]
+  operator    User?              @relation("JOOperator", fields: [operatorId], references: [id])
+  scrapLogs   ScrapLog[]
+
   @@index([workOrderId])
   @@index([factoryId, status])
   @@index([machineId])
+  @@map("job_orders")
 }
 
 // Per-step scrap / rejection log — every increment of actualQtyRejected creates one entry
@@ -2639,40 +2737,40 @@ model ScrapLog {
   jobOrder  JobOrder  @relation(fields: [jobOrderId], references: [id])
   operator  User?     @relation("ScrapLogOperator", fields: [operatorId], references: [id])
 
-  @@map("scrap_logs")
   @@index([factoryId, createdAt])
   @@index([jobOrderId])
   @@index([workOrderId])
+  @@map("scrap_logs")
 }
 
 enum ScrapCategory {
-  QUALITY      // Failed quality / spec out-of-range
-  SETUP        // Machine setup / startup waste
-  DAMAGE       // Physical handling damage
-  OVERRUN      // Weight / fill overrun
-  MATERIAL     // Raw material defect
-  MACHINE      // Machine malfunction
-  OPERATOR     // Operator error
+  QUALITY // Failed quality / spec out-of-range
+  SETUP // Machine setup / startup waste
+  DAMAGE // Physical handling damage
+  OVERRUN // Weight / fill overrun
+  MATERIAL // Raw material defect
+  MACHINE // Machine malfunction
+  OPERATOR // Operator error
   OTHER
 }
 
 // Per-step material specification: inputs consumed and outputs produced
 model JobOrderMaterial {
-  id            String   @id @default(uuid())
+  id            String  @id @default(uuid())
   jobOrderId    String
   materialCode  String
   materialName  String
-  direction     String   // IN | OUT | REJECT
+  direction     String // IN | OUT | REJECT
   materialLotId String?
   plannedQty    Float
-  actualQty     Float    @default(0)
+  actualQty     Float   @default(0)
   unit          String
 
   jobOrder    JobOrder     @relation(fields: [jobOrderId], references: [id], onDelete: Cascade)
   materialLot MaterialLot? @relation(fields: [materialLotId], references: [id])
 
-  @@map("job_order_materials")
   @@index([jobOrderId])
+  @@map("job_order_materials")
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -2684,11 +2782,11 @@ model JobOrderMaterial {
 // ════════════════════════════════════════════════════════════════
 
 enum DashboardSource {
-  STAR_MES_NATIVE   // existing in-app module dashboards / analytics pages
-  GRAFANA           // Grafana-hosted dashboard (embedded)
-  REPORT            // existing STAR-MES report pages
-  EXTERNAL          // arbitrary external/embeddable URL
-  TEMPLATE          // reusable dashboard template (clone to create)
+  STAR_MES_NATIVE // existing in-app module dashboards / analytics pages
+  GRAFANA // Grafana-hosted dashboard (embedded)
+  REPORT // existing STAR-MES report pages
+  EXTERNAL // arbitrary external/embeddable URL
+  TEMPLATE // reusable dashboard template (clone to create)
 }
 
 enum DashboardType {
@@ -2705,10 +2803,10 @@ enum DashboardType {
 }
 
 enum DashboardVisibility {
-  PRIVATE       // only the creator
-  FACTORY       // everyone in the same factory
-  ENTERPRISE    // everyone in the enterprise
-  PUBLIC        // any authenticated user
+  PRIVATE // only the creator
+  FACTORY // everyone in the same factory
+  ENTERPRISE // everyone in the enterprise
+  PUBLIC // any authenticated user
 }
 
 enum DashboardPermissionLevel {
@@ -2718,97 +2816,97 @@ enum DashboardPermissionLevel {
 }
 
 model DashboardCategory {
-  id          String      @id @default(uuid())
-  factoryId   String?     // null = global / enterprise-wide category
-  key         String      // stable slug e.g. "production", "energy"
+  id          String   @id @default(uuid())
+  factoryId   String? // null = global / enterprise-wide category
+  key         String // stable slug e.g. "production", "energy"
   name        String
   nameAr      String?
   description String?
-  icon        String?     // lucide icon name
+  icon        String? // lucide icon name
   color       String?
-  sortOrder   Int         @default(0)
-  isSystem    Boolean     @default(false) // seeded, non-deletable
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  sortOrder   Int      @default(0)
+  isSystem    Boolean  @default(false) // seeded, non-deletable
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  dashboards  Dashboard[]
+  dashboards Dashboard[]
 
   @@unique([factoryId, key])
-  @@map("dashboard_categories")
   @@index([factoryId])
+  @@map("dashboard_categories")
 }
 
 model Dashboard {
-  id            String              @id @default(uuid())
-  factoryId     String?             // null = global/enterprise dashboard (visible across factories)
-  enterpriseId  String?
-  categoryId    String?
-  slug          String?             // optional stable slug for deep-linking
-  title         String
-  titleAr       String?
-  description   String?
-  source        DashboardSource     @default(STAR_MES_NATIVE)
-  type          DashboardType       @default(OPERATIONAL)
-  visibility    DashboardVisibility @default(FACTORY)
+  id           String              @id @default(uuid())
+  factoryId    String? // null = global/enterprise dashboard (visible across factories)
+  enterpriseId String?
+  categoryId   String?
+  slug         String? // optional stable slug for deep-linking
+  title        String
+  titleAr      String?
+  description  String?
+  source       DashboardSource     @default(STAR_MES_NATIVE)
+  type         DashboardType       @default(OPERATIONAL)
+  visibility   DashboardVisibility @default(FACTORY)
 
   // Native / external routing
-  route         String?             // internal Next.js route, e.g. "/production/oee"
-  externalUrl   String?             // external embeddable URL (EXTERNAL source)
+  route       String? // internal Next.js route, e.g. "/production/oee"
+  externalUrl String? // external embeddable URL (EXTERNAL source)
 
   // Grafana linkage
-  grafanaUid    String?             // Grafana dashboard UID
+  grafanaUid    String? // Grafana dashboard UID
   grafanaSlug   String?
   grafanaOrgId  Int?
   grafanaFolder String?
 
   // Presentation / behavior
-  icon          String?             // lucide icon name
-  thumbnailUrl  String?
-  tags          String[]            @default([])
-  isFactoryAware Boolean            @default(true) // inherit selected factory context
-  supportedScopes String[]         @default([])    // e.g. ["FACTORY","AREA","LINE","MACHINE","SHIFT","PRODUCT","BATCH"]
-  defaultTimeRange String?          @default("now-24h")
-  refreshInterval  String?          @default("30s")
+  icon             String? // lucide icon name
+  thumbnailUrl     String?
+  tags             String[] @default([])
+  isFactoryAware   Boolean  @default(true) // inherit selected factory context
+  supportedScopes  String[] @default([]) // e.g. ["FACTORY","AREA","LINE","MACHINE","SHIFT","PRODUCT","BATCH"]
+  defaultTimeRange String?  @default("now-24h")
+  refreshInterval  String?  @default("30s")
 
   // Template support
-  isTemplate    Boolean             @default(false)
-  templateOfId  String?             // if cloned from a template
+  isTemplate   Boolean @default(false)
+  templateOfId String? // if cloned from a template
 
   // Governance
-  isSystem      Boolean             @default(false) // seeded built-in, non-deletable
-  isPublished   Boolean             @default(true)
-  createdById   String?
-  updatedById   String?
-  viewCount     Int                 @default(0)
-  lastViewedAt  DateTime?
+  isSystem     Boolean   @default(false) // seeded built-in, non-deletable
+  isPublished  Boolean   @default(true)
+  createdById  String?
+  updatedById  String?
+  viewCount    Int       @default(0)
+  lastViewedAt DateTime?
 
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  deletedAt     DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
-  category      DashboardCategory?      @relation(fields: [categoryId], references: [id])
-  favorites     DashboardFavorite[]
-  permissions   DashboardPermission[]
+  category    DashboardCategory?    @relation(fields: [categoryId], references: [id])
+  favorites   DashboardFavorite[]
+  permissions DashboardPermission[]
 
-  @@map("dashboards")
   @@index([factoryId, source])
   @@index([categoryId])
   @@index([type])
   @@index([isTemplate])
+  @@map("dashboards")
 }
 
 model DashboardFavorite {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   dashboardId String
   userId      String
-  sortOrder   Int       @default(0)
-  createdAt   DateTime  @default(now())
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
 
-  dashboard   Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
 
   @@unique([dashboardId, userId])
-  @@map("dashboard_favorites")
   @@index([userId])
+  @@map("dashboard_favorites")
 }
 
 model DashboardPermission {
@@ -2820,9 +2918,9 @@ model DashboardPermission {
   level       DashboardPermissionLevel @default(VIEW)
   createdAt   DateTime                 @default(now())
 
-  dashboard   Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
 
-  @@map("dashboard_permissions")
   @@index([dashboardId])
   @@index([userId])
+  @@map("dashboard_permissions")
 }

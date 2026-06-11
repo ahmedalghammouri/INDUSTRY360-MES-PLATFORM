@@ -153,7 +153,7 @@ function WorkOrderQualityPanel({ workOrderId, machineId }: { workOrderId: string
       <div className="flex items-center justify-between mb-2">
         <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
           <ClipboardCheck size={12} className="text-primary" />
-          Quality Inspections (ISA-95)
+          Quality Inspections
         </p>
         <div className="flex items-center gap-2">
           {inspections.length > 0 && (
@@ -660,7 +660,7 @@ export function ProductionWorkOrdersView() {
                   </div>
                 )}
 
-                {/* Production Progress — ISA-95 correct */}
+                {/* Production Progress */}
                 {(() => {
                   const d = detail as any;
                   const completedSteps = d.completedSteps ?? 0;
@@ -730,7 +730,7 @@ export function ProductionWorkOrdersView() {
                 {((detail as any).jobOrders?.length > 0) && (
                   <div>
                     <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <Layers className="w-3 h-3" />Dispatch List (ISA-95)
+                      <Layers className="w-3 h-3" />Dispatch List
                     </p>
                     <div className="space-y-1.5">
                       {(detail as any).jobOrders.map((jo: any) => {
@@ -858,7 +858,7 @@ export function ProductionWorkOrdersView() {
                   </div>
                 )}
 
-                {/* Quality Inspections (ISA-95 integration) */}
+                {/* Quality Inspections */}
                 <WorkOrderQualityPanel workOrderId={(detail as any).id} machineId={(detail as any).machineId ?? (detail as any).machine?.id} />
 
                 {/* Notes */}

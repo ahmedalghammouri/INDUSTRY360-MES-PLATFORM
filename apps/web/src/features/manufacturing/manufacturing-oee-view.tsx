@@ -300,7 +300,7 @@ export default function ManufacturingOeeView() {
           <Gauge size={20} className="text-primary" />
           <div>
             <h1 className="text-lg font-bold leading-tight">OEE Dashboard</h1>
-            <p className="text-xs text-muted-foreground">Overall Equipment Effectiveness — ISA-95</p>
+            <p className="text-xs text-muted-foreground">Overall Equipment Effectiveness</p>
           </div>
         </div>
 

@@ -550,13 +550,13 @@ function AutoGenDialog({ po, open, onClose }: AutoGenDialogProps) {
             </div>
           ) : prev ? (
             <div className="space-y-3">
-              {/* ISA-95 model explanation + recipe/process badges */}
+              {/* Model explanation + recipe/process badges */}
               <div className="flex items-center gap-3 flex-wrap text-xs">
                 {isDispatchMode && (
                   <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border border-purple-500/20">
                     <Layers className="w-3.5 h-3.5 text-purple-400" />
                     <span className="text-purple-300 font-medium">
-                      ISA-95: 1 Work Order → {joSteps.length} Job Orders
+                      1 Work Order → {joSteps.length} Job Orders
                     </span>
                   </div>
                 )}
@@ -914,9 +914,9 @@ function PODetailSheet({ po, open, onClose, actions }: PODetailSheetProps) {
             ))}
           </div>
 
-          {/* ISA-95 flow */}
+          {/* Flow */}
           <div className="glass-card rounded-lg p-3 border border-brand-500/20">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">ISA-95 Flow</p>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Order Flow</p>
             <div className="flex items-center gap-1.5 flex-wrap text-xs">
               <span className="px-2 py-0.5 rounded bg-brand-500/20 text-brand-300 font-mono text-[10px]">PO {po.orderNumber}</span>
               <ArrowRight className="w-3 h-3 text-muted-foreground" />
@@ -1355,7 +1355,7 @@ export function ProductionOrdersView() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold">Production Orders</h1>
-          <p className="text-muted-foreground text-sm mt-1">ISA-95 Level 4 — ERP/Scheduling → Shop Floor execution</p>
+          <p className="text-muted-foreground text-sm mt-1">From ERP / scheduling to shop-floor execution</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => refetch()}><RefreshCw className="w-3.5 h-3.5 mr-1.5" />Refresh</Button>
@@ -1363,9 +1363,9 @@ export function ProductionOrdersView() {
         </div>
       </div>
 
-      {/* ISA-95 flow banner */}
+      {/* Flow banner */}
       <div className="glass-card rounded-xl p-4 border border-brand-500/20">
-        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2.5">ISA-95 Manufacturing Data Flow</p>
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2.5">Manufacturing Data Flow</p>
         <div className="flex items-center gap-2 flex-wrap text-xs">
           {[
             { label: 'ERP / SAP', sub: 'Create PO', color: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },

@@ -1047,7 +1047,7 @@ export default function QualityRecordsView() {
           <div>
             <h1 className="text-lg font-bold">Quality Records</h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              ISA-95 MES quality management — inspections and non-conformances
+              Quality management — inspections and non-conformances
             </p>
           </div>
         </div>

@@ -660,7 +660,7 @@ export function ShopFloorView() {
             <div>
               <h1 className="text-base font-bold leading-none">Shop Floor</h1>
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                ISA-95 Real-time Execution · Refresh: {lastRefresh}
+                Real-time Execution · Refresh: {lastRefresh}
               </p>
             </div>
           </div>

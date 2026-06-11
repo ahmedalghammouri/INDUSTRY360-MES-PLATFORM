@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { motion } from 'framer-motion';
 import { Search, BoxesIcon, ChevronDown, ChevronRight, Plus, Edit3, Trash2, MoreHorizontal, Ruler, Weight } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
@@ -230,18 +231,22 @@ export function ProductsView() {
   });
   const storageLocations: StorageLocationOption[] = (storageLocData as any)?.data ?? (storageLocData as any) ?? [];
 
+  const [page, setPage] = useState(1);
+  const PAGE_LIMIT = 25;
   const { data, isLoading } = useQuery({
-    queryKey: ['inventory', 'products', search, category, brand],
+    queryKey: ['inventory', 'products', search, category, brand, page],
     queryFn: () => api.get<{ data: SKU[]; total: number }>('/inventory/products', {
       params: {
         search: search || undefined,
         category: category || undefined,
         brand: brand || undefined,
-        limit: 50,
+        page,
+        limit: PAGE_LIMIT,
       },
     }),
     staleTime: 60_000,
   });
+  useEffect(() => { setPage(1); }, [search, category, brand]);
 
   const skus: SKU[] = (data as any)?.data ?? [];
   const total: number = (data as any)?.total ?? 0;
@@ -390,6 +395,11 @@ export function ProductsView() {
             </tbody>
           </table>
         </div>
+        {total > PAGE_LIMIT && (
+          <div className="border-t border-border/50 px-4 py-2">
+            <TablePagination page={page} total={total} limit={PAGE_LIMIT} onPageChange={setPage} isLoading={isLoading} />
+          </div>
+        )}
       </div>
 
       {/* Create Product Dialog */}

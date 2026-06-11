@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
+import { findProcessForSku } from '../../common/process-scope.util';
 import type { Prisma, DowntimeCategory } from '@prisma/client';
 import type {
   CreateDowntimeEventDto, UpdateDowntimeEventDto, EndDowntimeEventDto,
@@ -220,16 +221,19 @@ export class DowntimeService {
     if (!workCenterId || downtimeMins < 1) return 0;
 
     try {
-      // Find routing steps at this WorkCenter for the active WO's process
+      // Find routing steps at this WorkCenter for the active WO's process.
+      // Resolution goes through the canonical scope chain so CATEGORY /
+      // BASE_WEIGHT / PRODUCT_LIST scoped routings cascade too — never only
+      // the legacy direct sku.manufacturingProcesses relation.
       const wo = await this.prisma.workOrder.findUnique({
         where: { id: workOrderId },
-        include: {
-          sku: { include: { manufacturingProcesses: { include: { routingSteps: { include: { successors: true } } } } } },
-        },
+        select: { skuId: true, factoryId: true },
       });
-      if (!wo) return 0;
+      if (!wo?.skuId) return 0;
 
-      const process = wo.sku?.manufacturingProcesses?.[0];
+      const process = await findProcessForSku<any>(this.prisma, wo.factoryId, wo.skuId, {
+        routingSteps: { include: { successors: true } },
+      });
       if (!process) return 0;
 
       const affectedSteps = process.routingSteps.filter(

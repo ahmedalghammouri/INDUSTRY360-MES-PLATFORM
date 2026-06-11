@@ -8,7 +8,12 @@ import {
   Filter, ChevronLeft, GitMerge, ArrowDownCircle,
   GitBranch, Shuffle, Check, X, Package, Box, Boxes,
   User, BarChart2, Monitor, AlertTriangle,
+  MoreVertical, Ban, Workflow, List, UserPlus,
 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
@@ -131,6 +136,166 @@ function DepBadge({ type }: { type: DepType }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// PDM (Precedence Diagram Method) — job orders as nodes, typed
+// dependency arrows (FS advances a column, SS/FF share a column),
+// status-coloured borders, qty flow + OEE on each node.
+// ─────────────────────────────────────────────────────────────
+
+const PDM_BOX_W = 158;
+const PDM_BOX_H = 72;
+const PDM_COL_GAP = 56;
+const PDM_ROW_GAP = 18;
+const PDM_PAD = 12;
+
+const PDM_STATUS_STROKE: Record<JOStatus, string> = {
+  SCHEDULED: '#475569',
+  READY:     '#3b82f6',
+  EXECUTING: '#22c55e',
+  PAUSED:    '#f59e0b',
+  COMPLETE:  '#10b981',
+  CANCELLED: '#ef4444',
+};
+
+const PDM_DEP_STROKE: Record<string, string> = {
+  FINISH_TO_START:  '#94a3b8',
+  START_TO_START:   '#22d3ee',
+  START_TO_FINISH:  '#fb923c',
+  FINISH_TO_FINISH: '#c084fc',
+};
+
+function JoPdmDiagram({ jobs, onStart, onComplete, pending }: {
+  jobs: JobOrder[];
+  onStart: (id: string) => void;
+  onComplete: (jo: JobOrder) => void;
+  pending: boolean;
+}) {
+  const sorted = [...jobs].sort((a, b) => a.sequenceOrder - b.sequenceOrder);
+  const byId = new Map(sorted.map(j => [j.id, j]));
+
+  // Column layout: FS advances, SS/SF/FF share the predecessor's column
+  const cols = new Map<string, number>();
+  for (const jo of sorted) {
+    const pred = jo.predecessor ? byId.get(jo.predecessor.id) : undefined;
+    if (!pred) { cols.set(jo.id, 0); continue; }
+    const predCol = cols.get(pred.id) ?? 0;
+    cols.set(jo.id, predCol + (jo.depType === 'FINISH_TO_START' || jo.depType == null ? 1 : 0));
+  }
+  const colGroups = new Map<number, JobOrder[]>();
+  for (const jo of sorted) {
+    const c = cols.get(jo.id) ?? 0;
+    if (!colGroups.has(c)) colGroups.set(c, []);
+    colGroups.get(c)!.push(jo);
+  }
+  const positions = new Map<string, { x: number; y: number }>();
+  const maxCol = Math.max(0, ...cols.values());
+  let maxRow = 0;
+  for (let c = 0; c <= maxCol; c++) {
+    (colGroups.get(c) ?? []).forEach((jo, row) => {
+      positions.set(jo.id, { x: PDM_PAD + c * (PDM_BOX_W + PDM_COL_GAP), y: PDM_PAD + row * (PDM_BOX_H + PDM_ROW_GAP) });
+      maxRow = Math.max(maxRow, row);
+    });
+  }
+  const svgW = PDM_PAD * 2 + (maxCol + 1) * PDM_BOX_W + maxCol * PDM_COL_GAP;
+  const svgH = PDM_PAD * 2 + (maxRow + 1) * PDM_BOX_H + maxRow * PDM_ROW_GAP;
+
+  return (
+    <div className="overflow-x-auto px-2 py-3">
+      <svg width={Math.max(svgW, 280)} height={svgH} className="block">
+        <defs>
+          {Object.entries(PDM_DEP_STROKE).map(([k, color]) => (
+            <marker key={k} id={`jo-arrow-${k}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill={color} />
+            </marker>
+          ))}
+        </defs>
+
+        {/* Dependency arrows */}
+        {sorted.map(jo => {
+          if (!jo.predecessor) return null;
+          const from = positions.get(jo.predecessor.id);
+          const to = positions.get(jo.id);
+          if (!from || !to) return null;
+          const dep = jo.depType ?? 'FINISH_TO_START';
+          const color = PDM_DEP_STROKE[dep] ?? '#94a3b8';
+          const fs = dep === 'FINISH_TO_START';
+          const fx = fs ? from.x + PDM_BOX_W : from.x + PDM_BOX_W / 2;
+          const fy = fs ? from.y + PDM_BOX_H / 2 : from.y + PDM_BOX_H;
+          const tx = fs ? to.x : to.x + PDM_BOX_W / 2;
+          const ty = fs ? to.y + PDM_BOX_H / 2 : to.y;
+          const cx = (fx + tx) / 2;
+          const d = fs
+            ? `M ${fx} ${fy} C ${cx} ${fy}, ${cx} ${ty}, ${tx} ${ty}`
+            : `M ${fx} ${fy} C ${fx} ${fy + 16}, ${tx} ${ty - 16}, ${tx} ${ty}`;
+          const short = DEP_CONFIG[dep]?.short ?? 'FS';
+          return (
+            <g key={`dep-${jo.id}`}>
+              <path d={d} fill="none" stroke={color} strokeWidth="1.5"
+                strokeDasharray={dep === 'START_TO_START' || dep === 'FINISH_TO_FINISH' ? '5 3' : undefined}
+                markerEnd={`url(#jo-arrow-${dep})`} opacity="0.9" />
+              <rect x={(fx + tx) / 2 - 11} y={(fy + ty) / 2 - 8} width="22" height="14" rx="3" fill="#0f1117" opacity="0.9" />
+              <text x={(fx + tx) / 2} y={(fy + ty) / 2 + 3} textAnchor="middle" fontSize="9" fontWeight="700" fill={color} fontFamily="monospace">
+                {short}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Nodes */}
+        {sorted.map(jo => {
+          const pos = positions.get(jo.id);
+          if (!pos) return null;
+          const stroke = PDM_STATUS_STROKE[jo.status] ?? '#475569';
+          const executing = jo.status === 'EXECUTING';
+          const pct = (jo.plannedQtyOut ?? 0) > 0 ? Math.min(1, jo.actualQtyGood / (jo.plannedQtyOut ?? 1)) : 0;
+          return (
+            <g key={jo.id}>
+              <rect x={pos.x + 2} y={pos.y + 2} width={PDM_BOX_W} height={PDM_BOX_H} rx="8" fill="rgba(0,0,0,0.35)" />
+              <rect x={pos.x} y={pos.y} width={PDM_BOX_W} height={PDM_BOX_H} rx="8"
+                fill={executing ? 'rgba(34,197,94,0.08)' : '#171a28'} stroke={stroke} strokeWidth="1.5" />
+              {/* status dot + seq + operation */}
+              <circle cx={pos.x + 13} cy={pos.y + 14} r="4" fill={stroke}>
+                {executing && <animate attributeName="opacity" values="1;0.3;1" dur="1.6s" repeatCount="indefinite" />}
+              </circle>
+              <text x={pos.x + 23} y={pos.y + 18} fontSize="10.5" fontWeight="700" fill="#e2e8f0">
+                {jo.sequenceOrder}. {jo.operationName.length > 14 ? jo.operationName.slice(0, 13) + '…' : jo.operationName}
+              </text>
+              {/* machine */}
+              <text x={pos.x + 10} y={pos.y + 33} fontSize="9" fill="#94a3b8">
+                {(jo.machine?.name ?? jo.workCenter?.name ?? '—').slice(0, 24)}
+              </text>
+              {/* qty + unit */}
+              <text x={pos.x + 10} y={pos.y + 47} fontSize="9" fill="#64748b" fontFamily="monospace">
+                {jo.actualQtyGood}/{jo.plannedQtyOut ?? '—'} {jo.outputUnit ?? ''}
+                {jo.joOEE != null ? `  OEE ${Math.round(jo.joOEE)}%` : ''}
+              </text>
+              {/* progress bar */}
+              <rect x={pos.x + 10} y={pos.y + 56} width={PDM_BOX_W - 50} height="4" rx="2" fill="#1e2235" />
+              <rect x={pos.x + 10} y={pos.y + 56} width={(PDM_BOX_W - 50) * pct} height="4" rx="2"
+                fill={jo.status === 'COMPLETE' ? '#10b981' : '#6366f1'} />
+              {/* quick action on node */}
+              {['READY', 'PAUSED'].includes(jo.status) && (
+                <g className="cursor-pointer" opacity={pending ? 0.4 : 1} onClick={() => !pending && onStart(jo.id)}>
+                  <circle cx={pos.x + PDM_BOX_W - 18} cy={pos.y + PDM_BOX_H - 16} r="10" fill="rgba(34,197,94,0.15)" stroke="#22c55e" strokeWidth="1" />
+                  <path d={`M ${pos.x + PDM_BOX_W - 21.5} ${pos.y + PDM_BOX_H - 21} L ${pos.x + PDM_BOX_W - 21.5} ${pos.y + PDM_BOX_H - 11} L ${pos.x + PDM_BOX_W - 12.5} ${pos.y + PDM_BOX_H - 16} Z`} fill="#22c55e" />
+                  <title>Start this step</title>
+                </g>
+              )}
+              {jo.status === 'EXECUTING' && (
+                <g className="cursor-pointer" opacity={pending ? 0.4 : 1} onClick={() => !pending && onComplete(jo)}>
+                  <circle cx={pos.x + PDM_BOX_W - 18} cy={pos.y + PDM_BOX_H - 16} r="10" fill="rgba(16,185,129,0.15)" stroke="#10b981" strokeWidth="1" />
+                  <path d={`M ${pos.x + PDM_BOX_W - 23} ${pos.y + PDM_BOX_H - 16} l 3.5 3.5 l 6 -7`} fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <title>Complete this step (planned qty)</title>
+                </g>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Single WO card (compact)
 // ─────────────────────────────────────────────────────────────
 
@@ -146,7 +311,7 @@ function UnitBadge({ unit }: { unit: string | undefined }) {
 }
 
 function WOCard({
-  wo, jobs, onTransition, onCount, onAssignOperator, users, pending,
+  wo, jobs, onTransition, onCount, onAssignOperator, users, pending, mode,
 }: {
   wo: JobOrder['workOrder'];
   jobs: JobOrder[];
@@ -155,6 +320,7 @@ function WOCard({
   onAssignOperator: (id: string, operatorId: string | null) => void;
   users: Operator[];
   pending: boolean;
+  mode: 'list' | 'pdm';
 }) {
   const [completingId,   setCompletingId]   = useState<string | null>(null);
   const [completeQty,    setCompleteQty]    = useState<string>('');
@@ -210,7 +376,15 @@ function WOCard({
         )}
       </div>
 
-      {/* Job order rows */}
+      {/* PDM flow mode — precedence diagram with typed dependency arrows */}
+      {mode === 'pdm' ? (
+        <JoPdmDiagram
+          jobs={jobs}
+          pending={pending}
+          onStart={(id) => onTransition(id, 'EXECUTING')}
+          onComplete={(jo) => onTransition(jo.id, 'COMPLETE', jo.plannedQtyOut ?? 0)}
+        />
+      ) : (
       <div className="divide-y divide-border/20 flex-1">
         {sorted.map((jo, idx) => {
           const next      = VALID_NEXT[jo.status] ?? [];
@@ -410,6 +584,72 @@ function WOCard({
                       <CheckSquare className="w-3 h-3" />
                     </button>
                   ) : null}
+
+                  {/* Options menu — every action in one place */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors">
+                        <MoreVertical className="w-3 h-3" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuLabel className="text-[10px] font-mono text-muted-foreground">
+                        {jo.sequenceOrder}. {jo.operationName} · {JO_STATUS[jo.status].label}
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {next.includes('EXECUTING') && (
+                        <DropdownMenuItem disabled={pending} onClick={() => onTransition(jo.id, 'EXECUTING')}>
+                          <Play size={13} className="mr-2 text-green-400" />{jo.status === 'PAUSED' ? 'Resume' : 'Start'} step
+                        </DropdownMenuItem>
+                      )}
+                      {next.includes('PAUSED') && (
+                        <DropdownMenuItem disabled={pending} onClick={() => onTransition(jo.id, 'PAUSED')}>
+                          <Pause size={13} className="mr-2 text-amber-400" />Pause step
+                        </DropdownMenuItem>
+                      )}
+                      {next.includes('COMPLETE') && (
+                        <DropdownMenuItem
+                          disabled={pending}
+                          onClick={() => {
+                            setCompletingId(jo.id);
+                            setCompleteQty(String(Math.round(jo.plannedQtyOut ?? jo.plannedQtyIn ?? 0) || ''));
+                            setLoggingId(null);
+                          }}
+                        >
+                          <CheckSquare size={13} className="mr-2 text-emerald-400" />Complete… (enter qty)
+                        </DropdownMenuItem>
+                      )}
+                      {canLog && (
+                        <DropdownMenuItem onClick={() => openLog(jo)}>
+                          <BarChart2 size={13} className="mr-2 text-brand-400" />Log good / scrap count
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem onClick={() => setAssigningOpId(jo.id)}>
+                        <UserPlus size={13} className="mr-2 text-sky-400" />{jo.operator ? 'Change operator' : 'Assign operator'}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => window.open('/shop-floor', '_blank')}>
+                        <Monitor size={13} className="mr-2 text-muted-foreground" />Open on Shop Floor
+                      </DropdownMenuItem>
+                      {jo.actualQtyRejected > 0 && (
+                        <DropdownMenuItem onClick={() => window.open('/production/scrap-log', '_blank')}>
+                          <AlertTriangle size={13} className="mr-2 text-red-400" />View scrap log
+                        </DropdownMenuItem>
+                      )}
+                      {next.includes('CANCELLED') && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            disabled={pending}
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => onTransition(jo.id, 'CANCELLED')}
+                          >
+                            <Ban size={13} className="mr-2" />Cancel step
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
 
@@ -484,6 +724,7 @@ function WOCard({
           );
         })}
       </div>
+      )}
     </div>
   );
 }
@@ -578,6 +819,7 @@ export function JobOrdersView() {
   const [search,       setSearch]  = useState('');
   const [statusFilter, setStatus]  = useState<string>('ALL');
   const [page,         setPage]    = useState(1);
+  const [viewMode,     setViewMode] = useState<'list' | 'pdm'>('list');
 
   // Sorting state — declared before useQuery so sortCol/sortDir are in queryKey
   const { sortedData: _sortedForKey, sortCol, sortDir, handleSort } = useSortedData(
@@ -703,7 +945,7 @@ export function JobOrdersView() {
             Dispatch List
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            ISA-95 Job Orders — shop floor execution tracking
+            Job Orders — shop floor execution tracking
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -771,6 +1013,26 @@ export function JobOrdersView() {
             ))}
           </SelectContent>
         </Select>
+        {/* View mode: operational list ⇄ PDM precedence diagram */}
+        <div className="flex items-center rounded-lg border border-border overflow-hidden">
+          <button
+            onClick={() => setViewMode('list')}
+            className={`h-9 px-3 text-xs font-medium flex items-center gap-1.5 transition-colors ${
+              viewMode === 'list' ? 'bg-brand-500/15 text-brand-400' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <List className="w-3.5 h-3.5" />List
+          </button>
+          <button
+            onClick={() => setViewMode('pdm')}
+            title="Precedence Diagram Method — steps as nodes, typed dependency arrows"
+            className={`h-9 px-3 text-xs font-medium flex items-center gap-1.5 border-l border-border transition-colors ${
+              viewMode === 'pdm' ? 'bg-brand-500/15 text-brand-400' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Workflow className="w-3.5 h-3.5" />PDM Flow
+          </button>
+        </div>
         <DepLegend />
       </div>
 
@@ -798,6 +1060,7 @@ export function JobOrdersView() {
                 wo={wo}
                 jobs={jobs}
                 users={users}
+                mode={viewMode}
                 onTransition={(id, status, qty) => transitionMut.mutate({ id, status, qty })}
                 onCount={(id, good, scrap, reason, category) => countMut.mutate({ id, good, scrap, reason, category })}
                 onAssignOperator={(id, operatorId) => operatorMut.mutate({ id, operatorId })}

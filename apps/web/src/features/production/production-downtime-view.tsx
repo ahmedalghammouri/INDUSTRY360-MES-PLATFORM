@@ -964,9 +964,9 @@ function EditEventModal({
         </div>
 
         <div className="p-5 flex flex-col gap-4">
-          {/* ISA-95 Reason Code */}
+          {/* Reason Code */}
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs font-medium">ISA-95 Reason Code</Label>
+            <Label className="text-xs font-medium">Reason Code</Label>
             <Select value={form.reasonCode} onValueChange={v => setForm(p => ({ ...p, reasonCode: v as DowntimeReasonCode }))}>
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -1352,7 +1352,7 @@ function LiveTab({ machines, reasonTree }: { machines: Machine[]; reasonTree: Re
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <Label className="text-xs font-medium">ISA-95 Reason Code</Label>
+                    <Label className="text-xs font-medium">Reason Code</Label>
                     <Select value={form.reasonCode} onValueChange={v => setForm(p => ({ ...p, reasonCode: v as DowntimeReasonCode }))}>
                       <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -1802,7 +1802,7 @@ export function ProductionDowntimeView() {
         <span>
           Downtime threshold: <strong className="text-foreground">1 minute</strong> (NCC spec) ·
           OEE Availability loss excludes <strong className="text-foreground">Planned Maintenance</strong> and <strong className="text-foreground">External</strong> stops ·
-          The <strong className="text-foreground">Reason Tree</strong> tab follows ISA-95 / NCC 3-level standard: Category → Sub-category → Specific Reason
+          The <strong className="text-foreground">Reason Tree</strong> tab follows the NCC 3-level standard: Category → Sub-category → Specific Reason
         </span>
       </div>
 

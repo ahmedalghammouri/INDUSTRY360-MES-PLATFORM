@@ -6,6 +6,10 @@ export class RunScheduleDto {
   @ApiPropertyOptional({ description: 'Schedule forward from this instant (defaults to now)' })
   @IsOptional() @IsDateString()
   startFrom?: string;
+
+  @ApiPropertyOptional({ description: 'Recalculate ONLY this work order — other open jobs keep their plan and pre-occupy their machines' })
+  @IsOptional() @IsUUID('4')
+  workOrderId?: string;
 }
 
 export class RescheduleJobDto {

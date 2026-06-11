@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Search, ChevronDown, ChevronRight, CheckCircle2,
   Trash2, X, GitBranch, FlaskConical, FileCheck2, Info,
-  Edit2, AlertTriangle, Package, Layers,
+  Edit2, AlertTriangle, Package, Layers, Workflow, Sparkles, RefreshCcw,
 } from 'lucide-react';
 import { api } from '@/services/api.client';
 import { Button } from '@/components/ui/button';
@@ -26,7 +26,10 @@ interface BOMItem {
   isOptional: boolean;
   notes?: string;
   rawMaterial: { id: string; code: string; name: string; unit: string; unitCost?: number };
+  routingStepRef?: { stepNumber: number; operationName: string } | null;
 }
+
+type BomSource = 'MANUAL' | 'DERIVED_FROM_PROCESS' | 'DRAFT_FOR_PROCESS';
 
 interface BOM {
   id: string;
@@ -35,8 +38,21 @@ interface BOM {
   isActive: boolean;
   approvedAt?: string;
   notes?: string;
+  processId?: string | null;
+  sourceType?: BomSource;
+  isStale?: boolean;
+  process?: { id: string; name: string; version: string; scopeType: string } | null;
   sku: { id: string; code: string; name: string; itemNumber: string; category?: string };
   items: BOMItem[];
+}
+
+interface ResolvedProcess {
+  found: boolean;
+  process: {
+    id: string; name: string; version: string; scopeType: string;
+    steps: Array<{ stepNumber: number; operationName: string; outUnit: string | null; materials: number }>;
+    totalMaterials: number;
+  } | null;
 }
 
 interface RawMaterial {
@@ -102,6 +118,14 @@ export function BOMView() {
   const skus: any[] = (skusData as any)?.data ?? [];
   const rawMaterials: RawMaterial[] = (rawMatsData as any)?.data ?? [];
 
+  // Smart linking: when a product is picked, look up the process the BOM could derive from
+  const { data: resolvedProcess } = useQuery<ResolvedProcess>({
+    queryKey: ['bom-resolve-process', newBOM.skuId],
+    queryFn: () => api.get(`/inventory/bom/resolve-process?skuId=${newBOM.skuId}`) as Promise<ResolvedProcess>,
+    enabled: createOpen && !!newBOM.skuId,
+    staleTime: 30_000,
+  });
+
   const rawLots: any[] = (materialLotsData as any)?.data ?? [];
   const lotsByMaterial: Record<string, MaterialLotSummary> = rawLots.reduce((acc, lot) => {
     const key = lot.rawMaterialId;
@@ -127,6 +151,27 @@ export function BOMView() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bom'] });
       setEditBOM(null);
+    },
+  });
+
+  // Derive a BOM from the resolved manufacturing process (smart linking)
+  const deriveMutation = useMutation({
+    mutationFn: (dto: { skuId: string; processId?: string }) =>
+      api.post('/inventory/bom/generate-from-process', dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bom'] });
+      setCreateOpen(false);
+      setNewBOM({ skuId: '', version: '1.0', notes: '' });
+      setNewItems([{ rawMaterialId: '', quantityPer: '', unit: 'KG', scrapFactor: '0', isOptional: false, notes: '' }]);
+    },
+  });
+
+  // Inverse guided flow: generate a DRAFT process from a manual BOM
+  const genProcessMutation = useMutation({
+    mutationFn: (bomId: string) => api.post(`/inventory/bom/${bomId}/generate-process`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bom'] });
+      queryClient.invalidateQueries({ queryKey: ['manufacturing-processes'] });
     },
   });
 
@@ -223,7 +268,7 @@ export function BOMView() {
         <span>
           A <strong className="text-foreground">BOM</strong> links a finished product (SKU) to the raw materials, packaging and consumables needed to make one unit.
           The <strong className="text-foreground">scrap factor</strong> adds a buffer (e.g. 0.05 = 5% extra). Approved BOMs are used by production to auto-calculate material requirements.
-          Material <strong className="text-foreground">lots</strong> (ISA-95 MaterialLot) show available stock per raw material.
+          Material <strong className="text-foreground">lots</strong> show available stock per raw material.
         </span>
       </div>
 
@@ -258,6 +303,10 @@ export function BOMView() {
             onDeleteItem={(itemId) => deleteItemMutation.mutate({ bomId: bom.id, itemId })}
             onEdit={() => handleOpenEdit(bom)}
             onDelete={() => setDeleteBOMTarget(bom)}
+            onGenerateProcess={() => genProcessMutation.mutate(bom.id)}
+            onRederive={() => deriveMutation.mutate({ skuId: bom.skuId, processId: bom.processId ?? undefined })}
+            generatePending={genProcessMutation.isPending}
+            rederivePending={deriveMutation.isPending}
             bomCost={calcBOMCost(bom)}
             lotsByMaterial={lotsByMaterial}
           />
@@ -308,6 +357,44 @@ export function BOMView() {
                   </div>
                 </div>
 
+                {/* Smart linking: derive the BOM from the product's manufacturing process */}
+                {newBOM.skuId && resolvedProcess?.found && resolvedProcess.process && (
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/25">
+                    <Sparkles size={15} className="mt-0.5 text-emerald-400 shrink-0" />
+                    <div className="flex-1 text-xs">
+                      <div className="text-foreground font-medium flex items-center flex-wrap gap-x-1">
+                        <span>Found manufacturing process: <strong>{resolvedProcess.process.name}</strong> v{resolvedProcess.process.version}</span>
+                        <Badge variant="outline" className="text-[9px] h-4">{resolvedProcess.process.scopeType.replace('_', ' ')}</Badge>
+                      </div>
+                      <p className="text-muted-foreground mt-0.5">
+                        {resolvedProcess.process.steps.length} steps · {resolvedProcess.process.totalMaterials} step input material{resolvedProcess.process.totalMaterials !== 1 ? 's' : ''} —
+                        the BOM can be derived automatically (rolled up per 1 finished unit, each line linked to its step).
+                      </p>
+                      {resolvedProcess.process.totalMaterials === 0 && (
+                        <p className="text-amber-400 mt-1">The process has no step materials yet — add them in Manufacturing Processes, or enter the BOM manually below.</p>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs shrink-0 bg-emerald-600 hover:bg-emerald-500"
+                      disabled={deriveMutation.isPending || resolvedProcess.process.totalMaterials === 0}
+                      onClick={() => deriveMutation.mutate({ skuId: newBOM.skuId, processId: resolvedProcess.process!.id })}
+                    >
+                      <Workflow size={12} className="mr-1" />
+                      {deriveMutation.isPending ? 'Deriving…' : 'Derive from process'}
+                    </Button>
+                  </div>
+                )}
+                {newBOM.skuId && resolvedProcess && !resolvedProcess.found && (
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-sky-500/5 border border-sky-500/25 text-xs text-muted-foreground">
+                    <Info size={14} className="mt-0.5 text-sky-400 shrink-0" />
+                    <span>
+                      No manufacturing process exists for this product yet. Enter the materials below — after creating the BOM you can
+                      <strong className="text-foreground"> generate a draft process</strong> from it with one click.
+                    </span>
+                  </div>
+                )}
+
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <Label>Raw Material Components *</Label>
@@ -333,7 +420,11 @@ export function BOMView() {
                             <td className="p-1.5">
                               <Select
                                 value={item.rawMaterialId}
-                                onValueChange={v => setNewItems(prev => prev.map((it, idx) => idx === i ? { ...it, rawMaterialId: v } : it))}
+                                onValueChange={v => {
+                                  // Auto-fetch: the unit always comes from the material master (unified UoM)
+                                  const rm = rawMaterials.find(m => m.id === v);
+                                  setNewItems(prev => prev.map((it, idx) => idx === i ? { ...it, rawMaterialId: v, unit: rm?.unit ?? it.unit } : it));
+                                }}
                               >
                                 <SelectTrigger className="h-7 text-xs">
                                   <SelectValue placeholder="Select material..." />
@@ -354,15 +445,24 @@ export function BOMView() {
                               />
                             </td>
                             <td className="p-1.5">
-                              <Select
-                                value={item.unit}
-                                onValueChange={v => setNewItems(prev => prev.map((it, idx) => idx === i ? { ...it, unit: v } : it))}
-                              >
-                                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  {UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
+                              {item.rawMaterialId ? (
+                                <div
+                                  className="h-7 flex items-center px-2 rounded-md border border-input bg-muted/40 text-xs text-muted-foreground"
+                                  title="Unit comes from the raw-material master (unified UoM)"
+                                >
+                                  {item.unit}
+                                </div>
+                              ) : (
+                                <Select
+                                  value={item.unit}
+                                  onValueChange={v => setNewItems(prev => prev.map((it, idx) => idx === i ? { ...it, unit: v } : it))}
+                                >
+                                  <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    {UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              )}
                             </td>
                             <td className="p-1.5">
                               <Input
@@ -526,7 +626,13 @@ export function BOMView() {
               <div className="p-5 flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
                   <Label>Raw Material *</Label>
-                  <Select value={addItem.rawMaterialId} onValueChange={v => setAddItem(p => ({ ...p, rawMaterialId: v }))}>
+                  <Select
+                    value={addItem.rawMaterialId}
+                    onValueChange={v => {
+                      const rm = rawMaterials.find(m => m.id === v);
+                      setAddItem(p => ({ ...p, rawMaterialId: v, unit: rm?.unit ?? p.unit }));
+                    }}
+                  >
                     <SelectTrigger className="h-8 text-sm">
                       <SelectValue placeholder="Select material..." />
                     </SelectTrigger>
@@ -553,13 +659,19 @@ export function BOMView() {
                       className="h-8 text-sm" placeholder="0.000" />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <Label>Unit</Label>
-                    <Select value={addItem.unit} onValueChange={v => setAddItem(p => ({ ...p, unit: v }))}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <Label>Unit {addItem.rawMaterialId && <span className="text-[10px] text-muted-foreground">(from material master)</span>}</Label>
+                    {addItem.rawMaterialId ? (
+                      <div className="h-8 flex items-center px-3 rounded-md border border-input bg-muted/40 text-sm text-muted-foreground">
+                        {addItem.unit}
+                      </div>
+                    ) : (
+                      <Select value={addItem.unit} onValueChange={v => setAddItem(p => ({ ...p, unit: v }))}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -595,7 +707,8 @@ export function BOMView() {
 }
 
 function BOMCard({
-  bom, isExpanded, onToggle, onApprove, onAddItem, onDeleteItem, onEdit, onDelete, bomCost, lotsByMaterial,
+  bom, isExpanded, onToggle, onApprove, onAddItem, onDeleteItem, onEdit, onDelete,
+  onGenerateProcess, onRederive, generatePending, rederivePending, bomCost, lotsByMaterial,
 }: {
   bom: BOM;
   isExpanded: boolean;
@@ -605,6 +718,10 @@ function BOMCard({
   onDeleteItem: (itemId: string) => void;
   onEdit: () => void;
   onDelete: () => void;
+  onGenerateProcess: () => void;
+  onRederive: () => void;
+  generatePending: boolean;
+  rederivePending: boolean;
   bomCost: number;
   lotsByMaterial: Record<string, MaterialLotSummary>;
 }) {
@@ -631,12 +748,40 @@ function BOMCard({
             {bom.isActive && !bom.approvedAt && (
               <Badge variant="outline" className="text-[10px] h-4 text-amber-500 border-amber-500/30">Draft</Badge>
             )}
+            {bom.process && (
+              <Badge variant="outline" className="text-[10px] h-4 text-indigo-400 border-indigo-500/30">
+                <Workflow size={8} className="mr-1" />
+                {bom.sourceType === 'DERIVED_FROM_PROCESS' ? 'Derived from' : 'Linked to'} {bom.process.name} v{bom.process.version}
+              </Badge>
+            )}
+            {bom.isStale && (
+              <Badge className="text-[10px] h-4 bg-amber-500/10 text-amber-400 border-amber-500/30">
+                <AlertTriangle size={8} className="mr-1" />
+                Stale
+              </Badge>
+            )}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
             {bom.items.length} component{bom.items.length !== 1 ? 's' : ''} · Est. cost: {bomCost > 0 ? `SAR ${bomCost.toFixed(3)} / unit` : 'N/A'}
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {bom.isStale && bom.processId && (
+            <Button size="sm" variant="outline" className="h-7 text-xs text-amber-400 border-amber-500/40"
+              disabled={rederivePending}
+              title="Source process changed — derive a fresh BOM version from it"
+              onClick={e => { e.stopPropagation(); onRederive(); }}>
+              <RefreshCcw size={12} className="mr-1" />{rederivePending ? 'Re-deriving…' : 'Re-derive'}
+            </Button>
+          )}
+          {!bom.processId && (
+            <Button size="sm" variant="outline" className="h-7 text-xs text-indigo-400 border-indigo-500/40"
+              disabled={generatePending}
+              title="Create a draft manufacturing process from this BOM (guided flow)"
+              onClick={e => { e.stopPropagation(); onGenerateProcess(); }}>
+              <Workflow size={12} className="mr-1" />{generatePending ? 'Generating…' : 'Generate process'}
+            </Button>
+          )}
           {!bom.approvedAt && (
             <Button size="sm" variant="outline" className="h-7 text-xs"
               onClick={e => { e.stopPropagation(); onApprove(); }}>
@@ -680,12 +825,13 @@ function BOMCard({
                     <tr>
                       <th className="text-left p-2.5 font-medium text-muted-foreground">Material</th>
                       <th className="text-left p-2.5 font-medium text-muted-foreground">Code</th>
+                      <th className="text-left p-2.5 font-medium text-muted-foreground">Step</th>
                       <th className="text-right p-2.5 font-medium text-muted-foreground">Qty / Unit</th>
                       <th className="text-right p-2.5 font-medium text-muted-foreground">Scrap</th>
                       <th className="text-right p-2.5 font-medium text-muted-foreground">Total Qty</th>
                       <th className="text-right p-2.5 font-medium text-muted-foreground">Unit Cost</th>
                       <th className="text-right p-2.5 font-medium text-muted-foreground">Line Cost</th>
-                      <th className="text-center p-2.5 font-medium text-muted-foreground">Lots (ISA-95)</th>
+                      <th className="text-center p-2.5 font-medium text-muted-foreground">Lots</th>
                       <th className="w-8 p-2.5" />
                     </tr>
                   </thead>
@@ -699,6 +845,15 @@ function BOMCard({
                         <tr key={item.id} className="border-t hover:bg-muted/20">
                           <td className="p-2.5 font-medium">{item.rawMaterial.name}</td>
                           <td className="p-2.5 font-mono text-muted-foreground">{item.rawMaterial.code}</td>
+                          <td className="p-2.5">
+                            {item.routingStepRef ? (
+                              <Badge variant="outline" className="text-[9px] h-4 text-indigo-300 border-indigo-500/30">
+                                {item.routingStepRef.stepNumber}. {item.routingStepRef.operationName}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground/40 text-[10px]">—</span>
+                            )}
+                          </td>
                           <td className="p-2.5 text-right tabular-nums">
                             {item.quantityPer.toFixed(3)} {item.unit}
                           </td>
@@ -745,7 +900,7 @@ function BOMCard({
                   {bomCost > 0 && (
                     <tfoot className="bg-muted/30 border-t">
                       <tr>
-                        <td colSpan={6} className="p-2.5 text-right text-xs font-medium text-muted-foreground">
+                        <td colSpan={7} className="p-2.5 text-right text-xs font-medium text-muted-foreground">
                           Total Material Cost per Unit
                         </td>
                         <td className="p-2.5 text-right font-bold text-sm">

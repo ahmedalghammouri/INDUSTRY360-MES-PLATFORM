@@ -18,6 +18,12 @@ import {
   Settings2,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import Link from 'next/link';
+import {
+  SlidersHorizontal, GitCommit, ClipboardList, Layers, Monitor,
+  CalendarRange, CalendarClock, ShieldCheck, Wrench, GitMerge,
+  Workflow, GitBranch, Sparkles, LineChart, Boxes,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -66,7 +72,7 @@ export function DashboardView() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
         <div>
-          <h1 className="text-lg font-bold text-foreground">Operations Center</h1>
+          <h1 className="text-lg font-bold text-foreground">Home</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
             {dateLabel || ' '} · Real-time overview
           </p>
@@ -82,13 +88,11 @@ export function DashboardView() {
             <RefreshCw size={13} className={cn(isRefreshing && 'animate-spin')} />
             Refresh
           </Button>
-          <Button variant="ghost" size="sm" className="gap-1.5 h-8 text-xs">
-            <Filter size={13} />
-            Filter
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
-            <Settings2 size={13} />
-            Customize
+          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" asChild>
+            <Link href="/dashboard-center">
+              <LayoutGrid size={13} />
+              Dashboard Center
+            </Link>
           </Button>
         </div>
       </div>
@@ -101,6 +105,43 @@ export function DashboardView() {
           animate="visible"
           className="space-y-5"
         >
+          {/* Quick actions — one tap to the most-used screens */}
+          <motion.div variants={itemVariants}>
+            <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 xl:grid-cols-12 gap-2">
+              {[
+                { label: 'Control Panel',    href: '/manufacturing/control',          icon: SlidersHorizontal, tone: 'text-primary' },
+                { label: 'New PO',           href: '/production/production-orders',   icon: GitCommit,         tone: 'text-sky-400' },
+                { label: 'Work Orders',      href: '/production/orders',              icon: ClipboardList,     tone: 'text-indigo-400' },
+                { label: 'Dispatch (JO)',    href: '/production/job-orders',          icon: Layers,            tone: 'text-violet-400' },
+                { label: 'Shop Floor',       href: '/shop-floor',                     icon: Monitor,           tone: 'text-emerald-400' },
+                { label: 'Schedule',         href: '/scheduling/production',          icon: CalendarRange,     tone: 'text-cyan-400' },
+                { label: 'Downtime',         href: '/production/downtime',            icon: AlertTriangle,     tone: 'text-red-400' },
+                { label: 'Planned DT',       href: '/scheduling/planned-downtime',    icon: CalendarClock,     tone: 'text-amber-400' },
+                { label: 'Quality',          href: '/quality/inspections',            icon: ShieldCheck,       tone: 'text-green-400' },
+                { label: 'Maintenance',      href: '/maintenance/work-orders',        icon: Wrench,            tone: 'text-orange-400' },
+                { label: 'OEE Analytics',    href: '/production/oee',                 icon: LineChart,         tone: 'text-fuchsia-400' },
+                { label: 'Energy',           href: '/energy',                         icon: Zap,               tone: 'text-yellow-400' },
+                { label: 'Processes',        href: '/production/processes',           icon: Workflow,          tone: 'text-teal-400' },
+                { label: 'BOM',              href: '/inventory/bom',                  icon: GitMerge,          tone: 'text-rose-400' },
+                { label: 'Traceability',     href: '/traceability',                   icon: GitBranch,         tone: 'text-lime-400' },
+                { label: 'Materials',        href: '/inventory/raw-materials',        icon: Boxes,             tone: 'text-blue-400' },
+                { label: 'Reports',          href: '/reports',                        icon: TrendingUp,        tone: 'text-purple-400' },
+                { label: 'AI Insights',      href: '/ai',                             icon: Sparkles,          tone: 'text-pink-400' },
+              ].map(a => (
+                <Link
+                  key={a.href + a.label}
+                  href={a.href}
+                  className="flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border border-border/40 bg-card/60 hover:bg-muted/30 hover:border-primary/40 transition-all group"
+                >
+                  <a.icon size={17} className={cn('transition-transform group-hover:scale-110', a.tone)} />
+                  <span className="text-[10px] font-medium text-muted-foreground group-hover:text-foreground text-center leading-tight px-1">
+                    {a.label}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </motion.div>
+
           {/* Production Status Bar */}
           <motion.div variants={itemVariants}>
             <ProductionStatusBar data={data?.productionStatus} isLoading={isLoading} />
