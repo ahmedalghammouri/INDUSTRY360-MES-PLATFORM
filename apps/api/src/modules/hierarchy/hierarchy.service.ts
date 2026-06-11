@@ -58,6 +58,9 @@ export class HierarchyService {
     const toMachineNode = (m: (typeof areaOnlyMachines)[0]) => ({
       id: m.id, type: 'MACHINE', code: m.code, name: m.name,
       machineType: m.machineType, state: m.currentStatus?.state ?? 'OFFLINE', oee: m.currentStatus?.oee,
+      // Editable attributes — surfaced so the Edit dialog can pre-fill (parity with Add)
+      criticality: m.criticality, manufacturer: m.manufacturer, designCapacity: m.designCapacity,
+      areaId: m.areaId, lineId: m.lineId,
     });
 
     return factories.map((factory) => {
@@ -68,9 +71,11 @@ export class HierarchyService {
         children: [
           ...factory.areas.map((area) => ({
             id: area.id, type: 'AREA', code: area.code, name: area.name,
+            areaType: area.type,
             children: [
               ...area.productionLines.map((line) => ({
                 id: line.id, type: 'PRODUCTION_LINE', code: line.code, name: line.name,
+                lineType: line.type, areaId: line.areaId,
                 children: line.machines.map(toMachineNode),
               })),
               ...(areaDirectMap.get(area.id) ?? []).map(toMachineNode),

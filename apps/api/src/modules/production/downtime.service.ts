@@ -532,12 +532,37 @@ export class DowntimeService {
 
   // ── Summary (legacy + enhanced) ───────────────────────────────
 
-  async getDowntimeSummary(factoryId: string | null, dateFrom: Date, dateTo: Date) {
+  /** Resolve an analysis scope (area/line/machine) to a downtime where-fragment. */
+  private async scopeWhere(
+    factoryId: string | null,
+    scope?: { areaId?: string; lineId?: string; machineId?: string },
+  ): Promise<Record<string, unknown>> {
+    if (!scope || (!scope.areaId && !scope.lineId && !scope.machineId)) return {};
+    if (scope.machineId) return { machineId: scope.machineId };
+    const ms = await this.prisma.machine.findMany({
+      where: {
+        ...(factoryId ? { factoryId } : {}),
+        ...(scope.lineId ? { lineId: scope.lineId } : {}),
+        ...(scope.areaId ? { line: { areaId: scope.areaId } } : {}),
+      },
+      select: { id: true },
+    });
+    return { machineId: { in: ms.map((m) => m.id) } };
+  }
+
+  async getDowntimeSummary(
+    factoryId: string | null,
+    dateFrom: Date,
+    dateTo: Date,
+    scope?: { areaId?: string; lineId?: string; machineId?: string },
+  ) {
     const factoryFilter = factoryId ? { factoryId } : {};
+    const scopeFilter = await this.scopeWhere(factoryId, scope);
 
     const events = await this.prisma.downtimeEvent.findMany({
       where: {
         ...factoryFilter,
+        ...scopeFilter,
         startTime: { gte: dateFrom },
         endTime: { lte: dateTo },
       },

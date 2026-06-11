@@ -187,15 +187,21 @@ export class DowntimeController {
   @ApiOperation({ summary: 'Get downtime summary for a date range' })
   @ApiQuery({ name: 'dateFrom', required: false })
   @ApiQuery({ name: 'dateTo', required: false })
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
   async getSummary(
     @CurrentUser() user: RequestUser,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
+    @Query('machineId') machineId?: string,
   ) {
     const now = new Date();
     const from = dateFrom ? new Date(dateFrom) : new Date(now.setHours(0, 0, 0, 0));
     const to = dateTo ? new Date(dateTo) : new Date();
-    return this.downtimeService.getDowntimeSummary(user.factoryId, from, to);
+    return this.downtimeService.getDowntimeSummary(user.factoryId, from, to, { areaId, lineId, machineId });
   }
 
   // ── Reason Tree ────────────────────────────────────────────────

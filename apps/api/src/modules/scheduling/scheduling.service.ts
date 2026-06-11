@@ -41,6 +41,8 @@ interface UnifiedQuery {
   dateTo?: string;
   types?: string;       // csv of ScheduleItemType
   machineId?: string;
+  areaId?: string;
+  lineId?: string;
 }
 
 @Injectable()
@@ -72,7 +74,21 @@ export class SchedulingService {
       [startField]: { lte: to },
       [endField]: { gte: from },
     });
-    const machineFilter = query.machineId ? { machineId: query.machineId } : {};
+    // Scope filter (area/line/machine) → applies to machine-bound items (WO, maintenance, downtime).
+    let machineFilter: Record<string, unknown> = {};
+    if (query.machineId) {
+      machineFilter = { machineId: query.machineId };
+    } else if (query.lineId || query.areaId) {
+      const ms = await this.prisma.machine.findMany({
+        where: {
+          factoryId: fid,
+          ...(query.lineId ? { lineId: query.lineId } : {}),
+          ...(query.areaId ? { line: { areaId: query.areaId } } : {}),
+        },
+        select: { id: true },
+      });
+      machineFilter = { machineId: { in: ms.map((m) => m.id) } };
+    }
 
     const tasks: Promise<ScheduleItem[]>[] = [];
 

@@ -22,6 +22,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
+import { useScope } from '@/hooks/use-scope';
 
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
@@ -178,19 +179,20 @@ function KpiCard({ title, value, trend, target, icon, isLoading }: KpiCardProps)
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ManufacturingKpiView() {
+  const { filter, key } = useScope();
   const [timeframe, setTimeframe] = useState<Timeframe>('today');
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['dashboard', 'kpis', timeframe],
-    queryFn: () => api.get<DashboardKpis>('/dashboard/kpis'),
+    queryKey: ['dashboard', 'kpis', timeframe, key],
+    queryFn: () => api.get<DashboardKpis>('/dashboard/kpis', { params: filter }),
     refetchInterval: 30_000,
   });
 
   const { data: oeeRecords, isLoading: recordsLoading } = useQuery({
-    queryKey: ['production', 'oee-records', timeframe],
+    queryKey: ['production', 'oee-records', timeframe, key],
     // Endpoint is paginated → unwrap the `data` array (guard non-array shapes)
     queryFn: async () => {
-      const res = await api.get<{ data: OeeRecord[] } | OeeRecord[]>('/production/oee-records?limit=30');
+      const res = await api.get<{ data: OeeRecord[] } | OeeRecord[]>('/production/oee-records', { params: { limit: 30, ...filter } });
       return Array.isArray(res) ? res : (res?.data ?? []);
     },
     refetchInterval: 60_000,

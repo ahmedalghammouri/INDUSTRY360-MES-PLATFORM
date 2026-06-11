@@ -14,6 +14,7 @@ import {
   Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 import { api } from '@/services/api.client';
+import { useScope } from '@/hooks/use-scope';
 import { cn } from '@/lib/utils';
 
 interface EnergyOverview {
@@ -247,10 +248,11 @@ function EnergyContextPanel() {
 }
 
 export function EnergyOverview() {
+  const { filter: scopeFilter, key: scopeKey } = useScope();
   const [activeTab, setActiveTab] = useState<'overview' | 'mes'>('overview');
   const { data: overview, isLoading: ovLoading } = useQuery({
-    queryKey: ['energy', 'overview'],
-    queryFn: () => api.get<EnergyOverview>('/energy/overview'),
+    queryKey: ['energy', 'overview', scopeKey],
+    queryFn: () => api.get<EnergyOverview>('/energy/overview', { params: scopeFilter }),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });

@@ -6,6 +6,10 @@ import {
   AlertTriangle, Trophy, Activity, Gauge as GaugeIcon,
 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { HierarchyOEE } from './hierarchy-oee';
+import { useScope } from '@/hooks/use-scope';
+import { useTimeRange } from '@/hooks/use-time-range';
+import { TimeRangeFilter } from '@/components/ui/time-range-filter';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip,
   ResponsiveContainer, BarChart, Bar, Cell, ReferenceLine,
@@ -18,8 +22,6 @@ import { KPICard } from '@/components/widgets/kpi-card';
 import { OEEGauge } from '@/components/charts/oee-gauge';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
-
-type Timeframe = 'shift' | 'day' | 'week' | 'month';
 
 interface EquipmentOee {
   name: string;
@@ -34,13 +36,6 @@ interface OeeCalcResponse {
   trend: { period: string; oee: number }[];
   byEquipment: EquipmentOee[];
 }
-
-const TIMEFRAMES: { v: Timeframe; label: string }[] = [
-  { v: 'shift', label: 'Shift' },
-  { v: 'day', label: 'Today' },
-  { v: 'week', label: 'Week' },
-  { v: 'month', label: 'Month' },
-];
 
 const WORLD_CLASS = 85;
 
@@ -61,12 +56,13 @@ function oeeBarColor(v: number): string {
 
 export function ProductionOEEView() {
   const qc = useQueryClient();
-  const [timeframe, setTimeframe] = useState<Timeframe>('day');
+  const { filter, key } = useScope();
+  const { params: timeParams, key: timeKey, preset: timeframe } = useTimeRange();
   const [machineFilter, setMachineFilter] = useState<string>('ALL');
 
   const { data: oeeData, isLoading, isFetching } = useQuery({
-    queryKey: ['production', 'oee', timeframe],
-    queryFn: () => api.get<OeeCalcResponse>(`/production/oee/calculate?timeframe=${timeframe}`),
+    queryKey: ['production', 'oee', timeKey, key],
+    queryFn: () => api.get<OeeCalcResponse>('/production/oee/calculate', { params: { ...timeParams, ...filter } }),
     refetchInterval: 30_000,
   });
 
@@ -140,21 +136,8 @@ export function ProductionOEEView() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Timeframe filter */}
-          <div className="flex items-center rounded-lg border border-border overflow-hidden">
-            {TIMEFRAMES.map(tf => (
-              <button
-                key={tf.v}
-                onClick={() => setTimeframe(tf.v)}
-                className={cn(
-                  'h-8 px-3 text-xs font-medium transition-colors',
-                  timeframe === tf.v ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {tf.label}
-              </button>
-            ))}
-          </div>
+          {/* Smart time filter (Today / Shift / Week / Month / Custom) */}
+          <TimeRangeFilter />
           {/* Machine filter */}
           <SelectMenu
             value={machineFilter}
@@ -335,6 +318,9 @@ export function ProductionOEEView() {
             </div>
           </div>
         </div>
+
+        {/* OEE rolled up Factory → Area → Line → Machine + losses + Pareto */}
+        <HierarchyOEE />
       </div>
     </div>
   );

@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityPicker } from '@/components/ui/entity-picker';
+import { useScope } from '@/hooks/use-scope';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -309,6 +310,7 @@ export function ProductionWorkOrdersView() {
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { filter: scopeFilter, key: scopeKey } = useScope();
 
   const [sortCol, setSortCol] = useState('createdAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -323,9 +325,9 @@ export function ProductionWorkOrdersView() {
   };
 
   const { data: workOrdersData, isLoading } = useQuery({
-    queryKey: ['production', 'work-orders', { search, status: statusFilter, page, sortCol, sortDir }],
+    queryKey: ['production', 'work-orders', { search, status: statusFilter, page, sortCol, sortDir, scope: scopeKey }],
     queryFn: () => api.get('/production/work-orders', {
-      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page, sortBy: sortCol, sortOrder: sortDir },
+      params: { search: search || undefined, status: statusFilter || undefined, limit: 20, page, sortBy: sortCol, sortOrder: sortDir, ...scopeFilter },
     }),
     staleTime: 15_000,
     refetchInterval: 30_000,

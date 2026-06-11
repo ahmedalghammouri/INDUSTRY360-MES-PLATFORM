@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart,
@@ -15,6 +15,9 @@ import {
 } from 'recharts';
 import { Gauge, TrendingUp, TrendingDown, Award, AlertTriangle, Download } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { useScope } from '@/hooks/use-scope';
+import { useTimeRange } from '@/hooks/use-time-range';
+import { TimeRangeFilter } from '@/components/ui/time-range-filter';
 import { format, parseISO } from 'date-fns';
 
 import { api } from '@/services/api.client';
@@ -69,8 +72,6 @@ interface MachineOverview {
 interface DashboardOverviewResponse {
   machines: MachineOverview[];
 }
-
-type Timeframe = 'Shift' | 'Day' | 'Week' | 'Month';
 
 // ── Color helpers ──────────────────────────────────────────────────────────────
 
@@ -198,22 +199,23 @@ function ChartTooltip({ active, payload, label }: CustomTooltipProps) {
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function ManufacturingOeeView() {
-  const [timeframe, setTimeframe] = useState<Timeframe>('Day');
+  const { filter: scopeFilter, key: scopeKey } = useScope();
+  const { params: timeParams, key: timeKey, dateFrom, dateTo } = useTimeRange();
 
   // Query: OEE calculation
   const { data: oeeData, isLoading: oeeLoading } = useQuery<OeeCalculateResponse>({
-    queryKey: ['oee', 'calculate', timeframe],
+    queryKey: ['oee', 'calculate', timeKey, scopeKey],
     queryFn: () =>
-      api.get<OeeCalculateResponse>(`/production/oee/calculate?timeframe=${timeframe}`),
+      api.get<OeeCalculateResponse>('/production/oee/calculate', { params: { ...timeParams, ...scopeFilter } }),
     refetchInterval: 30_000,
   });
 
   // Query: OEE records history
   const { data: oeeRecords, isLoading: recordsLoading } = useQuery<OeeRecord[]>({
-    queryKey: ['oee', 'records'],
+    queryKey: ['oee', 'records', scopeKey, timeKey],
     // Endpoint is paginated → unwrap the `data` array (guard non-array shapes)
     queryFn: async () => {
-      const res = await api.get<{ data: OeeRecord[] } | OeeRecord[]>('/production/oee-records?limit=50');
+      const res = await api.get<{ data: OeeRecord[] } | OeeRecord[]>('/production/oee-records', { params: { limit: 50, ...scopeFilter, dateFrom, dateTo } });
       return Array.isArray(res) ? res : (res?.data ?? []);
     },
     refetchInterval: 30_000,
@@ -221,8 +223,8 @@ export default function ManufacturingOeeView() {
 
   // Query: Dashboard overview (machines list)
   const { data: overviewData, isLoading: overviewLoading } = useQuery<DashboardOverviewResponse>({
-    queryKey: ['dashboard', 'overview'],
-    queryFn: () => api.get<DashboardOverviewResponse>('/dashboard/overview'),
+    queryKey: ['dashboard', 'overview', scopeKey],
+    queryFn: () => api.get<DashboardOverviewResponse>('/dashboard/overview', { params: scopeFilter }),
     refetchInterval: 30_000,
   });
 
@@ -305,23 +307,8 @@ export default function ManufacturingOeeView() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Timeframe selector */}
-          <div className="flex items-center rounded-md border border-border/50 overflow-hidden">
-            {(['Shift', 'Day', 'Week', 'Month'] as Timeframe[]).map((tf) => (
-              <button
-                key={tf}
-                onClick={() => setTimeframe(tf)}
-                className={cn(
-                  'px-3 py-1.5 text-xs font-medium transition-colors',
-                  timeframe === tf
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-muted/30',
-                )}
-              >
-                {tf}
-              </button>
-            ))}
-          </div>
+          {/* Smart time filter (Today / Shift / Week / Month / Custom) */}
+          <TimeRangeFilter />
 
           <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={handleExport}>
             <Download size={13} />
@@ -335,7 +322,7 @@ export default function ManufacturingOeeView() {
 
         {/* 1. Four metric boxes */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <MetricBox label="OEE" value={oeeData?.oee ?? 0} trend={oeeData?.trend} isLoading={isAnyLoading} />
+          <MetricBox label="OEE" value={oeeData?.oee ?? 0} isLoading={isAnyLoading} />
           <MetricBox label="Availability" value={oeeData?.availability ?? 0} isLoading={isAnyLoading} />
           <MetricBox label="Performance" value={oeeData?.performance ?? 0} isLoading={isAnyLoading} />
           <MetricBox label="Quality" value={oeeData?.quality ?? 0} isLoading={isAnyLoading} />

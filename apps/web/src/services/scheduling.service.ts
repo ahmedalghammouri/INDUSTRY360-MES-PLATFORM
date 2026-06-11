@@ -19,6 +19,8 @@ export interface UnifiedScheduleParams {
   dateTo?: string;
   types?: string;
   machineId?: string;
+  areaId?: string;
+  lineId?: string;
 }
 
 export const schedulingService = {

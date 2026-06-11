@@ -30,6 +30,14 @@ interface HierarchyNode {
   machineType?: string;
   state?: string;
   oee?: number;
+  // Editable attributes (surfaced by /hierarchy/tree for the Edit dialog)
+  areaType?: string;
+  lineType?: string;
+  criticality?: string;
+  manufacturer?: string | null;
+  designCapacity?: number | null;
+  areaId?: string | null;
+  lineId?: string | null;
   children?: HierarchyNode[];
 }
 
@@ -222,7 +230,14 @@ export function HierarchyView() {
       type: node.type as NodeType,
       name: node.name,
       code: node.code ?? '',
+      areaType: node.areaType ?? 'PACKING',
+      lineType: node.lineType ?? 'PACKING',
       machineType: node.machineType ?? 'MACHINE',
+      criticality: node.criticality ?? 'MEDIUM',
+      areaId: node.areaId ?? '__none__',
+      lineId: node.lineId ?? '__none__',
+      manufacturer: node.manufacturer ?? '',
+      designCapacity: node.designCapacity != null ? String(node.designCapacity) : '',
     });
     setFormOpen(true);
   };
@@ -358,9 +373,9 @@ export function HierarchyView() {
               </div>
             )}
 
-            {/* Common: Name */}
+            {/* Common: Name + Code (Code is read-only when editing — it's the immutable node key) */}
             <div className="grid grid-cols-2 gap-3">
-              <div className={cn('space-y-1.5', !editNode ? '' : 'col-span-2')}>
+              <div className="space-y-1.5">
                 <Label className="text-xs font-medium">Name <span className="text-destructive">*</span></Label>
                 <Input
                   value={form.name}
@@ -370,17 +385,19 @@ export function HierarchyView() {
                 />
               </div>
 
-              {!editNode && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium">Code <span className="text-destructive">*</span></Label>
-                  <Input
-                    value={form.code}
-                    onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
-                    placeholder={form.type === 'AREA' ? 'PACKING' : form.type === 'PRODUCTION_LINE' ? 'PL-01' : 'M1-001'}
-                    className="h-9 font-mono"
-                  />
-                </div>
-              )}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">
+                  Code {!editNode && <span className="text-destructive">*</span>}
+                </Label>
+                <Input
+                  value={form.code}
+                  onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+                  placeholder={form.type === 'AREA' ? 'PACKING' : form.type === 'PRODUCTION_LINE' ? 'PL-01' : 'M1-001'}
+                  className="h-9 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                  disabled={!!editNode}
+                  title={editNode ? 'Code cannot be changed' : undefined}
+                />
+              </div>
             </div>
 
             {/* AREA specific */}

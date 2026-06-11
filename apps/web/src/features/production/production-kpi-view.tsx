@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
   TrendingUp,
   TrendingDown,
@@ -13,6 +13,9 @@ import {
   Download,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { useScope } from '@/hooks/use-scope';
+import { useTimeRange } from '@/hooks/use-time-range';
+import { TimeRangeFilter } from '@/components/ui/time-range-filter';
 import { motion } from 'framer-motion';
 import {
   BarChart,
@@ -34,7 +37,6 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
 
@@ -85,7 +87,6 @@ interface WorkOrdersResponse {
   total: number;
 }
 
-type Timeframe = 'today' | 'week' | 'month';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -219,27 +220,49 @@ function PrimaryKpiCard({
 // ---------------------------------------------------------------------------
 
 export default function ProductionKpiView() {
-  const [timeframe, setTimeframe] = useState<Timeframe>('month');
+  const { filter, key } = useScope();
+  const { dateFrom, dateTo, key: timeKey } = useTimeRange();
 
   // --- Queries ---
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['dashboard', 'kpis'],
-    queryFn: () => api.get<DashboardKpis>('/dashboard/kpis'),
+    queryKey: ['dashboard', 'kpis', key],
+    queryFn: () => api.get<DashboardKpis>('/dashboard/kpis', { params: filter }),
     refetchInterval: 60_000,
   });
 
   const { data: oeeRecordsResp, isLoading: recordsLoading } = useQuery({
-    queryKey: ['production', 'oee-records', 90],
-    queryFn: () => api.get<{ data: OeeRecord[]; total: number }>('/production/oee-records?limit=90'),
+    queryKey: ['production', 'oee-records', timeKey, key],
+    queryFn: () => api.get<{ data: OeeRecord[]; total: number }>('/production/oee-records', { params: { limit: 365, ...filter, dateFrom, dateTo } }),
     refetchInterval: 60_000,
   });
   const oeeRecords = oeeRecordsResp?.data ?? [];
 
   const { data: workOrdersResp, isLoading: woLoading } = useQuery({
-    queryKey: ['production', 'work-orders', 200],
-    queryFn: () => api.get<WorkOrdersResponse>('/production/work-orders?limit=200'),
+    queryKey: ['production', 'work-orders', 200, key],
+    queryFn: () => api.get<WorkOrdersResponse>('/production/work-orders', { params: { limit: 200, ...filter } }),
     refetchInterval: 60_000,
   });
+
+  // --- Time-windowed, scope-filtered OEE summary (records are already scoped server-side) ---
+  const summary = useMemo(() => {
+    const start = new Date(dateFrom);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(dateTo);
+    end.setHours(23, 59, 59, 999);
+    const recs = oeeRecords.filter((r: any) => {
+      const d = new Date(r.recordDate);
+      return d >= start && d <= end;
+    });
+    const n = recs.length;
+    const avg = (k: string) => (n ? recs.reduce((s, r: any) => s + (r[k] ?? 0), 0) / n : 0);
+    return {
+      oee: Math.round(avg('oee') * 10) / 10,
+      availability: Math.round(avg('availability') * 10) / 10,
+      performance: Math.round(avg('performance') * 10) / 10,
+      quality: Math.round(avg('quality') * 10) / 10,
+      totalOutput: recs.reduce((s, r: any) => s + (r.totalOutput ?? 0), 0),
+    };
+  }, [oeeRecords, dateFrom, dateTo]);
 
   // --- Derived metrics ---
   const workOrders = workOrdersResp?.data ?? [];
@@ -271,30 +294,30 @@ export default function ProductionKpiView() {
     () => [
       {
         subject: 'Availability',
-        Actual: kpis?.availability ?? 0,
+        Actual: summary.availability,
         'World Class': 90,
       },
       {
         subject: 'Performance',
-        Actual: kpis?.performance ?? 0,
+        Actual: summary.performance,
         'World Class': 95,
       },
       {
         subject: 'Quality',
-        Actual: kpis?.quality ?? 0,
+        Actual: summary.quality,
         'World Class': 99,
       },
     ],
-    [kpis],
+    [summary],
   );
 
   // --- KPI target table rows ---
-  const plannedOutput = kpis?.totalOutput ? Math.ceil(kpis.totalOutput * 1.1) : 1000;
+  const plannedOutput = summary.totalOutput ? Math.ceil(summary.totalOutput * 1.1) : 1000;
   const kpiRows = useMemo(
     () => [
       {
         metric: 'OEE',
-        actual: kpis?.oee ?? 0,
+        actual: summary.oee,
         target: 85,
         unit: '%',
       },
@@ -306,7 +329,7 @@ export default function ProductionKpiView() {
       },
       {
         metric: 'Output',
-        actual: kpis?.totalOutput ?? 0,
+        actual: summary.totalOutput,
         target: plannedOutput,
         unit: ' units',
       },
@@ -317,7 +340,7 @@ export default function ProductionKpiView() {
         unit: '%',
       },
     ],
-    [kpis, firstPassYield, completionRate, plannedOutput],
+    [summary, firstPassYield, completionRate, plannedOutput],
   );
 
   // --- Production volume by week (BarChart) ---
@@ -349,13 +372,19 @@ export default function ProductionKpiView() {
   // --- Top 10 WOs by FPY ---
   const topWOs = useMemo(() => {
     return [...workOrders]
-      .filter((w) => w.plannedQty > 0)
-      .map((w) => ({
-        ...w,
-        fpy: (w.goodQty / w.plannedQty) * 100,
-        oeeValue: w.progress, // use progress as proxy if oee not on this endpoint
-      }))
-      .sort((a, b) => b.fpy - a.fpy)
+      .map((w) => {
+        const good = (w as any).liveGoodQty ?? w.goodQty ?? 0;
+        // FPY = good units / units actually produced (capped 100) — NOT good/planned,
+        // which mixes units across routing steps and yields nonsense like 4000%.
+        const produced = (w as any).actualQty || good || w.plannedQty || 0;
+        return {
+          ...w,
+          output: good,
+          fpy: produced > 0 ? Math.min(100, (good / produced) * 100) : 0,
+        };
+      })
+      .filter((w) => (w.plannedQty ?? 0) > 0)
+      .sort((a, b) => b.fpy - a.fpy || b.output - a.output)
       .slice(0, 10);
   }, [workOrders]);
 
@@ -382,22 +411,7 @@ export default function ProductionKpiView() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <Tabs
-            value={timeframe}
-            onValueChange={(v) => setTimeframe(v as Timeframe)}
-          >
-            <TabsList className="h-8">
-              <TabsTrigger value="today" className="text-xs px-3 h-7">
-                Today
-              </TabsTrigger>
-              <TabsTrigger value="week" className="text-xs px-3 h-7">
-                This Week
-              </TabsTrigger>
-              <TabsTrigger value="month" className="text-xs px-3 h-7">
-                This Month
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <TimeRangeFilter />
           <Button
             variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
             onClick={() => {
@@ -415,7 +429,7 @@ export default function ProductionKpiView() {
               const blob = new Blob([rows.map(r => r.join(',')).join('\n')], { type: 'text/csv' });
               const a = document.createElement('a');
               a.href = URL.createObjectURL(blob);
-              a.download = `production-kpi-${timeframe}-${new Date().toISOString().slice(0, 10)}.csv`;
+              a.download = `production-kpi-${timeKey}-${new Date().toISOString().slice(0, 10)}.csv`;
               a.click();
               URL.revokeObjectURL(a.href);
             }}
@@ -433,7 +447,7 @@ export default function ProductionKpiView() {
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <PrimaryKpiCard
             title="OEE"
-            value={kpis?.oee ?? 0}
+            value={summary.oee}
             unit="%"
             trend={kpis?.oeeTrend ?? 0}
             target={85}
@@ -451,7 +465,7 @@ export default function ProductionKpiView() {
           />
           <PrimaryKpiCard
             title="Total Output"
-            value={kpis?.totalOutput ?? 0}
+            value={summary.totalOutput}
             unit=" units"
             trend={kpis?.outputTrend ?? 0}
             target={plannedOutput}
@@ -692,16 +706,16 @@ export default function ProductionKpiView() {
                     className="h-10 hover:bg-accent/30 transition-colors"
                   >
                     <td className="pr-3 font-mono font-medium text-foreground/90">
-                      {w.woNumber}
+                      {(w as any).orderNumber ?? (w as any).woNumber ?? '—'}
                     </td>
-                    <td className="pr-3 text-muted-foreground">
-                      SKU-{w.id.slice(-6).toUpperCase()}
+                    <td className="pr-3 text-muted-foreground truncate max-w-[200px]">
+                      {(w as any).productName ?? (w as any).sku?.name ?? '—'}
                     </td>
                     <td className="pr-3 tabular-nums text-muted-foreground">
                       {(w.plannedQty ?? 0).toLocaleString()}
                     </td>
                     <td className="pr-3 tabular-nums font-medium text-foreground/80">
-                      {(w.goodQty ?? 0).toLocaleString()}
+                      {(w.output ?? 0).toLocaleString()}
                     </td>
                     <td className="pr-3">
                       <span

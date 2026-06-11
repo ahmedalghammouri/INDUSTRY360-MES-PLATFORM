@@ -23,6 +23,7 @@ import {
 import { KPICard } from '@/components/widgets/kpi-card';
 import { OEEGauge } from '@/components/charts/oee-gauge';
 import { api } from '@/services/api.client';
+import { useScope } from '@/hooks/use-scope';
 import { cn, getStatusVariant, formatDate, formatDuration, formatPercent } from '@/lib/utils';
 
 interface WorkOrder {
@@ -61,23 +62,24 @@ const STATUS_LABELS = {
 };
 
 export function ProductionOverview() {
+  const { filter: scopeFilter, key: scopeKey } = useScope();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   const { data: workOrders, isLoading } = useQuery({
-    queryKey: ['production', 'work-orders', { search, status: statusFilter }],
+    queryKey: ['production', 'work-orders', { search, status: statusFilter, scope: scopeKey }],
     queryFn: () => api.get<{ data: WorkOrder[]; total: number }>('/production/work-orders', {
-      params: { search, status: statusFilter, limit: 20 },
+      params: { search, status: statusFilter, limit: 20, ...scopeFilter },
     }),
     staleTime: 15_000,
   });
 
   const { data: productionKPIs } = useQuery({
-    queryKey: ['production', 'kpis'],
+    queryKey: ['production', 'kpis', scopeKey],
     queryFn: () => api.get<{
       oee: number; availability: number; performance: number; quality: number;
       totalOrders: number; completedOrders: number; inProgressOrders: number;
-    }>('/production/kpis'),
+    }>('/production/kpis', { params: scopeFilter }),
     refetchInterval: 30_000,
   });
 

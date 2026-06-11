@@ -64,6 +64,70 @@ describe('OEEService', () => {
     });
   });
 
+  describe('calculateDetailed (six-loss)', () => {
+    it('excludes planned stops from PPT and counts unplanned as availability loss', () => {
+      // PPT already net of planned stops = 660 min; 60 min unplanned breakdown
+      const r = service.calculateDetailed({
+        plannedProductionTime: 660,
+        unplannedDowntime: 60,
+        idealCycleTime: 0.2, // min/unit
+        totalCount: 2700,
+        goodCount: 2670,
+      });
+      expect(r.runTime).toBe(600);
+      expect(r.availability).toBeCloseTo(90.9, 0); // 600/660
+      expect(r.performance).toBeCloseTo(90.0, 0);  // (0.2*2700)/600 = 540/600
+      expect(r.quality).toBeCloseTo(98.9, 0);      // 2670/2700
+      expect(r.oee).toBeGreaterThan(0);
+      expect(r.oee).toBeLessThanOrEqual(100);
+    });
+
+    it('caps performance at 100 and never exceeds bounds', () => {
+      const r = service.calculateDetailed({
+        plannedProductionTime: 100, unplannedDowntime: 0,
+        idealCycleTime: 1, totalCount: 200, goodCount: 200,
+      });
+      expect(r.performance).toBeLessThanOrEqual(100);
+      expect(r.availability).toBe(100);
+    });
+  });
+
+  describe('availabilityFromSegments', () => {
+    it('computes availability from machine state segments, excluding planned stops', () => {
+      const r = service.availabilityFromSegments([
+        { state: 'RUNNING', durationMinutes: 600 },
+        { state: 'BREAKDOWN', durationMinutes: 40 },
+        { state: 'STARVED', durationMinutes: 20 },
+        { state: 'PLANNED_STOP', durationMinutes: 60, isPlannedStop: true }, // excluded from PPT
+      ]);
+      expect(r.ppt).toBe(660);       // 720 scheduled − 60 planned
+      expect(r.runTime).toBe(600);
+      expect(r.unplannedDowntime).toBe(60);
+      expect(r.availability).toBeCloseTo(90.9, 0);
+    });
+  });
+
+  describe('rollup', () => {
+    it('rolls up children by summing quantities, not averaging percentages', () => {
+      // One big efficient JO + one small bad JO — naive average would mislead.
+      const parent = service.rollup([
+        { ppt: 600, runTime: 600, idealRunTime: 600, totalCount: 1000, goodCount: 1000 }, // 100%
+        { ppt: 60, runTime: 30, idealRunTime: 15, totalCount: 50, goodCount: 25 },          // poor
+      ]);
+      // availability = 630/660, performance = 615/630, quality = 1025/1050
+      expect(parent.availability).toBeCloseTo(95.5, 0);
+      expect(parent.performance).toBeCloseTo(97.6, 0);
+      expect(parent.quality).toBeCloseTo(97.6, 0);
+      expect(parent.oee).toBeCloseTo(91.0, 0);
+    });
+
+    it('returns zeros for empty children', () => {
+      const parent = service.rollup([]);
+      expect(parent.oee).toBe(0);
+      expect(parent.availability).toBe(0);
+    });
+  });
+
   describe('getClassification', () => {
     it('should classify world-class OEE correctly', () => {
       expect(service.getClassification(85)).toBe('world-class');

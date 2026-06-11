@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
+import { useScope } from '@/hooks/use-scope';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -88,9 +89,10 @@ const REPORT_CARDS = [
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function ProductionReportsView() {
+  const { filter, key } = useScope();
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard', 'kpis'],
-    queryFn: () => api.get<DashboardKPIs>('/dashboard/kpis'),
+    queryKey: ['dashboard', 'kpis', key],
+    queryFn: () => api.get<DashboardKPIs>('/dashboard/kpis', { params: filter }),
     staleTime: 30_000,
   });
 

@@ -3,6 +3,7 @@ import { ApsModule } from '../aps/aps.module';
 import { ProductionController } from './production.controller';
 import { ProductionService } from './production.service';
 import { OEEService } from './oee.service';
+import { KpiService } from './kpi.service';
 import { DowntimeController } from './downtime.controller';
 import { DowntimeService } from './downtime.service';
 import { RecipeController } from './recipe.controller';
@@ -13,7 +14,7 @@ import { TraceabilityController } from './traceability.controller';
 @Module({
   imports: [ApsModule],
   controllers: [ProductionController, DowntimeController, RecipeController, TraceabilityController],
-  providers: [ProductionService, OEEService, DowntimeService, RecipeService, TraceabilityService],
-  exports: [ProductionService, OEEService, DowntimeService, RecipeService, TraceabilityService],
+  providers: [ProductionService, OEEService, KpiService, DowntimeService, RecipeService, TraceabilityService],
+  exports: [ProductionService, OEEService, KpiService, DowntimeService, RecipeService, TraceabilityService],
 })
 export class ProductionModule {}

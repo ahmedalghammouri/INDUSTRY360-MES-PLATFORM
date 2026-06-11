@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityPicker } from '@/components/ui/entity-picker';
+import { useScope } from '@/hooks/use-scope';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import {
@@ -901,6 +902,26 @@ function PODetailSheet({ po, open, onClose, actions }: PODetailSheetProps) {
             </div>
           </div>
 
+          {/* OEE — rolled up from the PO's work orders (JO→WO→PO engine) */}
+          {(po as any).oee != null && (
+            <div className="glass-card rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-xs text-muted-foreground">OEE — rolled up from work orders</span>
+                <span className={cn('text-sm font-bold',
+                  (po as any).oee >= 85 ? 'text-green-400' : (po as any).oee >= 65 ? 'text-brand-400' : (po as any).oee >= 45 ? 'text-amber-400' : 'text-red-400',
+                )}>{(po as any).oee}%</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {([['Availability', (po as any).availability], ['Performance', (po as any).performance], ['Quality', (po as any).quality]] as const).map(([label, val]) => (
+                  <div key={label} className="rounded-md bg-foreground/5 py-2">
+                    <div className="text-[10px] text-muted-foreground">{label}</div>
+                    <div className="text-sm font-semibold">{val != null ? `${val}%` : '—'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Dates */}
           <div className="grid grid-cols-2 gap-3 text-xs">
             {[
@@ -1235,6 +1256,7 @@ function PORow({ po, idx, onSelect, actions }: PORowProps) {
 export function ProductionOrdersView() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { filter: scopeFilter, key: scopeKey } = useScope();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
@@ -1255,12 +1277,13 @@ export function ProductionOrdersView() {
   const LIMIT = 20;
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['production-orders', search, statusFilter],
+    queryKey: ['production-orders', search, statusFilter, scopeKey],
     queryFn: () => api.get('/production/production-orders', {
       params: {
         search: search || undefined,
         status: statusFilter === 'all' ? undefined : statusFilter,
         limit: 100,
+        ...scopeFilter,
       },
     }),
     staleTime: 30_000,

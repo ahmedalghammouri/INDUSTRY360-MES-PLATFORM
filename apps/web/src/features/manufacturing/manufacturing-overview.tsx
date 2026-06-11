@@ -27,6 +27,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { api } from '@/services/api.client';
+import { useScope } from '@/hooks/use-scope';
 import { cn, formatPercent, formatNumber } from '@/lib/utils';
 
 // ─── TypeScript interfaces ────────────────────────────────────────────────────
@@ -231,16 +232,17 @@ function OverviewSkeleton() {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ManufacturingOverview() {
+  const { filter: scopeFilter, key: scopeKey } = useScope();
   const { data: overview, isLoading: overviewLoading } = useQuery<DashboardOverview>({
-    queryKey: ['dashboard-overview'],
-    queryFn: () => api.get<DashboardOverview>('/dashboard/overview'),
+    queryKey: ['dashboard-overview', scopeKey],
+    queryFn: () => api.get<DashboardOverview>('/dashboard/overview', { params: scopeFilter }),
     refetchInterval: 15000,
   });
 
   const { data: workOrdersResp, isLoading: woLoading } = useQuery<WorkOrdersResponse>({
-    queryKey: ['work-orders-in-progress'],
+    queryKey: ['work-orders-in-progress', scopeKey],
     queryFn: () =>
-      api.get<WorkOrdersResponse>('/production/work-orders', { params: { status: 'IN_PROGRESS', limit: 20 } }),
+      api.get<WorkOrdersResponse>('/production/work-orders', { params: { status: 'IN_PROGRESS', limit: 20, ...scopeFilter } }),
     refetchInterval: 15000,
   });
 

@@ -158,6 +158,20 @@ export class MesWebSocketGateway implements OnGatewayInit, OnGatewayConnection, 
     });
   }
 
+  @OnEvent('production.kpi.updated')
+  handleKpiUpdated(payload: {
+    factoryId: string;
+    workOrderId: string;
+    productionOrderId?: string | null;
+    wo: { id: string; oee: number; status: string };
+    po: { id: string; oee: number; status: string } | null;
+  }) {
+    this.toFactory(payload.factoryId, 'production:kpi:updated', {
+      ...payload,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // ────────────────────────────────────────────────────────────
   // DOWNTIME EVENTS
   // ────────────────────────────────────────────────────────────

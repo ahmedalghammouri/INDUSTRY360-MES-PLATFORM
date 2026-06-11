@@ -1,5 +1,5 @@
-import { Controller, Get } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { DashboardService } from './dashboard.service';
 
@@ -16,14 +16,30 @@ export class DashboardController {
 
   @Get('overview')
   @ApiOperation({ summary: 'Get real-time operations dashboard data' })
-  async getOverview(@CurrentUser() user: RequestUser) {
-    return this.dashboardService.getOverview(user.factoryId);
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
+  async getOverview(
+    @CurrentUser() user: RequestUser,
+    @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
+    @Query('machineId') machineId?: string,
+  ) {
+    return this.dashboardService.getOverview(user.factoryId, { areaId, lineId, machineId });
   }
 
   @Get('kpis')
   @ApiOperation({ summary: 'Get current shift KPIs' })
-  async getKPIs(@CurrentUser() user: RequestUser) {
-    const data = await this.dashboardService.getOverview(user.factoryId);
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
+  async getKPIs(
+    @CurrentUser() user: RequestUser,
+    @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
+    @Query('machineId') machineId?: string,
+  ) {
+    const data = await this.dashboardService.getOverview(user.factoryId, { areaId, lineId, machineId });
     return data.kpis;
   }
 }

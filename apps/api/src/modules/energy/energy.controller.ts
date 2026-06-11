@@ -19,8 +19,16 @@ export class EnergyController {
 
   @Get('overview')
   @ApiOperation({ summary: 'Energy management overview KPIs' })
-  async getOverview(@CurrentUser() user: RequestUser) {
-    return this.energyService.getOverview(user.factoryId);
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
+  async getOverview(
+    @CurrentUser() user: RequestUser,
+    @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
+    @Query('machineId') machineId?: string,
+  ) {
+    return this.energyService.getOverview(user.factoryId, { areaId, lineId, machineId });
   }
 
   @Get('meters')

@@ -385,6 +385,22 @@ export class ProductionOrderFiltersDto {
   @IsString()
   status?: string;
 
+  // Analysis scope — filter POs to those with a work order on the area/line/machine.
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  machineId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  lineId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  areaId?: string;
+
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @Type(() => Number)

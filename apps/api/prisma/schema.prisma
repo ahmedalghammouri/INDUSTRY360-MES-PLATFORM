@@ -653,6 +653,11 @@ model ProductionOrder {
   completedQty   Int                   @default(0)
   unit           String                @default("CARTON")
   status         ProductionOrderStatus @default(PLANNED)
+  // Rolled-up OEE from child work orders (engine: see docs/DESIGN-oee-kpi-engine.md)
+  oee            Float?
+  availability   Float?
+  performance    Float?
+  quality        Float?
   priority       Priority              @default(MEDIUM)
   plannedStart   DateTime
   plannedEnd     DateTime

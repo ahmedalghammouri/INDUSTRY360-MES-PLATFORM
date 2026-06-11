@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { FactoryGantt, type FactoryTask, type GanttResource, type FactoryZoom } from '@/components/charts/factory-gantt';
 import { ScheduleCalendar } from './schedule-calendar';
 import { useUnifiedSchedule } from './use-schedule';
+import { useScope } from '@/hooks/use-scope';
 
 const WINDOW_DAYS: Record<FactoryZoom, number> = { '30min': 1, hour: 2, day: 4, week: 14, month: 35 };
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -47,7 +48,8 @@ export function ScheduleView({
   const dateFrom = view === 'calendar' ? isoLocal(monthFrom) : iso(anchor);
   const dateTo = view === 'calendar' ? isoLocal(monthTo) : iso(new Date(anchor.getTime() + windowDays * 86_400_000));
 
-  const { data, isLoading } = useUnifiedSchedule({ dateFrom, dateTo });
+  const { filter: scopeFilter } = useScope();
+  const { data, isLoading } = useUnifiedSchedule({ dateFrom, dateTo, ...scopeFilter });
 
   const typeMeta = data?.typeMeta ?? [];
   const counts = data?.counts ?? {};

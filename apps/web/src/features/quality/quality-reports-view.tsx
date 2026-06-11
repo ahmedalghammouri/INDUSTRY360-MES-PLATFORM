@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
+import { useScope } from '@/hooks/use-scope';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { api } from '@/services/api.client';
@@ -150,9 +151,10 @@ function KPIPill({ label, value, variant = 'default', isLoading }: KPIPillProps)
 
 export default function QualityReportsView() {
   // Fetch dashboard KPIs for quality metrics
+  const { filter: scopeFilter, key: scopeKey } = useScope();
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['dashboard', 'kpis'],
-    queryFn: () => api.get<DashboardKPIs>('/dashboard/kpis'),
+    queryKey: ['dashboard', 'kpis', scopeKey],
+    queryFn: () => api.get<DashboardKPIs>('/dashboard/kpis', { params: scopeFilter }),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });

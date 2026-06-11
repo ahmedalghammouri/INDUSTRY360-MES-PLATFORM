@@ -6,6 +6,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { findProcessForSku } from '../../common/process-scope.util';
 import { OEEService } from './oee.service';
+import { KpiService } from './kpi.service';
 import { ApsService } from '../aps/aps.service';
 import type { WorkOrderStatus, Prisma } from '@prisma/client';
 import type {
@@ -31,6 +32,7 @@ export class ProductionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly oeeService: OEEService,
+    private readonly kpiService: KpiService,
     private readonly eventEmitter: EventEmitter2,
     private readonly apsService: ApsService,
   ) {}
@@ -116,12 +118,13 @@ export class ProductionService {
     priority?: string;
     machineId?: string;
     lineId?: string;
+    areaId?: string;
     dateFrom?: string;
     dateTo?: string;
     page?: number;
     limit?: number;
   }) {
-    const { search, status, priority, machineId, lineId, dateFrom, dateTo, page = 1, limit = 20 } = filters;
+    const { search, status, priority, machineId, lineId, areaId, dateFrom, dateTo, page = 1, limit = 20 } = filters;
     const factoryFilter = factoryId ? { factoryId } : {};
 
     const statusFilter = status
@@ -130,13 +133,22 @@ export class ProductionService {
         : { status: status as WorkOrderStatus }
       : {};
 
+    // A WO "belongs to" a machine via its header machineId OR any of its job orders
+    // (routed WOs span multiple machines through their JO steps).
+    const scopeOr: Prisma.WorkOrderWhereInput[] | null = machineId
+      ? [{ machineId }, { jobOrders: { some: { machineId } } }]
+      : lineId
+        ? [{ lineId }, { jobOrders: { some: { machine: { lineId } } } }]
+        : areaId
+          ? [{ line: { areaId } }, { jobOrders: { some: { machine: { line: { areaId } } } } }]
+          : null;
+
     const where: Prisma.WorkOrderWhereInput = {
       ...factoryFilter,
       deletedAt: null,
       ...statusFilter,
       ...(priority && { priority: priority as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' }),
-      ...(machineId && { machineId }),
-      ...(lineId && { lineId }),
+      ...(scopeOr && { OR: scopeOr }),
       ...(dateFrom && { plannedStart: { gte: new Date(dateFrom) } }),
       ...(dateTo && { plannedEnd: { lte: new Date(dateTo) } }),
       ...(search && {
@@ -356,6 +368,20 @@ export class ProductionService {
       ...factoryFilter,
       deletedAt: null,
       ...(filters.status && { status: filters.status as any }),
+      // Scope: PO is in-scope when it has a WO that — by its header machine OR any
+      // of its job-order steps — runs on the selected area/line/machine.
+      ...((filters.machineId || filters.lineId || filters.areaId) && {
+        workOrders: {
+          some: {
+            deletedAt: null,
+            OR: filters.machineId
+              ? [{ machineId: filters.machineId }, { jobOrders: { some: { machineId: filters.machineId } } }]
+              : filters.lineId
+                ? [{ lineId: filters.lineId }, { jobOrders: { some: { machine: { lineId: filters.lineId } } } }]
+                : [{ line: { areaId: filters.areaId } }, { jobOrders: { some: { machine: { line: { areaId: filters.areaId } } } } }],
+          },
+        },
+      }),
       ...(filters.search && {
         OR: [
           { orderNumber: { contains: filters.search, mode: 'insensitive' } },
@@ -1145,8 +1171,10 @@ export class ProductionService {
       },
     });
 
-    // Auto-calculate OEE
+    // Auto-calculate OEE — calculateAndStoreOEE persists the machine-grain OEERecord
+    // (history/hierarchy), then the engine rolls JO→WO→PO and owns the WO/PO OEE.
     const oeeResult = await this.calculateAndStoreOEE(wo, dto.actualQty, goodQty, actualEnd);
+    await this.kpiService.recomputeWorkOrderAndPO(workOrderId);
 
     // Traceability & genealogy: output batch + per-step trace events +
     // per-step material consumptions (linked to lots when available)
@@ -1230,29 +1258,38 @@ export class ProductionService {
   // KPIs
   // ────────────────────────────────────────────────────────────
 
-  async getKPIs(factoryId: string | null) {
+  async getKPIs(
+    factoryId: string | null,
+    scope?: { areaId?: string; lineId?: string; machineId?: string },
+  ) {
     const factoryFilter = factoryId ? { factoryId } : {};
+    const machineIds = await this.kpiService.resolveScopeMachineIds(factoryId, scope);
+    // WO "belongs to" a machine via its header OR any job-order step (routed WOs).
+    const woScope: Prisma.WorkOrderWhereInput = scope?.machineId
+      ? { OR: [{ machineId: scope.machineId }, { jobOrders: { some: { machineId: scope.machineId } } }] }
+      : scope?.lineId
+        ? { OR: [{ lineId: scope.lineId }, { jobOrders: { some: { machine: { lineId: scope.lineId } } } }] }
+        : scope?.areaId
+          ? { OR: [{ line: { areaId: scope.areaId } }, { jobOrders: { some: { machine: { line: { areaId: scope.areaId } } } } }] }
+          : {};
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
 
-    const [oeeData, totalOrders, inProgressOrders, completedOrders, plannedOrders, heldOrders] =
+    const [oee, totalOrders, inProgressOrders, completedOrders, plannedOrders, heldOrders] =
       await Promise.all([
-        this.prisma.oEERecord.aggregate({
-          where: { ...factoryFilter, recordDate: { gte: dayStart } },
-          _avg: { oee: true, availability: true, performance: true, quality: true },
-        }),
-        this.prisma.workOrder.count({ where: { ...factoryFilter, deletedAt: null } }),
-        this.prisma.workOrder.count({ where: { ...factoryFilter, status: 'IN_PROGRESS' } }),
-        this.prisma.workOrder.count({ where: { ...factoryFilter, status: 'COMPLETED' } }),
-        this.prisma.workOrder.count({ where: { ...factoryFilter, status: { in: ['PLANNED', 'RELEASED'] } } }),
-        this.prisma.workOrder.count({ where: { ...factoryFilter, status: 'ON_HOLD' } }),
+        this.kpiService.oeeAnalytics(factoryId, dayStart, new Date(), machineIds, 'hour'),
+        this.prisma.workOrder.count({ where: { ...factoryFilter, ...woScope, deletedAt: null } }),
+        this.prisma.workOrder.count({ where: { ...factoryFilter, ...woScope, status: 'IN_PROGRESS' } }),
+        this.prisma.workOrder.count({ where: { ...factoryFilter, ...woScope, status: 'COMPLETED' } }),
+        this.prisma.workOrder.count({ where: { ...factoryFilter, ...woScope, status: { in: ['PLANNED', 'RELEASED'] } } }),
+        this.prisma.workOrder.count({ where: { ...factoryFilter, ...woScope, status: 'ON_HOLD' } }),
       ]);
 
     return {
-      oee: oeeData._avg.oee ?? 0,
-      availability: oeeData._avg.availability ?? 0,
-      performance: oeeData._avg.performance ?? 0,
-      quality: oeeData._avg.quality ?? 0,
+      oee: oee.current.oee,
+      availability: oee.current.availability,
+      performance: oee.current.performance,
+      quality: oee.current.quality,
       totalOrders,
       inProgressOrders,
       completedOrders,
@@ -1261,102 +1298,68 @@ export class ProductionService {
     };
   }
 
-  async getOEESummary(factoryId: string | null) {
-    const factoryFilter = factoryId ? { factoryId } : {};
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-
-    // Current day averages
-    const avg = await this.prisma.oEERecord.aggregate({
-      where: { ...factoryFilter, recordDate: { gte: dayStart } },
-      _avg: { oee: true, availability: true, performance: true, quality: true },
-    });
-
-    // Hourly trend for today (12 x 2h buckets)
-    const records = await this.prisma.oEERecord.findMany({
-      where: { ...factoryFilter, recordDate: { gte: dayStart } },
-      select: { oee: true, recordDate: true },
-      orderBy: { recordDate: 'asc' },
-    });
-
-    const buckets: Record<string, { sum: number; count: number }> = {};
-    for (const r of records) {
-      const hour = new Date(r.recordDate).getHours();
-      const label = `${String(hour).padStart(2, '0')}:00`;
-      if (!buckets[label]) buckets[label] = { sum: 0, count: 0 };
-      buckets[label].sum += r.oee ?? 0;
-      buckets[label].count += 1;
+  async getOEESummary(
+    factoryId: string | null,
+    scope?: { areaId?: string; lineId?: string; machineId?: string },
+    timeframe: string = 'day',
+    dateFrom?: string,
+    dateTo?: string,
+  ) {
+    // Per-machine OEE comes from JOB ORDERS (a routed WO spans many machines), so
+    // every machine that ran a step is counted — not just the WO header machine.
+    const machineIds = await this.kpiService.resolveScopeMachineIds(factoryId, scope);
+    // Normalise the timeframe (accepts Day/Week/Month/Shift, any case) or an explicit range.
+    const tf = String(timeframe || 'day').toLowerCase();
+    const now = new Date();
+    // A date-only `dateTo` (YYYY-MM-DD) parses to midnight UTC; bump it to end-of-day
+    // so single-day / "today" ranges are inclusive instead of zero-width.
+    const to = dateTo ? new Date(new Date(dateTo).getTime() + (86_400_000 - 1)) : now;
+    let from: Date;
+    if (dateFrom) from = new Date(dateFrom);
+    else {
+      from = new Date(to);
+      if (tf === 'week') from.setDate(to.getDate() - 7);
+      else if (tf === 'month') from.setDate(to.getDate() - 30);
+      else from.setHours(0, 0, 0, 0); // day / shift → today
     }
-    const trend = Object.entries(buckets).map(([period, { sum, count }]) => ({
-      period,
-      oee: Math.round((sum / count) * 10) / 10,
-    }));
+    const bucket: 'hour' | 'day' = tf === 'day' || tf === 'shift' ? 'hour' : 'day';
 
-    // Per-equipment breakdown
-    const byMachine = await this.prisma.oEERecord.groupBy({
-      by: ['machineId'],
-      where: { ...factoryFilter, recordDate: { gte: dayStart } },
-      _avg: { oee: true, availability: true, performance: true, quality: true },
-    });
-
-    const machineIds = byMachine.map((r) => r.machineId).filter(Boolean) as string[];
-    const machines = machineIds.length
-      ? await this.prisma.machine.findMany({
-          where: { id: { in: machineIds } },
-          select: { id: true, name: true },
-        })
-      : [];
-    const machineMap = Object.fromEntries(machines.map((m) => [m.id, m.name]));
-
-    const byEquipment = byMachine.map((r) => ({
-      name: machineMap[r.machineId ?? ''] ?? 'Unknown',
-      oee: Math.round((r._avg.oee ?? 0) * 10) / 10,
-      availability: Math.round((r._avg.availability ?? 0) * 10) / 10,
-      performance: Math.round((r._avg.performance ?? 0) * 10) / 10,
-      quality: Math.round((r._avg.quality ?? 0) * 10) / 10,
-    }));
-
+    const a = await this.kpiService.oeeAnalytics(factoryId, from, to, machineIds, bucket);
     return {
-      current: {
-        oee: Math.round((avg._avg.oee ?? 0) * 10) / 10,
-        availability: Math.round((avg._avg.availability ?? 0) * 10) / 10,
-        performance: Math.round((avg._avg.performance ?? 0) * 10) / 10,
-        quality: Math.round((avg._avg.quality ?? 0) * 10) / 10,
-      },
-      trend,
-      byEquipment,
+      current: a.current,
+      // flat aliases for the Machine OEE view + legacy consumers
+      oee: a.current.oee, availability: a.current.availability, performance: a.current.performance, quality: a.current.quality,
+      totalCount: a.totalOutput, goodCount: a.goodOutput, downtime: 0,
+      trend: a.trend,
+      byEquipment: a.byEquipment.map((e) => ({
+        name: e.name, oee: e.oee, availability: e.availability, performance: e.performance, quality: e.quality,
+      })),
+      equipmentBreakdown: a.byEquipment.map((e) => ({
+        machineId: e.machineId, machineName: e.name,
+        oee: e.oee, availability: e.availability, performance: e.performance, quality: e.quality,
+      })),
     };
   }
 
   async getOEERecords(factoryId: string | null, filters: {
     machineId?: string;
+    areaId?: string;
+    lineId?: string;
     dateFrom?: string;
     dateTo?: string;
     page?: number;
     limit?: number;
   }) {
-    const { machineId, dateFrom, dateTo, page = 1, limit = 20 } = filters;
-    const factoryFilter = factoryId ? { factoryId } : {};
+    const { machineId, areaId, lineId, dateFrom, dateTo, page = 1, limit = 20 } = filters;
+    // Per-machine OEE rows are derived from JOB ORDERS so routed WOs contribute on
+    // every machine they ran a step on (not just the WO header machine).
+    const machineIds = await this.kpiService.resolveScopeMachineIds(factoryId, { machineId, areaId, lineId });
+    // Inclusive end-of-day for a date-only `dateTo` so today/single-day ranges aren't empty.
+    const to = dateTo ? new Date(new Date(dateTo).getTime() + (86_400_000 - 1)) : new Date();
+    const from = dateFrom ? new Date(dateFrom) : new Date(to.getTime() - 90 * 86_400_000);
 
-    const where: Prisma.OEERecordWhereInput = {
-      ...factoryFilter,
-      ...(machineId && { machineId }),
-      ...(dateFrom && { recordDate: { gte: new Date(dateFrom) } }),
-      ...(dateTo && { recordDate: { lte: new Date(dateTo) } }),
-    };
-
-    const [total, data] = await Promise.all([
-      this.prisma.oEERecord.count({ where }),
-      this.prisma.oEERecord.findMany({
-        where,
-        include: { machine: { select: { name: true, code: true } } },
-        orderBy: { recordDate: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-    ]);
-
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    const data = await this.kpiService.oeeRecordsFromJobOrders(factoryId, from, to, machineIds, limit);
+    return { data, total: data.length, page, limit, totalPages: 1 };
   }
 
   // ────────────────────────────────────────────────────────────
@@ -2537,6 +2540,9 @@ export class ProductionService {
       }
     }
 
+    // Roll up live OEE + propagate WO/PO status & broadcast
+    await this.kpiService.propagateFromJobOrder(jobOrderId);
+
     return updated;
   }
 
@@ -2589,6 +2595,9 @@ export class ProductionService {
         },
       });
     }
+
+    // Roll up live OEE from the new counts + propagate
+    await this.kpiService.propagateFromJobOrder(jobOrderId);
 
     return updated;
   }

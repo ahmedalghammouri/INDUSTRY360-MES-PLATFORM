@@ -10,20 +10,34 @@ export class EnergyService {
   // OVERVIEW
   // ────────────────────────────────────────────────────────────
 
-  async getOverview(factoryId: string | null) {
+  /** Scope (area/line/machine) → an EnergyMeter where-fragment (meters carry machineId/areaId). */
+  private scopeMeterWhere(scope?: { areaId?: string; lineId?: string; machineId?: string }): Record<string, unknown> {
+    if (!scope) return {};
+    if (scope.machineId) return { machineId: scope.machineId };
+    if (scope.lineId) return { machine: { lineId: scope.lineId } };
+    if (scope.areaId) return { OR: [{ areaId: scope.areaId }, { machine: { line: { areaId: scope.areaId } } }] };
+    return {};
+  }
+
+  async getOverview(
+    factoryId: string | null,
+    scope?: { areaId?: string; lineId?: string; machineId?: string },
+  ) {
     const factoryFilter = factoryId ? { factoryId } : {};
+    const meterWhere = this.scopeMeterWhere(scope);
+    const meterScoped = Object.keys(meterWhere).length ? { meter: meterWhere } : {};
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const [meterCount, monthlySummaries, dailySummaries] = await Promise.all([
-      this.prisma.energyMeter.count({ where: { ...factoryFilter, isActive: true } }),
+      this.prisma.energyMeter.count({ where: { ...factoryFilter, isActive: true, ...meterWhere } }),
       this.prisma.energySummary.findMany({
-        where: { ...factoryFilter, periodType: EnergyPeriod.DAILY, periodStart: { gte: monthStart } },
+        where: { ...factoryFilter, ...meterScoped, periodType: EnergyPeriod.DAILY, periodStart: { gte: monthStart } },
         include: { meter: { select: { type: true } } },
       }),
       this.prisma.energySummary.findMany({
-        where: { ...factoryFilter, periodType: EnergyPeriod.DAILY, periodStart: { gte: dayStart } },
+        where: { ...factoryFilter, ...meterScoped, periodType: EnergyPeriod.DAILY, periodStart: { gte: dayStart } },
         include: { meter: { select: { type: true } } },
       }),
     ]);
@@ -42,7 +56,7 @@ export class EnergyService {
     const sevenDaysAgo = new Date(now);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
     const trendSummaries = await this.prisma.energySummary.findMany({
-      where: { ...factoryFilter, periodType: EnergyPeriod.DAILY, periodStart: { gte: sevenDaysAgo } },
+      where: { ...factoryFilter, ...meterScoped, periodType: EnergyPeriod.DAILY, periodStart: { gte: sevenDaysAgo } },
       include: { meter: { select: { type: true } } },
       orderBy: { periodStart: 'asc' },
     });

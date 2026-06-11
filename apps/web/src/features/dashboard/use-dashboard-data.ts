@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/services/api.client';
 import { useRealtimeData } from '@/hooks/use-websocket';
+import { useScope } from '@/hooks/use-scope';
 
 export interface DashboardKPIs {
   oee: number;
@@ -70,14 +71,15 @@ export interface DashboardData {
   alarms: Alarm[];
 }
 
-async function fetchDashboardData(): Promise<DashboardData> {
-  return api.get<DashboardData>('/dashboard/overview');
+async function fetchDashboardData(filter: Record<string, string>): Promise<DashboardData> {
+  return api.get<DashboardData>('/dashboard/overview', { params: filter });
 }
 
 export function useDashboardData() {
+  const { filter, key } = useScope();
   const query = useQuery({
-    queryKey: ['dashboard', 'overview'],
-    queryFn: fetchDashboardData,
+    queryKey: ['dashboard', 'overview', key],
+    queryFn: () => fetchDashboardData(filter),
     refetchInterval: 30_000,
     staleTime: 15_000,
   });

@@ -17,13 +17,17 @@ export class SchedulingController {
   @ApiQuery({ name: 'dateTo', required: false })
   @ApiQuery({ name: 'types', required: false, description: 'csv: PRODUCTION_ORDER,WORK_ORDER,MAINTENANCE,PLANNED_DOWNTIME,UNPLANNED_DOWNTIME,SHIFT' })
   @ApiQuery({ name: 'machineId', required: false })
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
   getUnified(
     @CurrentUser() user: User,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('types') types?: string,
     @Query('machineId') machineId?: string,
+    @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
   ) {
-    return this.service.getUnified(user.factoryId, { dateFrom, dateTo, types, machineId });
+    return this.service.getUnified(user.factoryId, { dateFrom, dateTo, types, machineId, areaId, lineId });
   }
 }

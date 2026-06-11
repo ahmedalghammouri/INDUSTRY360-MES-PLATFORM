@@ -8,6 +8,7 @@ import {
 
 import { ProductionService } from './production.service';
 import { OEEService } from './oee.service';
+import { KpiService } from './kpi.service';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { AuditLog } from '../../common/decorators/audit-log.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -40,6 +41,7 @@ export class ProductionController {
   constructor(
     private readonly productionService: ProductionService,
     private readonly oeeService: OEEService,
+    private readonly kpiService: KpiService,
   ) {}
 
   // ────────────────────────────────────────────────────────────
@@ -48,14 +50,36 @@ export class ProductionController {
 
   @Get('kpis')
   @ApiOperation({ summary: 'Get production KPIs for current day' })
-  async getKPIs(@CurrentUser() user: RequestUser) {
-    return this.productionService.getKPIs(user.factoryId);
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
+  async getKPIs(
+    @CurrentUser() user: RequestUser,
+    @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
+    @Query('machineId') machineId?: string,
+  ) {
+    return this.productionService.getKPIs(user.factoryId, { areaId, lineId, machineId });
   }
 
   @Get('oee/calculate')
   @ApiOperation({ summary: 'Get current OEE summary with trend and per-equipment breakdown' })
-  async getOEESummary(@CurrentUser() user: RequestUser) {
-    return this.productionService.getOEESummary(user.factoryId);
+  @ApiQuery({ name: 'timeframe', required: false, description: 'day | week | month | shift (any case)' })
+  @ApiQuery({ name: 'dateFrom', required: false })
+  @ApiQuery({ name: 'dateTo', required: false })
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
+  async getOEESummary(
+    @CurrentUser() user: RequestUser,
+    @Query('timeframe') timeframe?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
+    @Query('machineId') machineId?: string,
+  ) {
+    return this.productionService.getOEESummary(user.factoryId, { areaId, lineId, machineId }, timeframe ?? 'day', dateFrom, dateTo);
   }
 
   @Post('oee/calculate')
@@ -70,9 +94,29 @@ export class ProductionController {
     return this.oeeService.calculate(body);
   }
 
+  @Get('oee/hierarchy')
+  @ApiOperation({ summary: 'Weighted OEE rolled up Factory→Area→Line→Machine + six-loss + Pareto' })
+  @ApiQuery({ name: 'dateFrom', required: false })
+  @ApiQuery({ name: 'dateTo', required: false })
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
+  getOeeHierarchy(
+    @CurrentUser() user: RequestUser,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
+    @Query('machineId') machineId?: string,
+  ) {
+    return this.kpiService.hierarchyOEE(user.factoryId, dateFrom, dateTo, { areaId, lineId, machineId });
+  }
+
   @Get('oee-records')
   @ApiOperation({ summary: 'Get stored OEE records' })
   @ApiQuery({ name: 'machineId', required: false })
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
   @ApiQuery({ name: 'dateFrom', required: false })
   @ApiQuery({ name: 'dateTo', required: false })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -80,6 +124,8 @@ export class ProductionController {
   async getOEERecords(
     @CurrentUser() user: RequestUser,
     @Query('machineId') machineId?: string,
+    @Query('areaId') areaId?: string,
+    @Query('lineId') lineId?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('page') page = '1',
@@ -87,6 +133,8 @@ export class ProductionController {
   ) {
     return this.productionService.getOEERecords(user.factoryId, {
       machineId,
+      areaId,
+      lineId,
       dateFrom,
       dateTo,
       page: parseInt(page, 10),
@@ -105,6 +153,7 @@ export class ProductionController {
   @ApiQuery({ name: 'priority', required: false })
   @ApiQuery({ name: 'machineId', required: false })
   @ApiQuery({ name: 'lineId', required: false })
+  @ApiQuery({ name: 'areaId', required: false })
   @ApiQuery({ name: 'dateFrom', required: false })
   @ApiQuery({ name: 'dateTo', required: false })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -116,6 +165,7 @@ export class ProductionController {
     @Query('priority') priority?: string,
     @Query('machineId') machineId?: string,
     @Query('lineId') lineId?: string,
+    @Query('areaId') areaId?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('page') page = '1',
@@ -127,6 +177,7 @@ export class ProductionController {
       priority,
       machineId,
       lineId,
+      areaId,
       dateFrom,
       dateTo,
       page: parseInt(page, 10),
@@ -326,6 +377,9 @@ export class ProductionController {
   @ApiOperation({ summary: 'List production orders with optional filters' })
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'areaId', required: false })
+  @ApiQuery({ name: 'lineId', required: false })
+  @ApiQuery({ name: 'machineId', required: false })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async findProductionOrders(

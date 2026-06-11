@@ -21,6 +21,7 @@ import { MachinePicker } from '@/components/ui/machine-picker';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { WorkCenterPicker, WorkCenterNode } from '@/components/ui/workcenter-picker';
 import { api } from '@/services/api.client';
+import { useScope } from '@/hooks/use-scope';
 import { cn, formatDateTime } from '@/lib/utils';
 import { SortableHeader } from '@/components/ui/sortable-header';
 import { useSortedData } from '@/lib/use-sorted-data';
@@ -1626,11 +1627,12 @@ function HistoryTab({ machines }: { machines: Machine[] }) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function AnalyticsTab() {
+  const { filter, key } = useScope();
   const [range, setRange] = useState({ from: new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
 
   const { data: summary, isLoading } = useQuery({
-    queryKey: ['downtime-summary', range],
-    queryFn: () => api.get(`/production/downtime/summary?dateFrom=${range.from}&dateTo=${range.to}`),
+    queryKey: ['downtime-summary', range, key],
+    queryFn: () => api.get('/production/downtime/summary', { params: { dateFrom: range.from, dateTo: range.to, ...filter } }),
   });
 
   const sum = summary as any;

@@ -1,15 +1,41 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { KpiService } from '../production/kpi.service';
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly kpi: KpiService,
+  ) {}
 
-  async getOverview(factoryId: string | null) {
+  /** Resolve an analysis scope (area/line/machine) to the machine ids it covers. */
+  private async scopeMachineIds(
+    factoryId: string | null,
+    scope?: { areaId?: string; lineId?: string; machineId?: string },
+  ): Promise<string[] | undefined> {
+    if (!scope || (!scope.areaId && !scope.lineId && !scope.machineId)) return undefined;
+    const ms = await this.prisma.machine.findMany({
+      where: {
+        ...(factoryId ? { factoryId } : {}),
+        ...(scope.machineId ? { id: scope.machineId } : {}),
+        ...(scope.lineId ? { lineId: scope.lineId } : {}),
+        ...(scope.areaId ? { line: { areaId: scope.areaId } } : {}),
+      },
+      select: { id: true },
+    });
+    return ms.map((m) => m.id);
+  }
+
+  async getOverview(
+    factoryId: string | null,
+    scope?: { areaId?: string; lineId?: string; machineId?: string },
+  ) {
+    const machineIds = await this.scopeMachineIds(factoryId, scope);
     const [kpis, machines, productionStatus, alarms] = await Promise.all([
-      this.getKPIs(factoryId),
-      this.getMachineStatus(factoryId),
-      this.getProductionStatus(factoryId),
+      this.getKPIs(factoryId, machineIds),
+      this.getMachineStatus(factoryId, machineIds),
+      this.getProductionStatus(factoryId, machineIds),
       this.getActiveAlarms(factoryId),
     ]);
 
@@ -30,66 +56,49 @@ export class DashboardService {
     };
   }
 
-  private async getKPIs(factoryId: string | null) {
+  private async getKPIs(factoryId: string | null, machineIds?: string[]) {
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const prevDayStart = new Date(dayStart.getTime() - 86_400_000);
+    const now = new Date();
 
     const factoryFilter = factoryId ? { factoryId } : {};
+    const r1 = (n: number) => Math.round(n * 10) / 10;
 
-    // Today + yesterday in one go — trends are real day-over-day deltas
-    const [oeeRecords, prevRecords, activeAlarms, prevAlarms] = await Promise.all([
-      this.prisma.oEERecord.findMany({ where: { ...factoryFilter, recordDate: { gte: dayStart } } }),
-      this.prisma.oEERecord.findMany({ where: { ...factoryFilter, recordDate: { gte: prevDayStart, lt: dayStart } } }),
+    // Plant OEE is rolled up from JOB ORDERS (per-machine) via the shared engine —
+    // so a routed WO contributes on every machine it ran, and scope works per-machine.
+    const [today, prev, activeAlarms, prevAlarms] = await Promise.all([
+      this.kpi.oeeAnalytics(factoryId, dayStart, now, machineIds, 'hour'),
+      this.kpi.oeeAnalytics(factoryId, prevDayStart, dayStart, machineIds, 'hour'),
       this.prisma.alarmEvent.count({ where: { ...factoryFilter, acknowledgedAt: null, resolvedAt: null } }),
       this.prisma.alarmEvent.count({ where: { ...factoryFilter, triggeredAt: { gte: prevDayStart, lt: dayStart } } }),
     ]);
 
-    type Rec = (typeof oeeRecords)[number];
-    const avg = (rows: Rec[], pick: (r: Rec) => number | null) =>
-      rows.length ? rows.reduce((s, r) => s + (pick(r) ?? 0), 0) / rows.length : 0;
-    const sum = (rows: Rec[], pick: (r: Rec) => number | null) =>
-      rows.reduce((s, r) => s + (pick(r) ?? 0), 0);
-    const r1 = (n: number) => Math.round(n * 10) / 10;
-
-    const today = {
-      oee: avg(oeeRecords, (r) => r.oee),
-      availability: avg(oeeRecords, (r) => r.availability),
-      performance: avg(oeeRecords, (r) => r.performance),
-      quality: avg(oeeRecords, (r) => r.quality),
-      output: sum(oeeRecords, (r) => r.totalOutput),
-    };
-    const prev = {
-      oee: avg(prevRecords, (r) => r.oee),
-      availability: avg(prevRecords, (r) => r.availability),
-      performance: avg(prevRecords, (r) => r.performance),
-      quality: avg(prevRecords, (r) => r.quality),
-      output: sum(prevRecords, (r) => r.totalOutput),
-    };
-    // Trend = delta vs yesterday (0 when either day has no data yet)
-    const trend = (t: number, p: number) => (prevRecords.length && oeeRecords.length ? r1(t - p) : 0);
+    const hasData = today.totalOutput > 0 && prev.totalOutput > 0;
+    const trend = (t: number, p: number) => (hasData ? r1(t - p) : 0);
 
     return {
-      oee: r1(today.oee),
-      availability: r1(today.availability),
-      performance: r1(today.performance),
-      quality: r1(today.quality),
-      totalOutput: today.output,
+      oee: today.current.oee,
+      availability: today.current.availability,
+      performance: today.current.performance,
+      quality: today.current.quality,
+      totalOutput: today.totalOutput,
       activeAlarms,
-      oeeTrend: trend(today.oee, prev.oee),
-      availabilityTrend: trend(today.availability, prev.availability),
-      performanceTrend: trend(today.performance, prev.performance),
-      qualityTrend: trend(today.quality, prev.quality),
-      outputTrend: trend(today.output, prev.output),
+      oeeTrend: trend(today.current.oee, prev.current.oee),
+      availabilityTrend: trend(today.current.availability, prev.current.availability),
+      performanceTrend: trend(today.current.performance, prev.current.performance),
+      qualityTrend: trend(today.current.quality, prev.current.quality),
+      outputTrend: trend(today.totalOutput, prev.totalOutput),
       alarmTrend: activeAlarms - prevAlarms,
     };
   }
 
-  private async getMachineStatus(factoryId: string | null) {
+  private async getMachineStatus(factoryId: string | null, machineIds?: string[]) {
     const factoryFilter = factoryId ? { factoryId } : {};
+    const scopeFilter = machineIds ? { id: { in: machineIds } } : {};
 
     const machines = await this.prisma.machine.findMany({
-      where: { ...factoryFilter, isActive: true },
+      where: { ...factoryFilter, ...scopeFilter, isActive: true },
       include: {
         currentStatus: true,
         workOrders: {
@@ -120,16 +129,18 @@ export class DashboardService {
     }));
   }
 
-  private async getProductionStatus(factoryId: string | null) {
+  private async getProductionStatus(factoryId: string | null, machineIds?: string[]) {
     const factoryFilter = factoryId ? { factoryId } : {};
+    const machineScope = machineIds ? { machineId: { in: machineIds } } : {};
+    const idScope = machineIds ? { id: { in: machineIds } } : {};
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
 
     const [totalMachines, activeWOs, completedToday, shiftTargets, outputToday] = await Promise.all([
-      this.prisma.machine.count({ where: { ...factoryFilter, isActive: true } }),
-      this.prisma.workOrder.count({ where: { ...factoryFilter, status: 'IN_PROGRESS' } }),
+      this.prisma.machine.count({ where: { ...factoryFilter, ...idScope, isActive: true } }),
+      this.prisma.workOrder.count({ where: { ...factoryFilter, ...machineScope, status: 'IN_PROGRESS' } }),
       this.prisma.workOrder.count({
-        where: { ...factoryFilter, status: 'COMPLETED', actualEnd: { gte: dayStart } },
+        where: { ...factoryFilter, ...machineScope, status: 'COMPLETED', actualEnd: { gte: dayStart } },
       }),
       // Planned output = sum of today's shift targets (real shift model)
       this.prisma.shiftInstance.aggregate({
@@ -138,7 +149,7 @@ export class DashboardService {
       }),
       // Actual output = today's recorded OEE output
       this.prisma.oEERecord.aggregate({
-        where: { ...factoryFilter, recordDate: { gte: dayStart } },
+        where: { ...factoryFilter, ...machineScope, recordDate: { gte: dayStart } },
         _sum: { totalOutput: true },
       }),
     ]);
