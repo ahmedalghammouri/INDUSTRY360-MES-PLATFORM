@@ -1,14 +1,17 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useMemo } from 'react';
+import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, ChevronDown, Factory, LayoutGrid, GitBranch, Cpu, X, Search } from 'lucide-react';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
 
 /**
- * Machine picker with the plant hierarchy tree (Factory → Area → Line → Machine),
- * same visual language as WorkCenterPicker. Only MACHINE nodes are selectable.
+ * Machine picker with the plant hierarchy tree (Factory → Area → Line → Machine).
+ * Only MACHINE nodes are selectable. The dropdown is a Radix Popover so it works
+ * inside dialogs and is never clipped; the list scrolls vertically.
+ * This is the canonical machine/asset selector used across the app.
  */
 
 export interface MachineNode {
@@ -70,6 +73,7 @@ function TreeNode({
       >
         {hasChildren ? (
           <button
+            type="button"
             className="shrink-0 p-0.5 rounded hover:bg-black/10"
             onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
           >
@@ -124,29 +128,28 @@ export function MachinePicker({
 }: MachinePickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const { data: treeData } = useQuery({
     queryKey: ['hierarchy-tree'],
     queryFn: () => api.get('/hierarchy/tree'),
     staleTime: 60_000,
   });
-  const tree: MachineNode[] = (() => {
+  const tree: MachineNode[] = useMemo(() => {
     const d = (treeData as any)?.data ?? treeData;
     return Array.isArray(d) ? d : d ? [d] : [];
-  })();
+  }, [treeData]);
 
   // Flat machine list for search + label resolution
-  const machines: MachineNode[] = [];
-  (function flatten(nodes: MachineNode[]) {
-    for (const n of nodes) {
-      if (n.type === 'MACHINE') machines.push(n);
-      if (n.children?.length) flatten(n.children);
-    }
-  })(tree);
+  const machines = useMemo(() => {
+    const acc: MachineNode[] = [];
+    (function flatten(nodes: MachineNode[]) {
+      for (const n of nodes) {
+        if (n.type === 'MACHINE') acc.push(n);
+        if (n.children?.length) flatten(n.children);
+      }
+    })(tree);
+    return acc;
+  }, [tree]);
 
   const selected = machines.find(m => m.id === value) ?? null;
   const filtered = search
@@ -157,17 +160,6 @@ export function MachinePicker({
         ),
       )
     : null;
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      const inTrigger = ref.current?.contains(target);
-      const inDropdown = dropdownRef.current?.contains(target);
-      if (!inTrigger && !inDropdown) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
 
   const handleSelect = (node: MachineNode) => {
     onChange(node.id, node);
@@ -180,54 +172,41 @@ export function MachinePicker({
     onChange(null, null);
   };
 
-  const handleToggle = () => {
-    if (disabled) return;
-    if (!open && buttonRef.current) {
-      const r = buttonRef.current.getBoundingClientRect();
-      setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
-    }
-    setOpen(o => !o);
-  };
-
   return (
-    <div ref={ref} className={cn('relative', className)}>
-      <button
-        ref={buttonRef}
-        type="button"
-        disabled={disabled}
-        onClick={handleToggle}
-        className={cn(
-          'w-full h-7 px-2.5 flex items-center gap-2 rounded-md border bg-background text-xs text-left transition-colors',
-          'hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary',
-          disabled && 'opacity-50 cursor-not-allowed',
-          open && 'ring-1 ring-primary border-primary/50',
-        )}
-      >
-        {selected && <Cpu size={12} className="text-green-500 shrink-0" />}
-        <span className={cn('flex-1 truncate', !selected && 'text-muted-foreground')}>
-          {selected ? `${selected.name} (${selected.code})` : placeholder}
-        </span>
-        {selected && !disabled && (
-          <span onClick={handleClear} className="p-0.5 rounded hover:bg-muted">
-            <X size={11} />
-          </span>
-        )}
-        <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
-      </button>
-
-      {open && dropdownPos && (
-        <div
-          ref={dropdownRef}
-          style={{
-            position: 'fixed',
-            top: dropdownPos.top,
-            left: dropdownPos.left,
-            width: Math.max(dropdownPos.width, 260),
-            zIndex: 9999,
-          }}
-          className="rounded-lg border bg-background shadow-xl"
+    <PopoverPrimitive.Root open={open} onOpenChange={(o) => { setOpen(o); if (!o) setSearch(''); }}>
+      <PopoverPrimitive.Trigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className={cn(
+            'w-full h-7 px-2.5 flex items-center gap-2 rounded-md border border-input bg-background text-xs text-left transition-colors',
+            'hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-ring',
+            'disabled:opacity-50 disabled:cursor-not-allowed',
+            'data-[state=open]:ring-1 data-[state=open]:ring-ring data-[state=open]:border-primary/50',
+            className,
+          )}
         >
-          <div className="p-2 border-b">
+          {selected && <Cpu size={12} className="text-green-500 shrink-0" />}
+          <span className={cn('flex-1 truncate', !selected && 'text-muted-foreground')}>
+            {selected ? `${selected.name} (${selected.code})` : placeholder}
+          </span>
+          {selected && !disabled && (
+            <span role="button" tabIndex={-1} onClick={handleClear} className="p-0.5 rounded hover:bg-muted">
+              <X size={11} />
+            </span>
+          )}
+          <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverPrimitive.Trigger>
+
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          align="start"
+          sideOffset={4}
+          className="z-50 w-[var(--radix-popover-trigger-width)] min-w-[260px] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-xl data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <div className="p-2 border-b border-border/60">
             <div className="relative">
               <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -235,7 +214,7 @@ export function MachinePicker({
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search machines..."
-                className="w-full h-7 pl-6 pr-2 text-xs rounded-md border bg-muted/50 outline-none focus:ring-1 focus:ring-primary"
+                className="w-full h-7 pl-6 pr-2 text-xs rounded-md border border-input bg-background outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
           </div>
@@ -272,8 +251,8 @@ export function MachinePicker({
               ))
             )}
           </div>
-        </div>
-      )}
-    </div>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
   );
 }

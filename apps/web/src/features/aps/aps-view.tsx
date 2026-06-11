@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Badge } from '@/components/ui/badge';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -77,14 +78,17 @@ function CtpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label>Product (SKU)</Label>
-            <select
+            <EntityPicker
+              items={skus}
               value={skuId}
-              onChange={(e) => setSkuId(e.target.value)}
-              className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-            >
-              <option value="">Select a SKU…</option>
-              {skus.map((s) => <option key={s.id} value={s.id}>{s.code} — {s.name}</option>)}
-            </select>
+              onChange={(id) => setSkuId(id ?? '')}
+              getId={(s) => s.id}
+              getPrimary={(s) => s.name}
+              getSecondary={(s) => s.code}
+              placeholder="Select a SKU…"
+              searchPlaceholder="Search by code or name…"
+              clearable={false}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

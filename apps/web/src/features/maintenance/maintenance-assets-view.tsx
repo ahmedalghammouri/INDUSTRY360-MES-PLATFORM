@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { TableRowActions } from '@/components/ui/table-row-actions';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
@@ -369,20 +370,16 @@ export function MaintenanceAssetsView() {
                   <Label className="text-xs flex items-center gap-1">
                     <Layers size={10} className="text-purple-400" />Area
                   </Label>
-                  <Select
-                    value={form.areaId || '__none__'}
-                    onValueChange={v => setForm(f => ({ ...f, areaId: v === '__none__' ? '' : v, lineId: '' }))}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Select area..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">No area</SelectItem>
-                      {areas.map((a: Area) => (
-                        <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <EntityPicker
+                    items={areas}
+                    value={form.areaId || null}
+                    onChange={id => setForm(f => ({ ...f, areaId: id ?? '', lineId: '' }))}
+                    getId={(a: Area) => a.id}
+                    getPrimary={(a: Area) => a.name}
+                    getSecondary={(a: Area) => a.code}
+                    placeholder="Select area..."
+                    searchPlaceholder="Search by code or name…"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs flex items-center gap-1">

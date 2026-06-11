@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
@@ -371,18 +372,17 @@ export function SparePartsView() {
             </div>
             <div>
               <Label className="text-xs">Storage Location</Label>
-              <Select
-                value={createForm.storageLocationId || '__none__'}
-                onValueChange={v => setCreateForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
-              >
-                <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {storageLocations.map(loc => (
-                    <SelectItem key={loc.id} value={loc.id}>{loc.code} — {loc.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityPicker
+                items={storageLocations}
+                value={createForm.storageLocationId || null}
+                onChange={id => setCreateForm(p => ({ ...p, storageLocationId: id ?? '' }))}
+                getId={loc => loc.id}
+                getPrimary={loc => loc.name}
+                getSecondary={loc => loc.code}
+                placeholder="Select location…"
+                searchPlaceholder="Search by code or name…"
+                className="mt-1"
+              />
             </div>
             <div>
               <Label className="text-xs">Bin Number</Label>
@@ -459,18 +459,17 @@ export function SparePartsView() {
             </div>
             <div>
               <Label className="text-xs">Storage Location</Label>
-              <Select
-                value={createForm.storageLocationId || '__none__'}
-                onValueChange={v => setCreateForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
-              >
-                <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {storageLocations.map(loc => (
-                    <SelectItem key={loc.id} value={loc.id}>{loc.code} — {loc.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityPicker
+                items={storageLocations}
+                value={createForm.storageLocationId || null}
+                onChange={id => setCreateForm(p => ({ ...p, storageLocationId: id ?? '' }))}
+                getId={loc => loc.id}
+                getPrimary={loc => loc.name}
+                getSecondary={loc => loc.code}
+                placeholder="Select location…"
+                searchPlaceholder="Search by code or name…"
+                className="mt-1"
+              />
             </div>
             <div>
               <Label className="text-xs">Bin Number</Label>

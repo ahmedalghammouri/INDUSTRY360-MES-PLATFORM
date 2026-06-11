@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -225,17 +226,18 @@ function WorkOrderQualityPanel({ workOrderId, machineId }: { workOrderId: string
             </div>
             <div>
               <Label className="text-xs">Quality Plan <span className="text-muted-foreground">(optional)</span></Label>
-              <Select value={addForm.planId} onValueChange={v => setAddForm(f => ({ ...f, planId: v }))}>
-                <SelectTrigger className="mt-1 h-8 text-xs">
-                  <SelectValue placeholder="— Select plan —" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">— No plan —</SelectItem>
-                  {plans.map((p: any) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name} <span className="text-muted-foreground">({p.code})</span></SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityPicker
+                items={plans}
+                value={addForm.planId === '__none__' ? null : addForm.planId}
+                onChange={id => setAddForm(f => ({ ...f, planId: id ?? '__none__' }))}
+                getId={(p: any) => p.id}
+                getPrimary={(p: any) => p.name}
+                getSecondary={(p: any) => p.code}
+                placeholder="— Select plan —"
+                searchPlaceholder="Search plans…"
+                size="sm"
+                className="mt-1"
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -513,7 +515,7 @@ export function ProductionWorkOrdersView() {
                   const canEdit = !['COMPLETED', 'CANCELLED'].includes(order.status);
                   const canDelete = ['PLANNED', 'RELEASED', 'ON_HOLD', 'CANCELLED'].includes(order.status);
                   return (
-                    <TableRow key={order.id} className="border-border/20 hover:bg-muted/20">
+                    <TableRow key={order.id} onClick={() => setViewId(order.id)} className="border-border/20 hover:bg-muted/20 cursor-pointer">
                       <TableCell className="font-mono text-xs font-semibold text-primary">{order.orderNumber}</TableCell>
                       <TableCell>
                         <div className="text-xs font-medium truncate max-w-[120px]">{order.productName || '—'}</div>
@@ -911,23 +913,31 @@ export function ProductionWorkOrdersView() {
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
             <Label>Product (SKU) *</Label>
-            <Select value={form.skuId} onValueChange={v => setForm(f => ({ ...f, skuId: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select product…" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">— Select product —</SelectItem>
-                {skus.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name} ({s.code ?? s.sku ?? ''})</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <EntityPicker
+              items={skus}
+              value={form.skuId === '__none__' ? null : form.skuId}
+              onChange={id => setForm(f => ({ ...f, skuId: id ?? '__none__' }))}
+              getId={(s: any) => s.id}
+              getPrimary={(s: any) => s.name}
+              getSecondary={(s: any) => s.code ?? s.sku ?? ''}
+              placeholder="Select product…"
+              searchPlaceholder="Search by code or name…"
+              className="mt-1"
+              clearable={false}
+            />
           </div>
           <div className="col-span-2">
             <Label>Operator</Label>
-            <Select value={form.operatorId} onValueChange={v => setForm(f => ({ ...f, operatorId: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Assign operator…" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">— Unassigned —</SelectItem>
-                {users.map((u: any) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <EntityPicker
+              items={users}
+              value={form.operatorId === '__none__' ? null : form.operatorId}
+              onChange={id => setForm(f => ({ ...f, operatorId: id ?? '__none__' }))}
+              getId={(u: any) => u.id}
+              getPrimary={(u: any) => u.name}
+              placeholder="Assign operator…"
+              searchPlaceholder="Search operators…"
+              className="mt-1"
+            />
           </div>
           <div>
             <Label>Priority</Label>

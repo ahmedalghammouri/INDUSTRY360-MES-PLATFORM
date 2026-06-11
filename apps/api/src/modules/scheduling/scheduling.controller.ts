@@ -15,7 +15,7 @@ export class SchedulingController {
   @ApiOperation({ summary: 'Unified schedule (production orders, work orders, maintenance, planned downtime, shifts) for a date range' })
   @ApiQuery({ name: 'dateFrom', required: false })
   @ApiQuery({ name: 'dateTo', required: false })
-  @ApiQuery({ name: 'types', required: false, description: 'csv: PRODUCTION_ORDER,WORK_ORDER,MAINTENANCE,PLANNED_DOWNTIME,SHIFT' })
+  @ApiQuery({ name: 'types', required: false, description: 'csv: PRODUCTION_ORDER,WORK_ORDER,MAINTENANCE,PLANNED_DOWNTIME,UNPLANNED_DOWNTIME,SHIFT' })
   @ApiQuery({ name: 'machineId', required: false })
   getUnified(
     @CurrentUser() user: User,

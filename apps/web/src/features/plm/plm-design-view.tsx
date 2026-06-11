@@ -19,6 +19,7 @@ import {
 import { api } from '@/services/api.client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
@@ -266,16 +267,15 @@ export default function PlmDesignView() {
             />
           </div>
           {categories.length > 0 && (
-            <select
+            <SelectMenu
               value={categoryFilter}
-              onChange={e => setCategoryFilter(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="">All categories</option>
-              {categories.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
+              onValueChange={setCategoryFilter}
+              menuLabel="Category"
+              options={[
+                { value: '', label: 'All categories' },
+                ...categories.map(cat => ({ value: cat, label: cat })),
+              ]}
+            />
           )}
         </div>
       </div>

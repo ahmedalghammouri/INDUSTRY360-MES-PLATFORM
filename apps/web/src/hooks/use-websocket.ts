@@ -6,7 +6,9 @@ import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '@/store/auth-store';
 import { useNotificationStore } from '@/store/notification-store';
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
+// Empty string = same-origin (nginx proxies /socket.io/ in production);
+// unset (local dev outside docker) falls back to the direct API port.
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001';
 
 let globalSocket: Socket | null = null;
 
@@ -19,7 +21,7 @@ export function useWebSocket() {
     if (!isAuthenticated || !accessToken) return;
 
     if (!globalSocket) {
-      globalSocket = io(WS_URL, {
+      globalSocket = io(WS_URL || window.location.origin, {
         auth: { token: accessToken },
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,

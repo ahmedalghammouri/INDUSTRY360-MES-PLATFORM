@@ -26,6 +26,8 @@ import { api } from '@/services/api.client';
 import { cn, generateId, formatDate } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SelectMenu } from '@/components/ui/select-menu';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import {
   Dialog,
   DialogContent,
@@ -341,43 +343,47 @@ export default function PlmChangeRequestsView() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Type *</label>
-                  <select
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  <SelectMenu
+                    size="md"
+                    fullWidth
                     value={form.type}
-                    onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as ChangeRequest['type'] }))}
-                  >
-                    <option value="BOM_CHANGE">BOM Change</option>
-                    <option value="RECIPE_CHANGE">Recipe Change</option>
-                    <option value="PROCESS_CHANGE">Process Change</option>
-                    <option value="DESIGN_CHANGE">Design Change</option>
-                  </select>
+                    onValueChange={(v) => setForm((f) => ({ ...f, type: v as ChangeRequest['type'] }))}
+                    options={[
+                      { value: 'BOM_CHANGE', label: 'BOM Change' },
+                      { value: 'RECIPE_CHANGE', label: 'Recipe Change' },
+                      { value: 'PROCESS_CHANGE', label: 'Process Change' },
+                      { value: 'DESIGN_CHANGE', label: 'Design Change' },
+                    ]}
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Priority *</label>
-                  <select
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  <SelectMenu
+                    size="md"
+                    fullWidth
                     value={form.priority}
-                    onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as ChangeRequest['priority'] }))}
-                  >
-                    <option value="LOW">Low</option>
-                    <option value="MEDIUM">Medium</option>
-                    <option value="HIGH">High</option>
-                    <option value="CRITICAL">Critical</option>
-                  </select>
+                    onValueChange={(v) => setForm((f) => ({ ...f, priority: v as ChangeRequest['priority'] }))}
+                    options={[
+                      { value: 'LOW', label: 'Low' },
+                      { value: 'MEDIUM', label: 'Medium' },
+                      { value: 'HIGH', label: 'High' },
+                      { value: 'CRITICAL', label: 'Critical' },
+                    ]}
+                  />
                 </div>
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Affected Product</label>
-                <select
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                <EntityPicker
+                  items={products}
                   value={form.skuId}
-                  onChange={(e) => setForm((f) => ({ ...f, skuId: e.target.value }))}
-                >
-                  <option value="">— Select product (optional) —</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>{p.itemNumber} — {p.name}</option>
-                  ))}
-                </select>
+                  onChange={(id) => setForm((f) => ({ ...f, skuId: id ?? '' }))}
+                  getId={(p) => p.id}
+                  getPrimary={(p) => p.name}
+                  getSecondary={(p) => p.itemNumber}
+                  placeholder="— Select product (optional) —"
+                  searchPlaceholder="Search by item number or name…"
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Target Date *</label>
@@ -465,41 +471,47 @@ export default function PlmChangeRequestsView() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select
-          className="h-9 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+        <SelectMenu
+          size="md"
           value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-        >
-          <option value="ALL">All Types</option>
-          <option value="BOM_CHANGE">BOM Change</option>
-          <option value="RECIPE_CHANGE">Recipe Change</option>
-          <option value="PROCESS_CHANGE">Process Change</option>
-          <option value="DESIGN_CHANGE">Design Change</option>
-        </select>
-        <select
-          className="h-9 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          onValueChange={setTypeFilter}
+          menuLabel="Type"
+          options={[
+            { value: 'ALL', label: 'All Types' },
+            { value: 'BOM_CHANGE', label: 'BOM Change' },
+            { value: 'RECIPE_CHANGE', label: 'Recipe Change' },
+            { value: 'PROCESS_CHANGE', label: 'Process Change' },
+            { value: 'DESIGN_CHANGE', label: 'Design Change' },
+          ]}
+        />
+        <SelectMenu
+          size="md"
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option value="ALL">All Statuses</option>
-          <option value="DRAFT">Draft</option>
-          <option value="SUBMITTED">Submitted</option>
-          <option value="UNDER_REVIEW">Under Review</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="IMPLEMENTED">Implemented</option>
-        </select>
-        <select
-          className="h-9 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          onValueChange={setStatusFilter}
+          menuLabel="Status"
+          options={[
+            { value: 'ALL', label: 'All Statuses' },
+            { value: 'DRAFT', label: 'Draft' },
+            { value: 'SUBMITTED', label: 'Submitted' },
+            { value: 'UNDER_REVIEW', label: 'Under Review' },
+            { value: 'APPROVED', label: 'Approved' },
+            { value: 'REJECTED', label: 'Rejected' },
+            { value: 'IMPLEMENTED', label: 'Implemented' },
+          ]}
+        />
+        <SelectMenu
+          size="md"
           value={priorityFilter}
-          onChange={(e) => setPriorityFilter(e.target.value)}
-        >
-          <option value="ALL">All Priorities</option>
-          <option value="CRITICAL">Critical</option>
-          <option value="HIGH">High</option>
-          <option value="MEDIUM">Medium</option>
-          <option value="LOW">Low</option>
-        </select>
+          onValueChange={setPriorityFilter}
+          menuLabel="Priority"
+          options={[
+            { value: 'ALL', label: 'All Priorities' },
+            { value: 'CRITICAL', label: 'Critical' },
+            { value: 'HIGH', label: 'High' },
+            { value: 'MEDIUM', label: 'Medium' },
+            { value: 'LOW', label: 'Low' },
+          ]}
+        />
         <span className="text-xs text-muted-foreground">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
       </div>
 

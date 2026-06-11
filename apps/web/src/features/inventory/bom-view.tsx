@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
 
@@ -335,16 +336,18 @@ export function BOMView() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
                     <Label>Product (SKU) *</Label>
-                    <Select value={newBOM.skuId} onValueChange={v => setNewBOM(p => ({ ...p, skuId: v }))}>
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue placeholder="Select product..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {skus.map((s: any) => (
-                          <SelectItem key={s.id} value={s.id}>{s.itemNumber} — {s.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <EntityPicker
+                      items={skus}
+                      value={newBOM.skuId}
+                      onChange={id => setNewBOM(p => ({ ...p, skuId: id ?? '' }))}
+                      getId={(s: any) => s.id}
+                      getPrimary={(s: any) => s.name}
+                      getSecondary={(s: any) => s.itemNumber}
+                      placeholder="Select product..."
+                      searchPlaceholder="Search by item number or name…"
+                      size="sm"
+                      clearable={false}
+                    />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label>Version</Label>
@@ -418,23 +421,22 @@ export function BOMView() {
                         {newItems.map((item, i) => (
                           <tr key={i} className="border-t">
                             <td className="p-1.5">
-                              <Select
+                              <EntityPicker
+                                items={rawMaterials}
                                 value={item.rawMaterialId}
-                                onValueChange={v => {
+                                onChange={(id, rm) => {
                                   // Auto-fetch: the unit always comes from the material master (unified UoM)
-                                  const rm = rawMaterials.find(m => m.id === v);
-                                  setNewItems(prev => prev.map((it, idx) => idx === i ? { ...it, rawMaterialId: v, unit: rm?.unit ?? it.unit } : it));
+                                  setNewItems(prev => prev.map((it, idx) => idx === i ? { ...it, rawMaterialId: id ?? '', unit: rm?.unit ?? it.unit } : it));
                                 }}
-                              >
-                                <SelectTrigger className="h-7 text-xs">
-                                  <SelectValue placeholder="Select material..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {rawMaterials.map(m => (
-                                    <SelectItem key={m.id} value={m.id}>{m.code} — {m.name}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                getId={m => m.id}
+                                getPrimary={m => m.name}
+                                getSecondary={m => m.code}
+                                placeholder="Select material..."
+                                searchPlaceholder="Search by code or name…"
+                                size="sm"
+                                className="h-7"
+                                clearable={false}
+                              />
                             </td>
                             <td className="p-1.5">
                               <Input
@@ -626,30 +628,22 @@ export function BOMView() {
               <div className="p-5 flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
                   <Label>Raw Material *</Label>
-                  <Select
+                  <EntityPicker
+                    items={rawMaterials.filter(m => !addItemBOM?.items.some(i => i.rawMaterialId === m.id))}
                     value={addItem.rawMaterialId}
-                    onValueChange={v => {
-                      const rm = rawMaterials.find(m => m.id === v);
-                      setAddItem(p => ({ ...p, rawMaterialId: v, unit: rm?.unit ?? p.unit }));
+                    onChange={(id, rm) => setAddItem(p => ({ ...p, rawMaterialId: id ?? '', unit: rm?.unit ?? p.unit }))}
+                    getId={m => m.id}
+                    getPrimary={m => m.name}
+                    getSecondary={m => m.code}
+                    getMeta={m => {
+                      const lots = lotsByMaterial[m.id];
+                      return lots ? <span className="text-green-400">{lots.activeLots} lots · {lots.totalRemaining.toFixed(0)} {lots.unit}</span> : null;
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder="Select material..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {rawMaterials
-                        .filter(m => !addItemBOM.items.some(i => i.rawMaterialId === m.id))
-                        .map(m => {
-                          const lots = lotsByMaterial[m.id];
-                          return (
-                            <SelectItem key={m.id} value={m.id}>
-                              <span>{m.code} — {m.name}</span>
-                              {lots && <span className="ml-2 text-[10px] text-green-400">({lots.activeLots} lots, {lots.totalRemaining.toFixed(0)} {lots.unit})</span>}
-                            </SelectItem>
-                          );
-                        })}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select material..."
+                    searchPlaceholder="Search by code or name…"
+                    size="sm"
+                    clearable={false}
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">

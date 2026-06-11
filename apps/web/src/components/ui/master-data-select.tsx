@@ -13,6 +13,7 @@ import { Settings2, Plus, Pencil, Trash2, Check, X } from 'lucide-react';
 import { api } from '@/services/api.client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/use-toast';
 
@@ -86,19 +87,17 @@ export function MasterDataSelect({ entity, label, value, onChange, placeholder, 
           <Settings2 size={13} />
         </button>
       </div>
-      <select
-        className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      <SelectMenu
+        size="md"
+        fullWidth
         value={value ?? ''}
-        onChange={(e) => {
-          const id = e.target.value || null;
-          onChange(id, items.find((i) => i.id === id) ?? null);
-        }}
-      >
-        <option value="">{placeholder ?? `Select ${label.toLowerCase()}…`}</option>
-        {items.map((it) => (
-          <option key={it.id} value={it.id}>{masterItemLabel(entity, it)}</option>
-        ))}
-      </select>
+        onValueChange={(id) => onChange(id || null, items.find((i) => i.id === id) ?? null)}
+        placeholder={placeholder ?? `Select ${label.toLowerCase()}…`}
+        options={[
+          { value: '', label: placeholder ?? `Select ${label.toLowerCase()}…` },
+          ...items.map((it) => ({ value: it.id, label: masterItemLabel(entity, it) })),
+        ]}
+      />
 
       <MasterDataManager entity={entity} label={label} open={manageOpen} onOpenChange={setManageOpen} />
     </div>

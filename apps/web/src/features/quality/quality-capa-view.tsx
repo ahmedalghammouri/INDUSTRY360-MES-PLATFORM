@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
@@ -371,18 +372,18 @@ export function QualityCapaView() {
           </div>
           <div>
             <Label>Related NCR</Label>
-            <Select value={form.ncrId} onValueChange={v => setForm(f => ({ ...f, ncrId: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Link to NCR (optional)..." /></SelectTrigger>
-              <SelectContent className="max-h-52">
-                <SelectItem value="__none__">None</SelectItem>
-                {openNcrs.map(ncr => (
-                  <SelectItem key={ncr.id} value={ncr.id}>
-                    <span className="font-mono text-xs">{ncr.ncrNumber}</span>
-                    <span className="text-muted-foreground ml-2 text-[10px] truncate">{ncr.title}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntityPicker
+              items={openNcrs}
+              value={form.ncrId === '__none__' ? null : (form.ncrId || null)}
+              onChange={id => setForm(f => ({ ...f, ncrId: id ?? '__none__' }))}
+              getId={ncr => ncr.id}
+              getPrimary={ncr => ncr.ncrNumber}
+              getSecondary={ncr => ncr.title}
+              searchText={ncr => `${ncr.ncrNumber} ${ncr.title}`}
+              placeholder="Link to NCR (optional)..."
+              searchPlaceholder="Search NCRs…"
+              className="mt-1"
+            />
           </div>
           <div className="col-span-2">
             <Label>Description</Label>

@@ -13,13 +13,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { TableRowActions } from '@/components/ui/table-row-actions';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
-import { MachineTreePicker } from '@/components/ui/machine-tree-picker';
+import { MachinePicker } from '@/components/ui/machine-picker';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { SortableHeader } from '@/components/ui/sortable-header';
 import { useSortedData } from '@/lib/use-sorted-data';
@@ -494,7 +495,7 @@ export function MaintenanceWorkOrdersView() {
                   orders.map((wo) => {
                     const priority = PRIORITY_CONFIG[wo.priority];
                     return (
-                      <TableRow key={wo.id} className="border-border/20 hover:bg-muted/20">
+                      <TableRow key={wo.id} onClick={() => setViewWO(wo)} className="border-border/20 hover:bg-muted/20 cursor-pointer">
                         <TableCell className="font-mono text-xs font-semibold text-primary">{wo.woNumber}</TableCell>
                         <TableCell>
                           <div className="text-xs font-medium max-w-[140px] truncate">{wo.title}</div>
@@ -618,26 +619,26 @@ export function MaintenanceWorkOrdersView() {
                 </div>
                 <div className="col-span-2 space-y-1.5">
                   <Label className="text-xs">Machine <span className="text-destructive">*</span></Label>
-                  <MachineTreePicker
-                    value={form.machineId}
-                    valueName={form.machineName}
+                  <MachinePicker
+                    value={form.machineId || null}
+                    onChange={(id, node) => setForm(f => ({ ...f, machineId: id ?? '', machineName: node?.name ?? '' }))}
                     placeholder="Browse hierarchy to select machine…"
-                    onSelect={(id, _type, name) => setForm(f => ({ ...f, machineId: id, machineName: name }))}
-                    onClear={() => setForm(f => ({ ...f, machineId: '', machineName: '' }))}
+                    className="h-9"
                   />
                 </div>
                 {/* Assigned To */}
                 <div className="col-span-2 space-y-1.5">
                   <Label className="text-xs">Assign To Technician</Label>
-                  <Select value={form.assignedToId || '__none__'} onValueChange={v => setForm(f => ({ ...f, assignedToId: v === '__none__' ? '' : v }))}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Unassigned</SelectItem>
-                      {technicianOptions.map(u => (
-                        <SelectItem key={u.id} value={u.id}>{u.name} — {u.role}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <EntityPicker
+                    items={technicianOptions}
+                    value={form.assignedToId || null}
+                    onChange={id => setForm(f => ({ ...f, assignedToId: id ?? '' }))}
+                    getId={u => u.id}
+                    getPrimary={u => u.name}
+                    getMeta={u => <span className="text-muted-foreground">{u.role}</span>}
+                    placeholder="Unassigned"
+                    searchPlaceholder="Search technicians…"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Due Date</Label>
@@ -668,22 +669,16 @@ export function MaintenanceWorkOrdersView() {
                 {/* Production Work Order Link */}
                 <div className="col-span-2 space-y-1.5">
                   <Label className="text-xs">Link to Production Order <span className="text-[10px] font-normal text-muted-foreground">(optional)</span></Label>
-                  <Select
-                    value={form.productionWOId || '__none__'}
-                    onValueChange={v => setForm(f => ({ ...f, productionWOId: v === '__none__' ? '' : v }))}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Not linked to production" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Not linked to production</SelectItem>
-                      {prodWOOptions.map(wo => (
-                        <SelectItem key={wo.id} value={wo.id}>
-                          {wo.orderNumber} — {wo.status}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <EntityPicker
+                    items={prodWOOptions}
+                    value={form.productionWOId || null}
+                    onChange={id => setForm(f => ({ ...f, productionWOId: id ?? '' }))}
+                    getId={wo => wo.id}
+                    getPrimary={wo => wo.orderNumber}
+                    getMeta={wo => <span className="text-muted-foreground">{wo.status}</span>}
+                    placeholder="Not linked to production"
+                    searchPlaceholder="Search production orders…"
+                  />
                 </div>
               </div>
             </div>
@@ -1177,15 +1172,17 @@ export function MaintenanceWorkOrdersView() {
             <div className="space-y-3 py-1">
               <div className="space-y-1.5">
                 <Label className="text-xs">Technician <span className="text-destructive">*</span></Label>
-                <Select value={assignUserId || '__none__'} onValueChange={v => setAssignUserId(v === '__none__' ? '' : v)}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select technician…" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Select technician…</SelectItem>
-                    {technicianOptions.map(u => (
-                      <SelectItem key={u.id} value={u.id}>{u.name} — {u.role}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <EntityPicker
+                  items={technicianOptions}
+                  value={assignUserId || null}
+                  onChange={id => setAssignUserId(id ?? '')}
+                  getId={u => u.id}
+                  getPrimary={u => u.name}
+                  getMeta={u => <span className="text-muted-foreground">{u.role}</span>}
+                  placeholder="Select technician…"
+                  searchPlaceholder="Search technicians…"
+                  clearable={false}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Notes (optional)</Label>

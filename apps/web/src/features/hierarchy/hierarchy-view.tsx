@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { toast } from '@/components/ui/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import {
@@ -400,14 +401,17 @@ export function HierarchyView() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium">Area <span className="text-destructive">*</span></Label>
-                  <Select value={form.areaId} onValueChange={v => setForm(f => ({ ...f, areaId: v }))}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Select area..." /></SelectTrigger>
-                    <SelectContent>
-                      {areas.length === 0
-                        ? <SelectItem value="_" disabled>No areas available</SelectItem>
-                        : areas.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <EntityPicker
+                    items={areas}
+                    value={form.areaId || null}
+                    onChange={id => setForm(f => ({ ...f, areaId: id ?? '' }))}
+                    getId={a => a.id}
+                    getPrimary={a => a.name}
+                    placeholder="Select area..."
+                    searchPlaceholder="Search areas…"
+                    emptyText="No areas available"
+                    clearable={false}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium">Line Type</Label>
@@ -447,23 +451,28 @@ export function HierarchyView() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs font-medium">Area</Label>
-                    <Select value={form.areaId} onValueChange={v => setForm(f => ({ ...f, areaId: v, lineId: '__none__' }))}>
-                      <SelectTrigger className="h-9"><SelectValue placeholder="Select area..." /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None</SelectItem>
-                        {areas.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <EntityPicker
+                      items={areas}
+                      value={form.areaId === '__none__' ? null : (form.areaId || null)}
+                      onChange={id => setForm(f => ({ ...f, areaId: id ?? '__none__', lineId: '__none__' }))}
+                      getId={a => a.id}
+                      getPrimary={a => a.name}
+                      placeholder="Select area..."
+                      searchPlaceholder="Search areas…"
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs font-medium">Production Line</Label>
-                    <Select value={form.lineId} onValueChange={v => setForm(f => ({ ...f, lineId: v }))} disabled={!form.areaId}>
-                      <SelectTrigger className="h-9"><SelectValue placeholder={form.areaId ? 'Select line...' : 'Select area first'} /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None</SelectItem>
-                        {lines.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <EntityPicker
+                      items={lines}
+                      value={form.lineId === '__none__' ? null : (form.lineId || null)}
+                      onChange={id => setForm(f => ({ ...f, lineId: id ?? '__none__' }))}
+                      getId={l => l.id}
+                      getPrimary={l => l.name}
+                      placeholder={form.areaId ? 'Select line...' : 'Select area first'}
+                      searchPlaceholder="Search lines…"
+                      disabled={!form.areaId}
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">

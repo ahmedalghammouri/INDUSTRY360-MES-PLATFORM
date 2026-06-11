@@ -17,6 +17,7 @@ import Link from 'next/link';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
 
@@ -446,30 +447,32 @@ export default function MaintenanceSchedulingView() {
 
               {/* Priority & Status selects */}
               <div className="ml-auto flex items-center gap-2">
-                <select
+                <SelectMenu
                   value={priorityFilter}
-                  onChange={e => setPriorityFilter(e.target.value)}
-                  className="h-8 text-xs rounded-md border border-border/50 bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="ALL">All Priority</option>
-                  <option value="CRITICAL">Critical</option>
-                  <option value="HIGH">High</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="LOW">Low</option>
-                </select>
-                <select
+                  onValueChange={setPriorityFilter}
+                  menuLabel="Priority"
+                  options={[
+                    { value: 'ALL', label: 'All Priority' },
+                    { value: 'CRITICAL', label: 'Critical' },
+                    { value: 'HIGH', label: 'High' },
+                    { value: 'MEDIUM', label: 'Medium' },
+                    { value: 'LOW', label: 'Low' },
+                  ]}
+                />
+                <SelectMenu
                   value={statusFilter}
-                  onChange={e => setStatusFilter(e.target.value)}
-                  className="h-8 text-xs rounded-md border border-border/50 bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="ALL">All Status</option>
-                  <option value="PLANNED">Planned</option>
-                  <option value="ASSIGNED">Assigned</option>
-                  <option value="IN_PROGRESS">In Progress</option>
-                  <option value="ON_HOLD">On Hold</option>
-                  <option value="COMPLETED">Completed</option>
-                  <option value="CANCELLED">Cancelled</option>
-                </select>
+                  onValueChange={setStatusFilter}
+                  menuLabel="Status"
+                  options={[
+                    { value: 'ALL', label: 'All Status' },
+                    { value: 'PLANNED', label: 'Planned' },
+                    { value: 'ASSIGNED', label: 'Assigned' },
+                    { value: 'IN_PROGRESS', label: 'In Progress' },
+                    { value: 'ON_HOLD', label: 'On Hold' },
+                    { value: 'COMPLETED', label: 'Completed' },
+                    { value: 'CANCELLED', label: 'Cancelled' },
+                  ]}
+                />
               </div>
             </div>
 

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useMemo } from 'react';
+import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, ChevronDown, Factory, LayoutGrid, GitBranch, Cpu, X, Search } from 'lucide-react';
 import { api } from '@/services/api.client';
@@ -107,10 +108,6 @@ export function WorkCenterPicker({
 }: WorkCenterPickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const { data: tree = [] } = useQuery<WorkCenterNode[]>({
     queryKey: ['workcenter-tree'],
@@ -119,11 +116,13 @@ export function WorkCenterPicker({
   });
 
   // Flat list for search
-  const flat: WorkCenterNode[] = [];
-  function flatten(nodes: WorkCenterNode[]) {
-    for (const n of nodes) { flat.push(n); flatten(n.children); }
-  }
-  flatten(tree);
+  const flat = useMemo(() => {
+    const acc: WorkCenterNode[] = [];
+    (function flatten(nodes: WorkCenterNode[]) {
+      for (const n of nodes) { acc.push(n); flatten(n.children); }
+    })(tree);
+    return acc;
+  }, [tree]);
 
   const selected = flat.find(n => n.id === value) ?? null;
   const filtered = search
@@ -132,18 +131,6 @@ export function WorkCenterPicker({
         n.code.toLowerCase().includes(search.toLowerCase()),
       )
     : null;
-
-  // Close on outside click (accounts for fixed-position dropdown)
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      const inTrigger = ref.current?.contains(target);
-      const inDropdown = dropdownRef.current?.contains(target);
-      if (!inTrigger && !inDropdown) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
 
   const handleSelect = (node: WorkCenterNode) => {
     onChange(node.id, node);
@@ -156,55 +143,43 @@ export function WorkCenterPicker({
     onChange(null, null);
   };
 
-  const handleToggle = () => {
-    if (!open && buttonRef.current) {
-      const r = buttonRef.current.getBoundingClientRect();
-      setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
-    }
-    setOpen(o => !o);
-  };
-
   const Icon = selected ? (LEVEL_ICON[selected.level] ?? Cpu) : null;
 
   return (
-    <div ref={ref} className={cn('relative', className)}>
-      <button
-        ref={buttonRef}
-        type="button"
-        disabled={disabled}
-        onClick={handleToggle}
-        className={cn(
-          'w-full h-8 px-2.5 flex items-center gap-2 rounded-md border bg-background text-sm text-left transition-colors',
-          'hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary',
-          disabled && 'opacity-50 cursor-not-allowed',
-          open && 'ring-1 ring-primary border-primary/50',
-        )}
-      >
-        {Icon && <Icon size={13} className={LEVEL_COLOR[selected!.level]} />}
-        <span className={cn('flex-1 truncate', !selected && 'text-muted-foreground')}>
-          {selected ? `${selected.name} (${selected.code})` : placeholder}
-        </span>
-        {selected && !disabled && (
-          <span onClick={handleClear} className="p-0.5 rounded hover:bg-muted">
-            <X size={11} />
-          </span>
-        )}
-        <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
-      </button>
-
-      {open && dropdownPos && (
-        <div
-          ref={dropdownRef}
-          style={{
-            position: 'fixed',
-            top: dropdownPos.top,
-            left: dropdownPos.left,
-            width: Math.max(dropdownPos.width, 240),
-            zIndex: 9999,
-          }}
-          className="rounded-lg border bg-background shadow-xl"
+    <PopoverPrimitive.Root open={open} onOpenChange={(o) => { setOpen(o); if (!o) setSearch(''); }}>
+      <PopoverPrimitive.Trigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className={cn(
+            'w-full h-8 px-2.5 flex items-center gap-2 rounded-md border border-input bg-background text-sm text-left transition-colors',
+            'hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-ring',
+            'disabled:opacity-50 disabled:cursor-not-allowed',
+            'data-[state=open]:ring-1 data-[state=open]:ring-ring data-[state=open]:border-primary/50',
+            className,
+          )}
         >
-          <div className="p-2 border-b">
+          {Icon && <Icon size={13} className={LEVEL_COLOR[selected!.level]} />}
+          <span className={cn('flex-1 truncate', !selected && 'text-muted-foreground')}>
+            {selected ? `${selected.name} (${selected.code})` : placeholder}
+          </span>
+          {selected && !disabled && (
+            <span role="button" tabIndex={-1} onClick={handleClear} className="p-0.5 rounded hover:bg-muted">
+              <X size={11} />
+            </span>
+          )}
+          <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverPrimitive.Trigger>
+
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          align="start"
+          sideOffset={4}
+          className="z-50 w-[var(--radix-popover-trigger-width)] min-w-[240px] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-xl data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <div className="p-2 border-b border-border/60">
             <div className="relative">
               <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -212,7 +187,7 @@ export function WorkCenterPicker({
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search work centers..."
-                className="w-full h-7 pl-6 pr-2 text-xs rounded-md border bg-muted/50 outline-none focus:ring-1 focus:ring-primary"
+                className="w-full h-7 pl-6 pr-2 text-xs rounded-md border border-input bg-background outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
           </div>
@@ -251,8 +226,8 @@ export function WorkCenterPicker({
               ))
             )}
           </div>
-        </div>
-      )}
-    </div>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
   );
 }

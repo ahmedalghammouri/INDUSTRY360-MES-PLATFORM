@@ -7,7 +7,7 @@ import {
   Pencil, Trash2, Network, Info, BarChart3, ListFilter, Eye,
   CheckCheck, AlertCircle, Search, Calendar, ChevronsUpDown,
   Tag, GitBranch, CircleDot, Cpu, AlignLeft, Lock,
-  FileText, Link2, Timer, ShieldAlert, Activity,
+  FileText, Link2, Timer, ShieldAlert, Activity, CalendarClock,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { MachinePicker } from '@/components/ui/machine-picker';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { WorkCenterPicker, WorkCenterNode } from '@/components/ui/workcenter-picker';
 import { api } from '@/services/api.client';
@@ -24,6 +25,7 @@ import { cn, formatDateTime } from '@/lib/utils';
 import { SortableHeader } from '@/components/ui/sortable-header';
 import { useSortedData } from '@/lib/use-sorted-data';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { PlannedDowntimeManager } from '@/features/shifts/planned-downtime-manager';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -384,7 +386,7 @@ function CauseTreeSelect({
 
 // ── Tab nav ──────────────────────────────────────────────────────────────────
 
-type Tab = 'live' | 'history' | 'tree' | 'analytics';
+type Tab = 'live' | 'history' | 'planned' | 'tree' | 'analytics';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // REASON TREE TAB
@@ -1329,26 +1331,13 @@ function LiveTab({ machines, reasonTree }: { machines: Machine[]; reasonTree: Re
                         </Badge>
                       )}
                     </Label>
-                    <Select
-                      value={form.machineId}
-                      onValueChange={v => { if (!machineLocked) setForm(p => ({ ...p, machineId: v, causeId: '' })); }}
+                    <MachinePicker
+                      value={form.machineId || null}
+                      onChange={id => { if (!machineLocked) setForm(p => ({ ...p, machineId: id ?? '', causeId: '' })); }}
+                      placeholder="Select machine..."
                       disabled={machineLocked}
-                    >
-                      <SelectTrigger className={cn('h-10', machineLocked && 'opacity-70 cursor-not-allowed')}>
-                        <SelectValue placeholder="Select machine..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {machines.map(m => (
-                          <SelectItem key={m.id} value={m.id}>
-                            <div className="flex items-center gap-2">
-                              <Cpu size={13} className="text-muted-foreground" />
-                              {m.name}
-                              <span className="text-[10px] text-muted-foreground font-mono">{m.code}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      className={cn('h-10', machineLocked && 'opacity-70 cursor-not-allowed')}
+                    />
                   </div>
 
                   <div className="flex flex-col gap-1.5">
@@ -1780,10 +1769,11 @@ export function ProductionDowntimeView() {
   const machines: Machine[] = (machinesData as any)?.data ?? (Array.isArray(machinesData) ? machinesData : []);
 
   const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-    { id: 'live',      label: 'Live Events',  icon: AlertTriangle },
-    { id: 'history',   label: 'History',      icon: ListFilter },
-    { id: 'tree',      label: 'Reason Tree',  icon: Network },
-    { id: 'analytics', label: 'Analytics',    icon: BarChart3 },
+    { id: 'live',      label: 'Live Events',       icon: AlertTriangle },
+    { id: 'history',   label: 'History',           icon: ListFilter },
+    { id: 'planned',   label: 'Planned Downtime',  icon: CalendarClock },
+    { id: 'tree',      label: 'Reason Tree',       icon: Network },
+    { id: 'analytics', label: 'Analytics',         icon: BarChart3 },
   ];
 
   return (
@@ -1833,6 +1823,7 @@ export function ProductionDowntimeView() {
         <motion.div key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
           {tab === 'live'      && <LiveTab machines={machines} reasonTree={reasonTree as ReasonNode[]} />}
           {tab === 'history'   && <HistoryTab machines={machines} />}
+          {tab === 'planned'   && <PlannedDowntimeManager />}
           {tab === 'tree'      && <TreeTab machines={machines} />}
           {tab === 'analytics' && <AnalyticsTab />}
         </motion.div>

@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { MachinePicker } from '@/components/ui/machine-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
@@ -399,20 +400,12 @@ export function QualityNcrView() {
           </div>
           <div>
             <Label>Machine (optional)</Label>
-            <Select value={form.machineId} onValueChange={v => setForm(f => ({ ...f, machineId: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select machine..." /></SelectTrigger>
-              <SelectContent className="max-h-52">
-                <SelectItem value="__none__">None</SelectItem>
-                {machines.map((m: any) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    <div className="flex flex-col">
-                      <span className="text-xs">{m.name} <span className="font-mono text-muted-foreground">({m.code})</span></span>
-                      <span className="text-[10px] text-muted-foreground">{m.line?.name ?? m.area?.name ?? 'Unassigned'}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MachinePicker
+              value={form.machineId === '__none__' ? null : (form.machineId || null)}
+              onChange={id => setForm(f => ({ ...f, machineId: id ?? '__none__' }))}
+              placeholder="Select machine..."
+              className="mt-1 h-9"
+            />
           </div>
           <div>
             <Label>Resolution Due Date *</Label>

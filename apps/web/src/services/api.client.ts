@@ -2,7 +2,9 @@ import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse 
 
 import { useAuthStore } from '@/store/auth-store';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+// Empty string = same-origin (nginx proxies /api/ to the backend in production);
+// unset (local dev outside docker) falls back to the direct API port.
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 const API_VERSION = '/api/v1';
 
 export const apiClient: AxiosInstance = axios.create({

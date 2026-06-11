@@ -8,6 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { cn } from '@/lib/utils';
 import { useFactoryStore } from '@/store/factory-store';
 import { toast } from '@/components/ui/use-toast';
@@ -155,15 +156,12 @@ export function DashboardCenterView() {
         {/* Source filter */}
         <div className="flex items-center gap-1.5">
           <SlidersHorizontal size={13} className="text-muted-foreground" />
-          <select
+          <SelectMenu
             value={source}
-            onChange={(e) => setSource(e.target.value as DashboardSource | 'ALL')}
-            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
-          >
-            {SOURCE_FILTERS.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
+            onValueChange={(v) => setSource(v as DashboardSource | 'ALL')}
+            menuLabel="Source"
+            options={SOURCE_FILTERS.map((s) => ({ value: s.value, label: s.label }))}
+          />
         </div>
 
         {hasFilters && (

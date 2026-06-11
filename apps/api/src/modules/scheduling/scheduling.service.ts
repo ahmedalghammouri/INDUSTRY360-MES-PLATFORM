@@ -2,7 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 
 export type ScheduleItemType =
-  | 'PRODUCTION_ORDER' | 'WORK_ORDER' | 'MAINTENANCE' | 'PLANNED_DOWNTIME' | 'SHIFT';
+  | 'PRODUCTION_ORDER' | 'WORK_ORDER' | 'MAINTENANCE' | 'PLANNED_DOWNTIME' | 'UNPLANNED_DOWNTIME' | 'SHIFT';
 
 export interface ScheduleItem {
   id: string;
@@ -23,6 +23,7 @@ const COLORS: Record<ScheduleItemType, string> = {
   WORK_ORDER: '#22c55e',
   MAINTENANCE: '#f59e0b',
   PLANNED_DOWNTIME: '#06b6d4',
+  UNPLANNED_DOWNTIME: '#ef4444',
   SHIFT: '#64748b',
 };
 
@@ -31,6 +32,7 @@ const TYPE_LABELS: Record<ScheduleItemType, string> = {
   WORK_ORDER: 'Work Orders',
   MAINTENANCE: 'Maintenance',
   PLANNED_DOWNTIME: 'Planned Downtime',
+  UNPLANNED_DOWNTIME: 'Unplanned Downtime',
   SHIFT: 'Shifts',
 };
 
@@ -62,7 +64,7 @@ export class SchedulingService {
 
     const wanted = new Set<ScheduleItemType>(
       (query.types?.split(',').map((t) => t.trim()).filter(Boolean) as ScheduleItemType[] | undefined)
-        ?? ['PRODUCTION_ORDER', 'WORK_ORDER', 'MAINTENANCE', 'PLANNED_DOWNTIME', 'SHIFT'],
+        ?? ['PRODUCTION_ORDER', 'WORK_ORDER', 'MAINTENANCE', 'PLANNED_DOWNTIME', 'UNPLANNED_DOWNTIME', 'SHIFT'],
     );
 
     // Overlap filter: start <= to AND end >= from
@@ -146,6 +148,22 @@ export class SchedulingService {
         start: d.startTime.toISOString(),
         end: (d.endTime ?? new Date(d.startTime.getTime() + (d.durationMinutes ?? 30) * 60_000)).toISOString(),
         color: COLORS.PLANNED_DOWNTIME,
+      }))));
+    }
+
+    if (wanted.has('UNPLANNED_DOWNTIME')) {
+      tasks.push(this.prisma.downtimeEvent.findMany({
+        where: { factoryId: fid, isPlanned: false, ...machineFilter, ...overlap('startTime', 'endTime') },
+        select: { id: true, startTime: true, endTime: true, durationMinutes: true, machine: { select: { id: true, name: true } }, cause: { select: { name: true } } },
+        orderBy: { startTime: 'asc' },
+        take: 800,
+      }).then((rows) => rows.map((d): ScheduleItem => ({
+        id: d.id, type: 'UNPLANNED_DOWNTIME', title: d.cause?.name ?? 'Unplanned downtime',
+        subtitle: d.machine?.name ?? undefined, status: d.endTime ? 'RESOLVED' : 'ONGOING',
+        resourceId: d.machine?.id ?? 'plant', resourceName: d.machine?.name ?? 'Plant',
+        start: d.startTime.toISOString(),
+        end: (d.endTime ?? new Date(d.startTime.getTime() + (d.durationMinutes ?? 30) * 60_000)).toISOString(),
+        color: COLORS.UNPLANNED_DOWNTIME,
       }))));
     }
 

@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'; // still used for status filter
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -260,7 +261,7 @@ export function ProductionBatchesView() {
                   const yieldPct = batch.yieldPct ?? (batch.quantity > 0 ? Math.round((batch.goodQuantity / batch.quantity) * 100) : 0);
                   const scrapPct = batch.scrapPct ?? (batch.quantity > 0 ? Math.round((batch.scrapQuantity / batch.quantity) * 100) : 0);
                   return (
-                    <TableRow key={batch.id} className="border-border/20 hover:bg-muted/20 cursor-pointer">
+                    <TableRow key={batch.id} onClick={() => setViewBatch(batch)} className="border-border/20 hover:bg-muted/20 cursor-pointer">
                       <TableCell className="font-mono text-xs font-semibold text-primary">{batch.batchNumber}</TableCell>
                       <TableCell>
                         <div className="text-xs font-medium">{batch.sku?.name ?? '—'}</div>
@@ -340,25 +341,18 @@ export function ProductionBatchesView() {
                 <Package size={11} className="text-muted-foreground" />
                 Product / SKU
               </Label>
-              <Select value={formData.skuId} onValueChange={v => setFormData(f => ({ ...f, skuId: v }))}>
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select a product..." />
-                </SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {skus.length === 0 ? (
-                    <SelectItem value="_none" disabled>No products available</SelectItem>
-                  ) : (
-                    skus.map(sku => (
-                      <SelectItem key={sku.id} value={sku.id}>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-medium">{sku.name}</span>
-                          <span className="text-[10px] text-muted-foreground">{sku.itemNumber ?? sku.code}</span>
-                        </div>
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+              <EntityPicker
+                items={skus}
+                value={formData.skuId}
+                onChange={id => setFormData(f => ({ ...f, skuId: id ?? '' }))}
+                getId={sku => sku.id}
+                getPrimary={sku => sku.name}
+                getSecondary={sku => sku.itemNumber ?? sku.code}
+                placeholder="Select a product..."
+                searchPlaceholder="Search by code or name…"
+                emptyText="No products available"
+                clearable={false}
+              />
             </div>
 
             {/* Planned Quantity */}
@@ -379,25 +373,18 @@ export function ProductionBatchesView() {
             {/* Work Order */}
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Work Order</Label>
-              <Select value={formData.workOrderId} onValueChange={v => setFormData(f => ({ ...f, workOrderId: v }))}>
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Link to a work order..." />
-                </SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {workOrders.length === 0 ? (
-                    <SelectItem value="_none" disabled>No open work orders</SelectItem>
-                  ) : (
-                    workOrders.map(wo => (
-                      <SelectItem key={wo.id} value={wo.id}>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-mono font-medium">{wo.orderNumber}</span>
-                          {wo.sku?.name && <span className="text-[10px] text-muted-foreground">{wo.sku.name}</span>}
-                        </div>
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+              <EntityPicker
+                items={workOrders}
+                value={formData.workOrderId}
+                onChange={id => setFormData(f => ({ ...f, workOrderId: id ?? '' }))}
+                getId={wo => wo.id}
+                getPrimary={wo => wo.orderNumber}
+                getSecondary={wo => wo.sku?.name ?? ''}
+                searchText={wo => `${wo.orderNumber} ${wo.sku?.name ?? ''}`}
+                placeholder="Link to a work order..."
+                searchPlaceholder="Search work orders…"
+                emptyText="No open work orders"
+              />
             </div>
           </div>
 

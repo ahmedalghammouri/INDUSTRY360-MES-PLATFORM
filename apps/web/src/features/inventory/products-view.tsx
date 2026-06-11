@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -528,18 +529,17 @@ export function ProductsView() {
 
             <div className="col-span-2">
               <Label className="text-xs">Storage Location (Finished Goods)</Label>
-              <Select
-                value={formData.storageLocationId || '__none__'}
-                onValueChange={v => setFormData(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
-              >
-                <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {storageLocations.map(loc => (
-                    <SelectItem key={loc.id} value={loc.id}>{loc.code} — {loc.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityPicker
+                items={storageLocations}
+                value={formData.storageLocationId || null}
+                onChange={id => setFormData(p => ({ ...p, storageLocationId: id ?? '' }))}
+                getId={loc => loc.id}
+                getPrimary={loc => loc.name}
+                getSecondary={loc => loc.code}
+                placeholder="Select location…"
+                searchPlaceholder="Search by code or name…"
+                className="mt-1"
+              />
             </div>
           </div>
           <DialogFooter>
@@ -677,18 +677,17 @@ export function ProductsView() {
 
             <div className="col-span-2">
               <Label className="text-xs">Storage Location (Finished Goods)</Label>
-              <Select
-                value={editForm.storageLocationId || '__none__'}
-                onValueChange={v => setEditForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
-              >
-                <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {storageLocations.map(loc => (
-                    <SelectItem key={loc.id} value={loc.id}>{loc.code} — {loc.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityPicker
+                items={storageLocations}
+                value={editForm.storageLocationId || null}
+                onChange={id => setEditForm(p => ({ ...p, storageLocationId: id ?? '' }))}
+                getId={loc => loc.id}
+                getPrimary={loc => loc.name}
+                getSecondary={loc => loc.code}
+                placeholder="Select location…"
+                searchPlaceholder="Search by code or name…"
+                className="mt-1"
+              />
             </div>
           </div>
           <DialogFooter>

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { cn } from '@/lib/utils';
 import { useFactoryStore } from '@/store/factory-store';
 import { useDashboardEmbed, type EmbedContext } from './use-dashboard-center';
@@ -66,13 +67,12 @@ export function EmbeddedDashboardViewer({ dashboardId }: { dashboardId: string }
           {/* Time range — applies as Grafana from/to */}
           <div className="flex items-center gap-1.5">
             <Clock size={13} className="text-muted-foreground" />
-            <select
+            <SelectMenu
               value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value)}
-              className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
-            >
-              {TIME_RANGES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+              onValueChange={setTimeRange}
+              menuLabel="Time range"
+              options={TIME_RANGES.map((t) => ({ value: t.value, label: t.label }))}
+            />
           </div>
 
           <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setReloadKey((k) => k + 1)} title="Reload">

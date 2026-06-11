@@ -19,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { Separator } from '@/components/ui/separator';
 import { useAuthStore } from '@/store/auth-store';
 import { authService } from '@/services/auth.service';
@@ -50,6 +51,10 @@ const SECTIONS = [
 export function SettingsView() {
   const { user } = useAuthStore();
   const [activeSection, setActiveSection] = useState('profile');
+  const [language, setLanguage] = useState('en');
+  const [dateFormat, setDateFormat] = useState('DD/MM/YYYY');
+  const [timeZone, setTimeZone] = useState('Asia/Riyadh (UTC+3)');
+  const [numberFormat, setNumberFormat] = useState('1,234.56');
   const [mfaSetupData, setMfaSetupData] = useState<{ qrCode: string; secret: string } | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
 
@@ -279,32 +284,56 @@ export function SettingsView() {
               <div className="grid grid-cols-2 gap-4 max-w-md">
                 <div className="space-y-2">
                   <Label>Interface Language</Label>
-                  <select className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                    <option value="en">English</option>
-                    <option value="ar">العربية (Arabic)</option>
-                  </select>
+                  <SelectMenu
+                    size="md"
+                    fullWidth
+                    value={language}
+                    onValueChange={setLanguage}
+                    options={[
+                      { value: 'en', label: 'English' },
+                      { value: 'ar', label: 'العربية (Arabic)' },
+                    ]}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Date Format</Label>
-                  <select className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                    <option>DD/MM/YYYY</option>
-                    <option>MM/DD/YYYY</option>
-                    <option>YYYY-MM-DD</option>
-                  </select>
+                  <SelectMenu
+                    size="md"
+                    fullWidth
+                    value={dateFormat}
+                    onValueChange={setDateFormat}
+                    options={[
+                      { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
+                      { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
+                      { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
+                    ]}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Time Zone</Label>
-                  <select className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                    <option>Asia/Riyadh (UTC+3)</option>
-                    <option>UTC</option>
-                  </select>
+                  <SelectMenu
+                    size="md"
+                    fullWidth
+                    value={timeZone}
+                    onValueChange={setTimeZone}
+                    options={[
+                      { value: 'Asia/Riyadh (UTC+3)', label: 'Asia/Riyadh (UTC+3)' },
+                      { value: 'UTC', label: 'UTC' },
+                    ]}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Number Format</Label>
-                  <select className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                    <option>1,234.56</option>
-                    <option>1.234,56</option>
-                  </select>
+                  <SelectMenu
+                    size="md"
+                    fullWidth
+                    value={numberFormat}
+                    onValueChange={setNumberFormat}
+                    options={[
+                      { value: '1,234.56', label: '1,234.56' },
+                      { value: '1.234,56', label: '1.234,56' },
+                    ]}
+                  />
                 </div>
               </div>
               <Button>Save Settings</Button>

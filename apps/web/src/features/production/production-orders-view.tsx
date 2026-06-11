@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import {
@@ -251,16 +252,17 @@ function POFormDialog({ open, onClose, initial }: POFormDialogProps) {
               </div>
               <div className="col-span-2 space-y-1.5">
                 <Label>Product (SKU) *</Label>
-                <Select value={form.skuId} onValueChange={v => set('skuId', v)}>
-                  <SelectTrigger><SelectValue placeholder="Select product…" /></SelectTrigger>
-                  <SelectContent>
-                    {skus.map((s: any) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        <span className="font-mono text-xs text-muted-foreground mr-2">{s.itemNumber}</span>{s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <EntityPicker
+                  items={skus}
+                  value={form.skuId}
+                  onChange={id => set('skuId', id ?? '')}
+                  getId={(s: any) => s.id}
+                  getPrimary={(s: any) => s.name}
+                  getSecondary={(s: any) => s.itemNumber}
+                  placeholder="Select product…"
+                  searchPlaceholder="Search by item number or name…"
+                  clearable={false}
+                />
               </div>
             </>
           )}

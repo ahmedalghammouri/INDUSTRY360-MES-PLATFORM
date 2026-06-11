@@ -6,9 +6,10 @@ import { motion } from 'framer-motion';
 import { Search, Plus, Layers3, AlertTriangle, Pencil, Trash2, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { SelectMenu } from '@/components/ui/select-menu';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
@@ -165,16 +166,15 @@ export function MaterialsView() {
             className="pl-8 h-9 w-64"
           />
         </div>
-        <select
+        <SelectMenu
           value={status}
-          onChange={e => { setStatus(e.target.value); setPage(1); }}
-          className="h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground"
-        >
-          <option value="">All Status</option>
-          {['ACTIVE', 'COMPLETED', 'RELEASED', 'REJECTED', 'ON_HOLD', 'QUARANTINE'].map(s => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+          onValueChange={v => { setStatus(v); setPage(1); }}
+          menuLabel="Status"
+          options={[
+            { value: '', label: 'All Status' },
+            ...['ACTIVE', 'COMPLETED', 'RELEASED', 'REJECTED', 'ON_HOLD', 'QUARANTINE'].map(s => ({ value: s, label: s })),
+          ]}
+        />
       </div>
 
       <div className="glass-card rounded-xl overflow-hidden">
@@ -288,33 +288,30 @@ export function MaterialsView() {
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <Label>Raw Material (Master) *</Label>
-            <Select
-              value={form.rawMaterialId || '__none__'}
-              onValueChange={v => {
-                if (v === '__none__') {
+            <EntityPicker
+              items={rawMaterials}
+              value={form.rawMaterialId || null}
+              onChange={(id, mat) => {
+                if (!id) {
                   setForm(f => ({ ...f, rawMaterialId: '', materialCode: '', materialName: '', unit: 'KG' }));
                   return;
                 }
-                const mat = rawMaterials.find((m: any) => m.id === v);
                 setForm(f => ({
                   ...f,
-                  rawMaterialId: v,
-                  materialCode: mat?.code ?? '',
-                  materialName: mat?.name ?? '',
-                  unit: mat?.unit ?? f.unit,
+                  rawMaterialId: id,
+                  materialCode: (mat as any)?.code ?? '',
+                  materialName: (mat as any)?.name ?? '',
+                  unit: (mat as any)?.unit ?? f.unit,
                 }));
               }}
-            >
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select raw material..." /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">— Select material —</SelectItem>
-                {rawMaterials.map((m: any) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.code} — {m.name} ({m.unit})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              getId={(m: any) => m.id}
+              getPrimary={(m: any) => m.name}
+              getSecondary={(m: any) => m.code}
+              getMeta={(m: any) => <span className="text-muted-foreground">{m.unit}</span>}
+              placeholder="Select raw material..."
+              searchPlaceholder="Search by code or name…"
+              className="mt-1"
+            />
           </div>
           <div>
             <Label>Lot Number *</Label>
@@ -338,20 +335,17 @@ export function MaterialsView() {
           </div>
           <div>
             <Label>Storage Location</Label>
-            <Select
-              value={form.storageLocationId || '__none__'}
-              onValueChange={v => setForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
-            >
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select location…" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">None</SelectItem>
-                {storageLocations.map(loc => (
-                  <SelectItem key={loc.id} value={loc.id}>
-                    {loc.code} — {loc.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntityPicker
+              items={storageLocations}
+              value={form.storageLocationId || null}
+              onChange={id => setForm(p => ({ ...p, storageLocationId: id ?? '' }))}
+              getId={loc => loc.id}
+              getPrimary={loc => loc.name}
+              getSecondary={loc => loc.code}
+              placeholder="Select location…"
+              searchPlaceholder="Search by code or name…"
+              className="mt-1"
+            />
           </div>
         </div>
       </FormDialog>

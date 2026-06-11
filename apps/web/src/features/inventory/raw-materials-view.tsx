@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
@@ -564,21 +565,17 @@ export function RawMaterialsView() {
               {/* Storage Location */}
               <div className="space-y-1.5">
                 <Label className="text-xs">Storage Location</Label>
-                <Select
-                  value={form.storageLocationId || '__none__'}
-                  onValueChange={v => setForm(p => ({ ...p, storageLocationId: v === '__none__' ? '' : v }))}
-                >
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select location…" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">None</SelectItem>
-                    {storageLocations.map(loc => (
-                      <SelectItem key={loc.id} value={loc.id}>
-                        {loc.code} — {loc.name}
-                        <span className="ml-1 text-xs text-muted-foreground">({loc.zone})</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <EntityPicker
+                  items={storageLocations}
+                  value={form.storageLocationId || null}
+                  onChange={id => setForm(p => ({ ...p, storageLocationId: id ?? '' }))}
+                  getId={loc => loc.id}
+                  getPrimary={loc => loc.name}
+                  getSecondary={loc => loc.code}
+                  getMeta={loc => <span className="text-muted-foreground">{loc.zone}</span>}
+                  placeholder="Select location…"
+                  searchPlaceholder="Search by code or name…"
+                />
               </div>
 
               {/* Supplier */}

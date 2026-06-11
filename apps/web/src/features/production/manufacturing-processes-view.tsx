@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
@@ -743,14 +744,18 @@ function ProcessForm({
                       {skus.find(s => s.id === newProcess.skuId)?.name ?? newProcess.skuId}
                     </div>
                   ) : (
-                    <Select value={newProcess.skuId} onValueChange={v => setNewProcess(p => ({ ...p, skuId: v }))}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select product..." /></SelectTrigger>
-                      <SelectContent>
-                        {skus.map((s: any) => (
-                          <SelectItem key={s.id} value={s.id}>{s.itemNumber} — {s.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <EntityPicker
+                      items={skus}
+                      value={newProcess.skuId}
+                      onChange={id => setNewProcess(p => ({ ...p, skuId: id ?? '' }))}
+                      getId={(s: any) => s.id}
+                      getPrimary={(s: any) => s.name}
+                      getSecondary={(s: any) => s.itemNumber}
+                      placeholder="Select product..."
+                      searchPlaceholder="Search by item number or name…"
+                      size="sm"
+                      clearable={false}
+                    />
                   )}
                 </>
               )}

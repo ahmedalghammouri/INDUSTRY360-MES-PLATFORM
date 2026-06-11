@@ -99,6 +99,7 @@ const navItems: NavItem[] = [
       { label: 'Production Schedule',     href: '/scheduling/production',        icon: Factory,       badge: 'APS',   badgeVariant: 'outline' },
       { label: 'Order Scheduling',        href: '/production/scheduling',        icon: Calendar       },
       { label: 'Planned Downtime',        href: '/scheduling/planned-downtime',  icon: CalendarClock  },
+      { label: 'Unplanned Downtime',      href: '/scheduling/unplanned-downtime', icon: AlertTriangle },
       { label: 'Shift Configuration',     href: '/production/shifts',            icon: Clock,         badge: 'NCC', badgeVariant: 'outline' },
     ],
   },

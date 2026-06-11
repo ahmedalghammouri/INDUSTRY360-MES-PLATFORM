@@ -13,6 +13,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { KPICard } from '@/components/widgets/kpi-card';
 import { OEEGauge } from '@/components/charts/oee-gauge';
 import { api } from '@/services/api.client';
@@ -155,14 +156,15 @@ export function ProductionOEEView() {
             ))}
           </div>
           {/* Machine filter */}
-          <select
+          <SelectMenu
             value={machineFilter}
-            onChange={e => setMachineFilter(e.target.value)}
-            className="h-8 text-xs rounded-md border border-input bg-background px-2 focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            <option value="ALL">All machines</option>
-            {equipment.map(e => <option key={e.name} value={e.name}>{e.name}</option>)}
-          </select>
+            onValueChange={setMachineFilter}
+            menuLabel="Machine"
+            options={[
+              { value: 'ALL', label: 'All machines' },
+              ...equipment.map(e => ({ value: e.name, label: e.name })),
+            ]}
+          />
           <Button
             variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
             onClick={() => qc.invalidateQueries({ queryKey: ['production', 'oee'] })}

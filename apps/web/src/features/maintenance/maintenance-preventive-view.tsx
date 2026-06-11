@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
+import { MachinePicker } from '@/components/ui/machine-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
@@ -261,22 +263,12 @@ export function MaintenancePreventiveView() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label>Equipment / Machine *</Label>
-            <Select value={form.equipment} onValueChange={v => setForm(f => ({ ...f, equipment: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select machine..." /></SelectTrigger>
-              <SelectContent className="max-h-52">
-                {machines.map((m: any) => (
-                  <SelectItem key={m.id} value={m.name}>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-medium">{m.name} <span className="font-mono text-muted-foreground">({m.code})</span></span>
-                      <span className="text-[10px] text-muted-foreground">{m.line?.name ?? m.area?.name ?? 'Unassigned'}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-                {machines.length === 0 && (
-                  <div className="px-2 py-3 text-xs text-muted-foreground text-center">No machines found</div>
-                )}
-              </SelectContent>
-            </Select>
+            <MachinePicker
+              value={machines.find(m => m.name === form.equipment)?.id ?? null}
+              onChange={(_id, node) => setForm(f => ({ ...f, equipment: node?.name ?? '' }))}
+              placeholder="Select machine..."
+              className="mt-1 h-9"
+            />
           </div>
           <div>
             <Label>Frequency *</Label>
@@ -301,18 +293,17 @@ export function MaintenancePreventiveView() {
           </div>
           <div>
             <Label>Assigned To</Label>
-            <Select value={form.assignedTo} onValueChange={v => setForm(f => ({ ...f, assignedTo: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select technician..." /></SelectTrigger>
-              <SelectContent className="max-h-52">
-                <SelectItem value="__none__">Unassigned</SelectItem>
-                {usersList.map(u => (
-                  <SelectItem key={u.id} value={u.name}>
-                    <span className="text-xs font-medium">{u.name}</span>
-                    <span className="text-muted-foreground ml-1 text-[10px]">{u.role.replace(/_/g, ' ')}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntityPicker
+              items={usersList}
+              value={form.assignedTo === '__none__' ? null : (form.assignedTo || null)}
+              onChange={id => setForm(f => ({ ...f, assignedTo: id ?? '__none__' }))}
+              getId={u => u.name}
+              getPrimary={u => u.name}
+              getMeta={u => <span className="text-muted-foreground">{u.role.replace(/_/g, ' ')}</span>}
+              placeholder="Select technician..."
+              searchPlaceholder="Search technicians…"
+              className="mt-1"
+            />
           </div>
         </div>
       </FormDialog>

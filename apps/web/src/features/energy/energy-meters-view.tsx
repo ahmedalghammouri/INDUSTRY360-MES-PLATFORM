@@ -8,6 +8,7 @@ import { Zap, Gauge, Thermometer, Activity, Plus, Clock, Pencil, Trash2, MoreVer
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -64,7 +65,7 @@ export function EnergyMetersView() {
   const [showMeterForm, setShowMeterForm] = useState(false);
   const [editMeter, setEditMeter] = useState<EnergyMeter | null>(null);
   const [deleteMeter, setDeleteMeter] = useState<EnergyMeter | null>(null);
-  const { register, handleSubmit, reset, setValue } = useForm();
+  const { register, handleSubmit, reset, setValue, watch } = useForm();
 
   const { data, isLoading } = useQuery({
     queryKey: ['energy', 'meters'],
@@ -147,7 +148,7 @@ export function EnergyMetersView() {
           <h1 className="text-2xl font-bold">Energy Meters</h1>
           <p className="text-muted-foreground text-sm mt-1">{meters.length} meters configured</p>
         </div>
-        <Button onClick={() => { setShowMeterForm(true); setEditMeter(null); reset(); }}>
+        <Button onClick={() => { setShowMeterForm(true); setEditMeter(null); reset({ type: 'ELECTRICAL' }); }}>
           <Plus className="w-4 h-4 mr-2" />Add Meter
         </Button>
       </div>
@@ -311,14 +312,21 @@ export function EnergyMetersView() {
                 </div>
                 <div>
                   <Label>Type *</Label>
-                  <select {...register('type', { required: true })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm mt-1">
-                    <option value="ELECTRICAL">Electrical</option>
-                    <option value="NATURAL_GAS">Natural Gas</option>
-                    <option value="COMPRESSED_AIR">Compressed Air</option>
-                    <option value="WATER">Water</option>
-                    <option value="STEAM">Steam</option>
-                    <option value="CHILLED_WATER">Chilled Water</option>
-                  </select>
+                  <SelectMenu
+                    size="md"
+                    fullWidth
+                    className="mt-1"
+                    value={(watch('type') as string) ?? 'ELECTRICAL'}
+                    onValueChange={(v) => setValue('type', v, { shouldValidate: true })}
+                    options={[
+                      { value: 'ELECTRICAL', label: 'Electrical' },
+                      { value: 'NATURAL_GAS', label: 'Natural Gas' },
+                      { value: 'COMPRESSED_AIR', label: 'Compressed Air' },
+                      { value: 'WATER', label: 'Water' },
+                      { value: 'STEAM', label: 'Steam' },
+                      { value: 'CHILLED_WATER', label: 'Chilled Water' },
+                    ]}
+                  />
                 </div>
               </div>
               <div>

@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
@@ -429,34 +430,34 @@ export function ProductionRecipesView() {
                 {/* SKU */}
                 <div className="col-span-2 flex flex-col gap-1.5">
                   <Label>Product (SKU) *</Label>
-                  <Select value={form.skuId} onValueChange={v => setForm(f => ({ ...f, skuId: v }))}>
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder="Select product..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {skus.map((s: any) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.itemNumber} — {s.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <EntityPicker
+                    items={skus}
+                    value={form.skuId}
+                    onChange={id => setForm(f => ({ ...f, skuId: id ?? '' }))}
+                    getId={(s: any) => s.id}
+                    getPrimary={(s: any) => s.name}
+                    getSecondary={(s: any) => s.itemNumber}
+                    placeholder="Select product..."
+                    searchPlaceholder="Search by item number or name…"
+                    size="sm"
+                    clearable={false}
+                  />
                 </div>
 
                 {/* Process */}
                 <div className="col-span-2 flex flex-col gap-1.5">
                   <Label>Manufacturing Process (optional)</Label>
-                  <Select value={form.processId || '_none'} onValueChange={v => setForm(f => ({ ...f, processId: v === '_none' ? '' : v }))}>
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder="Link to a process..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="_none">— None —</SelectItem>
-                      {processes.map((p: any) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name} v{p.version}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <EntityPicker
+                    items={processes}
+                    value={form.processId || null}
+                    onChange={id => setForm(f => ({ ...f, processId: id ?? '' }))}
+                    getId={(p: any) => p.id}
+                    getPrimary={(p: any) => p.name}
+                    getSecondary={(p: any) => `v${p.version}`}
+                    placeholder="Link to a process..."
+                    searchPlaceholder="Search processes…"
+                    size="sm"
+                  />
                 </div>
 
                 {/* Code + Version */}
@@ -552,17 +553,19 @@ export function ProductionRecipesView() {
               <div className="p-5 grid grid-cols-2 gap-4">
                 <div className="col-span-2 flex flex-col gap-1.5">
                   <Label>Raw Material *</Label>
-                  <Select value={ingForm.rawMaterialId} onValueChange={v => {
-                    const mat = rawMaterials.find((m: any) => m.id === v);
-                    setIngForm(f => ({ ...f, rawMaterialId: v, unit: mat?.unit ?? f.unit }));
-                  }}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select material..." /></SelectTrigger>
-                    <SelectContent>
-                      {rawMaterials.map((m: any) => (
-                        <SelectItem key={m.id} value={m.id}>{m.code} — {m.name} ({m.unit})</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <EntityPicker
+                    items={rawMaterials}
+                    value={ingForm.rawMaterialId}
+                    onChange={(id, mat) => setIngForm(f => ({ ...f, rawMaterialId: id ?? '', unit: (mat as any)?.unit ?? f.unit }))}
+                    getId={(m: any) => m.id}
+                    getPrimary={(m: any) => m.name}
+                    getSecondary={(m: any) => m.code}
+                    getMeta={(m: any) => <span className="text-muted-foreground">{m.unit}</span>}
+                    placeholder="Select material..."
+                    searchPlaceholder="Search by code or name…"
+                    size="sm"
+                    clearable={false}
+                  />
                 </div>
 
                 <div className="flex flex-col gap-1.5">

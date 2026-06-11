@@ -117,7 +117,7 @@ function woProgress(wo: WorkOrderRef | WorkOrder): number {
 // ─────────────────────────────────────────────────────────────
 
 function POScheduleRow({ po, idx }: { po: ProductionOrder; idx: number }) {
-  const [expanded, setExpanded] = useState(po.status === 'IN_PROGRESS' || po.status === 'RELEASED');
+  const [expanded, setExpanded] = useState(false);
   const cfg = PO_STATUS_CONFIG[po.status];
   const StatusIcon = cfg.icon;
   const progress = poProgress(po);

@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   compress: true,
 
+  // Self-contained server bundle — the production Docker stage copies
+  // .next/standalone and runs `node server.js` (see apps/web/Dockerfile)
+  output: 'standalone',
+
   // Monorepo root so Turbopack resolves cross-package paths
   // (e.g. tailwind content globs to ../../packages/ui) within
   // the filesystem boundary instead of panicking on root escape.

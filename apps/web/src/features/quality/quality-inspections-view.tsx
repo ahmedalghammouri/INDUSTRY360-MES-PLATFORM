@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityPicker } from '@/components/ui/entity-picker';
 import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
@@ -461,18 +462,18 @@ export function QualityInspectionsView() {
             </div>
             <div>
               <Label>Work Order</Label>
-              <Select value={form.workOrderId} onValueChange={v => setForm(f => ({ ...f, workOrderId: v }))}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Link to work order..." /></SelectTrigger>
-                <SelectContent className="max-h-52">
-                  <SelectItem value="__none__">None</SelectItem>
-                  {workOrders.map(wo => (
-                    <SelectItem key={wo.id} value={wo.id}>
-                      <span className="font-mono text-xs">{wo.orderNumber}</span>
-                      {wo.sku?.name && <span className="text-muted-foreground ml-2 text-[10px]">{wo.sku.name}</span>}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityPicker
+                items={workOrders}
+                value={form.workOrderId === '__none__' ? null : (form.workOrderId || null)}
+                onChange={id => setForm(f => ({ ...f, workOrderId: id ?? '__none__' }))}
+                getId={wo => wo.id}
+                getPrimary={wo => wo.orderNumber}
+                getSecondary={wo => wo.sku?.name ?? ''}
+                searchText={wo => `${wo.orderNumber} ${wo.sku?.name ?? ''}`}
+                placeholder="Link to work order..."
+                searchPlaceholder="Search work orders…"
+                className="mt-1"
+              />
             </div>
           </div>
 
@@ -482,19 +483,18 @@ export function QualityInspectionsView() {
               <ClipboardList size={12} className="text-primary" />
               Quality Plan
             </Label>
-            <Select value={form.planId || '__none__'} onValueChange={handlePlanSelect}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select plan..." /></SelectTrigger>
-              <SelectContent className="max-h-52">
-                <SelectItem value="__none__">No plan</SelectItem>
-                {plans.map(p => (
-                  <SelectItem key={p.id} value={p.id}>
-                    <span className="font-mono text-xs">{p.code}</span>
-                    <span className="ml-2">{p.name}</span>
-                    <span className="ml-2 text-muted-foreground text-[10px]">{p.type}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntityPicker
+              items={plans}
+              value={form.planId === '__none__' ? null : (form.planId || null)}
+              onChange={id => handlePlanSelect(id ?? '__none__')}
+              getId={p => p.id}
+              getPrimary={p => p.name}
+              getSecondary={p => p.code}
+              getMeta={p => <span className="text-muted-foreground">{p.type}</span>}
+              placeholder="Select plan..."
+              searchPlaceholder="Search plans…"
+              className="mt-1"
+            />
           </div>
 
           {/* Quality Checklist (quality parameters from plan) */}

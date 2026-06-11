@@ -50,7 +50,7 @@ export function TableRowActions({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-7 w-7 data-[state=open]:bg-muted">
+        <Button variant="ghost" size="icon" className="h-7 w-7 data-[state=open]:bg-muted" onClick={e => e.stopPropagation()}>
           <MoreHorizontal size={14} />
           <span className="sr-only">Row actions</span>
         </Button>
