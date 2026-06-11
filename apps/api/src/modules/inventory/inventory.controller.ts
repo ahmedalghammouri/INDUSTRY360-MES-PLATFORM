@@ -599,16 +599,17 @@ export class InventoryController {
   async createProcess(@CurrentUser() user: RequestUser, @Body() dto: any) {
     const factoryId = user.factoryId ?? dto.factoryId;
     if (!factoryId) throw new NotFoundException('Factory context required');
-    return this.inventoryService.createProcess(factoryId, dto);
+    return this.inventoryService.createProcess(factoryId, dto, user.id);
   }
 
   @Patch('manufacturing-processes/:id')
   @ApiOperation({ summary: 'Update a manufacturing process' })
   async updateProcess(
+    @CurrentUser() user: RequestUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: any,
   ) {
-    return this.inventoryService.updateProcess(id, dto);
+    return this.inventoryService.updateProcess(id, dto, user.id);
   }
 
   @Post('manufacturing-processes/:id/approve')

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
@@ -30,6 +30,8 @@ interface Product {
   code: string;
   name: string;
   category?: string;
+  categoryId?: string | null;
+  baseWeightId?: string | null;
 }
 
 interface BOMSummary {
@@ -57,11 +59,17 @@ interface ProcessStep {
 
 interface ProcessSummary {
   id: string;
-  skuId: string;
+  skuId: string | null;
   version: string;
   isActive: boolean;
   status: string;
-  steps: ProcessStep[];
+  steps?: ProcessStep[];
+  // Scope — a process can cover many products (not just a single skuId)
+  scopeType?: 'PRODUCT' | 'CATEGORY' | 'BASE_WEIGHT' | 'PRODUCT_LIST';
+  categoryId?: string | null;
+  baseWeightId?: string | null;
+  skuLinks?: Array<{ skuId: string }>;
+  routingSteps?: Array<{ stepNumber: number; operationName?: string; name?: string; outUnit?: string; outputUnit?: string }>;
 }
 
 type CoverageLevel = 'Complete' | 'Partial' | 'Missing';
@@ -96,6 +104,29 @@ function recipeStatusVariant(status: string): string {
     default:
       return 'bg-muted text-muted-foreground border-border';
   }
+}
+
+// A process is scoped to many products (PRODUCT / PRODUCT_LIST / CATEGORY / BASE_WEIGHT),
+// so resolve by scope — not just a direct skuId. Higher rank = more specific match wins.
+const SCOPE_RANK: Record<string, number> = { PRODUCT: 4, PRODUCT_LIST: 3, BASE_WEIGHT: 2, CATEGORY: 1 };
+
+function processMatchScore(p: ProcessSummary, product: Product): number {
+  const scope = p.scopeType ?? (p.skuId ? 'PRODUCT' : undefined);
+  switch (scope) {
+    case 'PRODUCT':      return p.skuId && p.skuId === product.id ? SCOPE_RANK.PRODUCT : 0;
+    case 'PRODUCT_LIST': return p.skuLinks?.some(l => l.skuId === product.id) ? SCOPE_RANK.PRODUCT_LIST : 0;
+    case 'BASE_WEIGHT':  return p.baseWeightId && p.baseWeightId === product.baseWeightId ? SCOPE_RANK.BASE_WEIGHT : 0;
+    case 'CATEGORY':     return p.categoryId && p.categoryId === product.categoryId ? SCOPE_RANK.CATEGORY : 0;
+    default:             return 0;
+  }
+}
+
+// API returns `routingSteps` ({operationName, outUnit}); the card reads `steps` ({name, outputUnit}).
+function normalizeSteps(p: ProcessSummary): ProcessStep[] {
+  if (p.steps && p.steps.length) return [...p.steps].sort((a, b) => a.stepNumber - b.stepNumber);
+  return (p.routingSteps ?? [])
+    .map(s => ({ stepNumber: s.stepNumber, name: s.name ?? s.operationName ?? `Step ${s.stepNumber}`, outputUnit: s.outputUnit ?? s.outUnit ?? '' }))
+    .sort((a, b) => a.stepNumber - b.stepNumber);
 }
 
 function computeCoverage(bom: BOMSummary | null, recipe: RecipeSummary | null, process: ProcessSummary | null): CoverageLevel {
@@ -187,20 +218,30 @@ export default function PlmDesignView() {
     return map;
   }, [recipes]);
 
-  const processByProduct = useMemo(() => {
-    const map = new Map<string, ProcessSummary>();
+  // Resolve the best-matching process per product by scope (PRODUCT > PRODUCT_LIST >
+  // BASE_WEIGHT > CATEGORY); tie-break active first, then latest version.
+  const resolveProcess = useCallback((product: Product): ProcessSummary | null => {
+    let best: ProcessSummary | null = null;
+    let bestScore = 0;
     for (const p of processes) {
-      if (!map.has(p.skuId)) map.set(p.skuId, p);
+      const score = processMatchScore(p, product);
+      if (score === 0) continue;
+      const isBetter =
+        score > bestScore ||
+        (score === bestScore && best != null &&
+          ((p.isActive && !best.isActive) ||
+            (p.isActive === best.isActive && (p.version ?? '') > (best.version ?? ''))));
+      if (best == null || isBetter) { best = p; bestScore = score; }
     }
-    return map;
+    return best ? { ...best, steps: normalizeSteps(best) } : null;
   }, [processes]);
 
   const rows: DesignRow[] = useMemo(() => products.map(product => {
     const bom = bomByProduct.get(product.id) ?? null;
     const recipe = recipeByProduct.get(product.id) ?? null;
-    const process = processByProduct.get(product.id) ?? null;
+    const process = resolveProcess(product);
     return { product, bom, recipe, process, coverage: computeCoverage(bom, recipe, process) };
-  }), [products, bomByProduct, recipeByProduct, processByProduct]);
+  }), [products, bomByProduct, recipeByProduct, resolveProcess]);
 
   // ── Filtering ─────────────────────────────────────────────────────────────
 

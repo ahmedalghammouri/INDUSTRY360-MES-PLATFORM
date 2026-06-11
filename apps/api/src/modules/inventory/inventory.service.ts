@@ -1535,7 +1535,7 @@ export class InventoryService {
    * Process materials changed → derived BOMs become stale and an ECR is raised
    * through the PLM workflow so the change is reviewed.
    */
-  private async markDerivedBomsStale(processId: string, factoryId: string) {
+  private async markDerivedBomsStale(processId: string, factoryId: string, userId?: string) {
     try {
       const linked = await this.prisma.bOMHeader.findMany({
         where: { processId, sourceType: { in: ['DERIVED_FROM_PROCESS', 'DRAFT_FOR_PROCESS'] }, isStale: false },
@@ -1560,6 +1560,7 @@ export class InventoryService {
             status: 'SUBMITTED',
             priority: 'MEDIUM',
             skuId: b.skuId,
+            requestedById: userId ?? null,
             reason: 'Process is the source of truth; derived BOM summary no longer matches.',
           },
         });
@@ -1664,7 +1665,7 @@ export class InventoryService {
       isOptional?: boolean;
       dependencies?: Array<{ fromStepNumber: number; type: string; lagMins?: number }>;
     }>;
-  }) {
+  }, userId?: string) {
     const version = dto.version ?? '1.0';
     const scopeType = dto.scopeType ?? 'PRODUCT';
     const mapMaterial = await this.stepMaterialMapper(factoryId, dto.steps);
@@ -1765,7 +1766,7 @@ export class InventoryService {
       skuId: process.skuId,
       title: `New process '${process.name}' v${process.version} — awaiting approval`,
       description: `Manufacturing process created with ${dto.steps.length} routing step(s). Review the routing, machines, unit flow and input materials, approve this change request, then approve the process.`,
-    });
+    }, userId);
 
     return { ...process, changeRequest: cr };
   }
@@ -1798,7 +1799,7 @@ export class InventoryService {
       isOptional?: boolean;
       dependencies?: Array<{ fromStepNumber: number; type: string; lagMins?: number }>;
     }>;
-  }) {
+  }, userId?: string) {
     const p = await this.prisma.manufacturingProcess.findUnique({ where: { id } });
     if (!p) throw new NotFoundException('Manufacturing process not found');
 
@@ -1831,7 +1832,7 @@ export class InventoryService {
     if (steps && steps.length > 0) {
       // Steps (and their materials) are being replaced → any BOM derived from
       // this process is now stale; flag it and raise a BOM_CHANGE ECR.
-      await this.markDerivedBomsStale(id, p.factoryId);
+      await this.markDerivedBomsStale(id, p.factoryId, userId);
 
       // Delete all existing steps (cascades to StepDependency via onDelete: Cascade)
       await this.prisma.routingStep.deleteMany({ where: { processId: id } });
@@ -1911,7 +1912,7 @@ export class InventoryService {
         skuId: p.skuId,
         title: `Process '${p.name}' v${p.version} modified — awaiting re-approval`,
         description: `Routing steps were replaced (${steps.length} step(s)).${wasApproved ? ' The process was approved and has been reverted to draft.' : ''} Approve this change request, then re-approve the process — its product BOMs will regenerate automatically.`,
-      });
+      }, userId);
 
       return { ...process, ...(wasApproved && { approvedAt: null }), changeRequest: cr };
     }
@@ -1930,6 +1931,7 @@ export class InventoryService {
     processId: string,
     factoryId: string,
     info: { skuId?: string | null; title: string; description: string },
+    userId?: string,
   ) {
     try {
       const year = new Date().getFullYear();
@@ -1947,6 +1949,7 @@ export class InventoryService {
           priority: 'MEDIUM',
           skuId: info.skuId ?? null,
           processId,
+          requestedById: userId ?? null,
           reason: 'Process create/update governance — routing changes require PLM review.',
         },
       });

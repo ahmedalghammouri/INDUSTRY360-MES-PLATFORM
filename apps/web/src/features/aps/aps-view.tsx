@@ -359,7 +359,7 @@ export function ApsView() {
             </thead>
             <tbody>
               {(m?.lateOrders ?? []).length === 0 ? (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-emerald-500">All scheduled orders are on time. 🎉</td></tr>
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-emerald-500">All scheduled orders are on time.</td></tr>
               ) : m!.lateOrders.map((o) => (
                 <tr key={o.orderNumber} className="border-t border-border/50">
                   <td className="px-4 py-2 font-mono text-xs">{o.orderNumber}</td>
