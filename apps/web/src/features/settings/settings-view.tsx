@@ -71,13 +71,10 @@ export function SettingsView() {
     }
   };
 
-  const handleSetupMFA = async () => {
-    try {
-      const data = await authService.setupMFA();
-      setMfaSetupData(data);
-    } catch {
-      toast({ title: 'Error', description: 'Failed to setup MFA.', variant: 'destructive' });
-    }
+  // MFA enrollment endpoint is not implemented on the backend yet —
+  // the button stays visible but disabled until /auth/mfa/setup exists.
+  const handleSetupMFA = () => {
+    toast({ title: 'Coming soon', description: 'MFA enrollment is not available yet.' });
   };
 
   return (

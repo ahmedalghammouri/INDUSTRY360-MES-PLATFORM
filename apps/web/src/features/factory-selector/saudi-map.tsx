@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
 import { Factory } from './factories';
 
@@ -136,7 +136,9 @@ const CSS = `
 export function SaudiMap({ factories, selectedId, hoveredId, onHover, onSelect }: SaudiMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
+  const leafletRef = useRef<typeof import('leaflet') | null>(null);
   const markersRef = useRef<Map<string, LeafletMarker>>(new Map());
+  const [mapReady, setMapReady] = useState(false);
 
   // Stable callback refs — Leaflet event listeners capture these once
   const onSelectRef = useRef(onSelect);
@@ -198,37 +200,55 @@ export function SaudiMap({ factories, selectedId, hoveredId, onHover, onSelect }
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       }).addTo(map);
 
-      // Create a marker per factory
-      factories.forEach((factory) => {
-        const icon = L.divIcon({
-          html: markerHTML(factory),
-          className: '',
-          iconSize: [70, 58],
-          iconAnchor: [35, 28],
-        });
+      // Default view: Saudi Arabia — markers fit the bounds once factories load
+      map.setView([24.2, 45.0], 6);
 
-        const marker = L.marker([factory.lat, factory.lng], { icon, riseOnHover: true })
-          .addTo(map!)
-          .on('click', () => onSelectRef.current(factory))
-          .on('mouseover', () => onHoverRef.current(factory.id))
-          .on('mouseout', () => onHoverRef.current(null));
-
-        markersRef.current.set(factory.id, marker);
-      });
-
-      // Fit view to contain all markers
-      const bounds = L.latLngBounds(factories.map((f) => [f.lat, f.lng] as [number, number]));
-      map.fitBounds(bounds, { padding: [55, 55] });
-
+      leafletRef.current = L;
       mapRef.current = map;
+      setMapReady(true);
     });
 
     return () => {
       map?.remove();
       mapRef.current = null;
+      leafletRef.current = null;
       markersRef.current.clear();
+      setMapReady(false);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync markers whenever the factory list changes (it loads async from the API)
+  useEffect(() => {
+    const map = mapRef.current;
+    const L = leafletRef.current;
+    if (!mapReady || !map || !L) return;
+
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current.clear();
+
+    factories.forEach((factory) => {
+      const icon = L.divIcon({
+        html: markerHTML(factory),
+        className: '',
+        iconSize: [70, 58],
+        iconAnchor: [35, 28],
+      });
+
+      const marker = L.marker([factory.lat, factory.lng], { icon, riseOnHover: true })
+        .addTo(map)
+        .on('click', () => onSelectRef.current(factory))
+        .on('mouseover', () => onHoverRef.current(factory.id))
+        .on('mouseout', () => onHoverRef.current(null));
+
+      markersRef.current.set(factory.id, marker);
+    });
+
+    // Fit view to contain all markers — only when bounds are valid (≥1 point)
+    if (factories.length > 0) {
+      const bounds = L.latLngBounds(factories.map((f) => [f.lat, f.lng] as [number, number]));
+      if (bounds.isValid()) map.fitBounds(bounds, { padding: [55, 55], maxZoom: 7 });
+    }
+  }, [factories, mapReady]);
 
   return <div ref={containerRef} className="absolute inset-0" style={{ zIndex: 0 }} />;
 }

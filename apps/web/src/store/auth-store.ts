@@ -15,6 +15,7 @@ export interface User {
   jobTitle?: string;
   phone?: string;
   avatarUrl?: string;
+  mfaEnabled?: boolean;
   language: 'en' | 'ar';
   timezone: string;
   // Factory embedded in user profile response

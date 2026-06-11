@@ -48,7 +48,7 @@ const TYPE_COLORS: Record<string, string> = {
   CHILLED_WATER: '#10b981',
 };
 
-const TYPE_ICONS: Record<string, React.FC<{ className?: string }>> = {
+const TYPE_ICONS: Record<string, React.FC<{ className?: string; style?: React.CSSProperties }>> = {
   ELECTRICAL: Zap,
   NATURAL_GAS: Thermometer,
   COMPRESSED_AIR: Gauge,
