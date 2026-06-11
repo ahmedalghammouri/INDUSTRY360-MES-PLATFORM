@@ -4,7 +4,7 @@ import type { User } from '@prisma/client';
 
 import { ApsService } from './aps.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { RunScheduleDto, RescheduleJobDto, CtpDto } from './dto/aps.dto';
+import { RunScheduleDto, RescheduleJobDto, CtpDto, SaveScheduleDto } from './dto/aps.dto';
 
 @ApiTags('APS — Advanced Planning & Scheduling')
 @ApiBearerAuth('JWT-auth')
@@ -23,6 +23,13 @@ export class ApsController {
   @ApiOperation({ summary: 'Recalculate a feasible plan (finite capacity, precedence, priority, due dates)' })
   runSchedule(@CurrentUser() user: User, @Body() dto: RunScheduleDto) {
     return this.aps.runSchedule(user.factoryId, dto);
+  }
+
+  @Post('save-schedule')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Commit a reviewed (dry-run) plan to the database' })
+  saveSchedule(@CurrentUser() user: User, @Body() dto: SaveScheduleDto) {
+    return this.aps.saveSchedule(user.factoryId, dto.updates);
   }
 
   @Post('reschedule-job')

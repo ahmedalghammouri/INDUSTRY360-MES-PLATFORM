@@ -7,7 +7,7 @@ import {
   ClipboardList, RefreshCw, PauseCircle, XCircle, Trash2,
   Pencil, Play, MoreHorizontal, Zap, Eye, ChevronDown,
   BarChart3, User, TrendingUp, Info, Layers, GitBranch,
-  CheckSquare, Circle, Loader2,
+  CheckSquare, Circle, Loader2, AlertTriangle, CalendarClock,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -27,6 +27,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
+import { AutoGenerateWODialog } from './auto-generate-wo-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SortableHeader } from '@/components/ui/sortable-header';
 import { useSortedData } from '@/lib/use-sorted-data';
@@ -482,214 +483,6 @@ function CreateWODialog({ po, open, onClose }: CreateWODialogProps) {
 // Auto-Generate WOs Dialog
 // ─────────────────────────────────────────────────────────────
 
-interface AutoGenDialogProps { po: ProductionOrder; open: boolean; onClose: () => void; }
-
-function AutoGenDialog({ po, open, onClose }: AutoGenDialogProps) {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const [plannedStart, setStart] = useState(toLocalInput(po.plannedStart));
-  const [plannedEnd,   setEnd]   = useState(toLocalInput(po.plannedEnd));
-
-  const { data: preview, isLoading: previewLoading } = useQuery({
-    queryKey: ['po-autogen-preview', po.id],
-    queryFn: () => api.get(`/production/production-orders/${po.id}/auto-generate-preview`),
-    enabled: open,
-    staleTime: 0,
-  });
-  const prev = preview as any;
-
-  const genMut = useMutation({
-    mutationFn: () => api.post(`/production/production-orders/${po.id}/auto-generate-work-orders`, {
-      plannedStart: new Date(plannedStart).toISOString(),
-      plannedEnd:   new Date(plannedEnd).toISOString(),
-    }),
-    onSuccess: (res: any) => {
-      qc.invalidateQueries({ queryKey: ['production-orders'] });
-      qc.invalidateQueries({ queryKey: ['work-orders'] });
-      qc.invalidateQueries({ queryKey: ['job-orders'] });
-      const joCount = res?.jobOrdersCreated ?? 0;
-      toast({
-        title: `Work order created + ${joCount} job order${joCount !== 1 ? 's' : ''} dispatched`,
-        description: `Linked to ${po.orderNumber}`,
-      });
-      onClose();
-    },
-    onError: (e: any) => toast({ variant: 'destructive', title: 'Error', description: e?.response?.data?.message ?? 'Failed' }),
-  });
-
-  const joSteps: any[] = prev?.jobOrdersToCreate ?? prev?.workOrdersToCreate ?? [];
-  const isDispatchMode = prev?.mode === 'dispatch' || joSteps.length > 1;
-
-  return (
-    <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-yellow-400" />
-            Auto-Generate Work Order
-          </DialogTitle>
-          <DialogDescription>
-            {po.orderNumber} · {po.sku?.name} · {po.targetQty.toLocaleString()} {po.unit}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4 py-2">
-          {/* Dates */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Production Start *</Label>
-              <Input type="datetime-local" value={plannedStart} onChange={e => setStart(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Production End *</Label>
-              <Input type="datetime-local" value={plannedEnd} onChange={e => setEnd(e.target.value)} />
-            </div>
-          </div>
-
-          {/* Preview */}
-          {previewLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 3 }).map((_, i) => <div key={i} className="shimmer h-10 rounded-lg" />)}
-            </div>
-          ) : prev ? (
-            <div className="space-y-3">
-              {/* Model explanation + recipe/process badges */}
-              <div className="flex items-center gap-3 flex-wrap text-xs">
-                {isDispatchMode && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border border-purple-500/20">
-                    <Layers className="w-3.5 h-3.5 text-purple-400" />
-                    <span className="text-purple-300 font-medium">
-                      1 Work Order → {joSteps.length} Job Orders
-                    </span>
-                  </div>
-                )}
-                {prev.recipe && (() => {
-                  const approved = prev.recipe.status === 'APPROVED';
-                  return (
-                    <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border ${approved ? 'border-green-500/20' : 'border-amber-500/20'}`}>
-                      {approved
-                        ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
-                        : <AlertCircle className="w-3.5 h-3.5 text-amber-400" />}
-                      <span className={`font-medium ${approved ? 'text-green-300' : 'text-amber-300'}`}>
-                        Recipe: {prev.recipe.code} v{prev.recipe.version}
-                        {!approved && <span className="ml-1 opacity-70">({prev.recipe.status})</span>}
-                      </span>
-                    </div>
-                  );
-                })()}
-                {prev.process && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border border-blue-500/20">
-                    <BarChart3 className="w-3.5 h-3.5 text-blue-400" />
-                    <span className="text-blue-300 font-medium">{prev.process.name}</span>
-                    {prev.process.totalCycleTimeMins && (
-                      <span className="text-muted-foreground">({prev.process.totalCycleTimeMins} min)</span>
-                    )}
-                  </div>
-                )}
-                {!prev.recipe && !prev.process && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-card border border-amber-500/20">
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-                    <span className="text-amber-300">No recipe found — using fallback</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Warning */}
-              {prev.warning && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
-                  <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                  {prev.warning}
-                </div>
-              )}
-
-              {/* Dispatch list preview */}
-              <div className="glass-card rounded-xl overflow-hidden">
-                <div className="px-4 py-2 border-b border-border flex items-center justify-between">
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    {isDispatchMode ? `Dispatch List — ${joSteps.length} Job Order${joSteps.length !== 1 ? 's' : ''}` : `Work Order Steps (${joSteps.length})`}
-                  </span>
-                  {isDispatchMode && (
-                    <span className="text-xs text-muted-foreground">SCHEDULED → READY on execution</span>
-                  )}
-                </div>
-                {joSteps.length === 0 ? (
-                  <div className="p-6 text-center text-sm text-muted-foreground">
-                    No routing steps found. Assign machines to routing steps first.
-                  </div>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border/50">
-                        {['#', 'Operation', 'Machine / Cell', 'Qty', 'Est. Duration'].map(h => (
-                          <th key={h} className="text-left p-3 text-xs text-muted-foreground font-medium">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {joSteps.map((step: any, i: number) => (
-                        <tr key={i} className="border-b border-border/30">
-                          <td className="p-3 text-xs font-mono text-brand-400">{step.stepNumber}</td>
-                          <td className="p-3 text-xs font-medium">{step.operationName}</td>
-                          <td className="p-3">
-                            <div className="flex flex-col gap-0.5">
-                              {step.machine ? (
-                                <div className="flex items-center gap-1.5 text-xs">
-                                  <Cpu className="w-3 h-3 text-muted-foreground" />
-                                  {step.machine.name}
-                                </div>
-                              ) : (
-                                <span className="text-xs text-amber-400">No machine</span>
-                              )}
-                              {step.workCenter && (
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <Layers className="w-2.5 h-2.5" />
-                                  {step.workCenter.name}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-3 text-xs">
-                            {(step.plannedQtyOut ?? step.plannedQty ?? po.targetQty).toLocaleString()}
-                            {' '}<span className="text-muted-foreground font-medium">{step.outputUnit ?? po.unit}</span>
-                          </td>
-                          <td className="p-3 text-xs text-muted-foreground">
-                            {step.estimatedDurationMins ? `${Math.round(step.estimatedDurationMins)} min` : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {prev.existingWOCount > 0 && (
-                <p className="text-xs text-amber-400/80">
-                  ⚠ This PO already has <span className="font-medium">{prev.existingWOCount}</span> work order(s).
-                </p>
-              )}
-            </div>
-          ) : null}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={() => genMut.mutate()}
-            disabled={genMut.isPending || !prev?.canGenerate || !plannedStart || !plannedEnd}
-            className="gap-2"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            {genMut.isPending
-              ? 'Generating…'
-              : isDispatchMode
-                ? `Generate 1 Work Order + ${joSteps.length} Job Orders`
-                : `Generate Work Order`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────
 // PO Action Menu (inline in table row and detail sheet)
@@ -1512,7 +1305,7 @@ export function ProductionOrdersView() {
       {createWOFor && <CreateWODialog po={createWOFor} open={!!createWOFor} onClose={() => setCreateWOFor(null)} />}
 
       {/* Auto-generate WOs */}
-      {autoGenFor && <AutoGenDialog po={autoGenFor} open={!!autoGenFor} onClose={() => setAutoGenFor(null)} />}
+      {autoGenFor && <AutoGenerateWODialog po={autoGenFor} open={!!autoGenFor} onClose={() => setAutoGenFor(null)} />}
 
       {/* Hold */}
       <ReasonDialog

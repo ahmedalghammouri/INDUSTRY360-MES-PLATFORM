@@ -39,6 +39,36 @@ export function useRunSchedule() {
   });
 }
 
+/** Recalculate as a DRY-RUN preview — returns the plan WITHOUT writing to the DB. */
+export function useRunScheduleDry() {
+  return useMutation({
+    mutationFn: (body: { startFrom?: string; workOrderId?: string } = {}) =>
+      apsService.runSchedule({ ...body, dryRun: true }),
+    onError: (e: unknown) => toast({
+      title: 'Could not compute the plan',
+      description: (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Please try again',
+      variant: 'destructive',
+    }),
+  });
+}
+
+/** Commit a reviewed (dry-run) plan to the database. */
+export function useSaveSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (updates: Array<{ id: string; start: string; end: string }>) => apsService.saveSchedule(updates),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['aps'] });
+      toast({ title: `Plan saved — ${res.saved} operation${res.saved === 1 ? '' : 's'} updated` });
+    },
+    onError: (e: unknown) => toast({
+      title: 'Could not save the plan',
+      description: (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Please try again',
+      variant: 'destructive',
+    }),
+  });
+}
+
 export function useRescheduleJob() {
   const qc = useQueryClient();
   return useMutation({

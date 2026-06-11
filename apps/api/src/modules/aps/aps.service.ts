@@ -124,6 +124,22 @@ export class ApsService {
         if (e > horizon) machineFree.set(j.machineId, Math.max(machineFree.get(j.machineId) ?? horizon, e));
       }
     }
+
+    // Planned downtime (breaks/cleaning/PM logged as planned events) makes a
+    // machine unavailable until the stop ends — pre-occupy it so operations are
+    // pushed past the planned stoppage that intersects the horizon.
+    const plannedDowns = await this.prisma.downtimeEvent.findMany({
+      where: {
+        factoryId: fid, isPlanned: true,
+        OR: [{ endTime: null }, { endTime: { gt: new Date(horizon) } }],
+      },
+      select: { machineId: true, endTime: true },
+    });
+    for (const d of plannedDowns) {
+      if (!d.machineId || !d.endTime) continue;
+      const e = +d.endTime;
+      if (e > horizon) machineFree.set(d.machineId, Math.max(machineFree.get(d.machineId) ?? horizon, e));
+    }
     const jobStart = new Map<string, number>();      // computed start per operation
     const jobEnd = new Map<string, number>();        // computed end per operation
     const updates: { id: string; start: number; end: number }[] = [];
@@ -221,6 +237,18 @@ export class ApsService {
       }
     }
 
+    // Dry-run: return the computed plan for review on the Gantt WITHOUT writing.
+    // The user reviews (undo/redo) and commits explicitly via saveSchedule.
+    if (dto.dryRun) {
+      return {
+        dryRun: true,
+        scheduled: updates.length,
+        scopedToWorkOrder: dto.workOrderId ?? null,
+        updates: updates.map((u) => ({ id: u.id, start: new Date(u.start).toISOString(), end: new Date(u.end).toISOString() })),
+        ...this.metricsFrom(jobs, jobEnd, horizon),
+      };
+    }
+
     await this.prisma.$transaction(
       updates.map((u) =>
         this.prisma.jobOrder.update({
@@ -230,7 +258,36 @@ export class ApsService {
       ),
     );
 
-    return { scheduled: updates.length, scopedToWorkOrder: dto.workOrderId ?? null, ...this.metricsFrom(jobs, jobEnd, horizon) };
+    return { dryRun: false, scheduled: updates.length, scopedToWorkOrder: dto.workOrderId ?? null, ...this.metricsFrom(jobs, jobEnd, horizon) };
+  }
+
+  /**
+   * Commit a reviewed plan (from a dry-run) to the database. Only open job
+   * orders of this factory are updated; the rest are ignored defensively.
+   */
+  async saveSchedule(factoryId: string | null, updates: Array<{ id: string; start: string; end: string }>) {
+    const fid = this.requireFactory(factoryId);
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new BadRequestException('No plan changes to save.');
+    }
+    const ids = updates.map((u) => u.id);
+    const owned = await this.prisma.jobOrder.findMany({
+      where: { id: { in: ids }, factoryId: fid, status: { in: OPEN_JO } },
+      select: { id: true },
+    });
+    const ownedIds = new Set(owned.map((o) => o.id));
+    const valid = updates.filter((u) => ownedIds.has(u.id));
+    if (valid.length === 0) throw new BadRequestException('No matching open operations to update.');
+
+    await this.prisma.$transaction(
+      valid.map((u) =>
+        this.prisma.jobOrder.update({
+          where: { id: u.id },
+          data: { plannedStart: new Date(u.start), plannedEnd: new Date(u.end) },
+        }),
+      ),
+    );
+    return { saved: valid.length, skipped: updates.length - valid.length };
   }
 
   /** Aggregate schedule KPIs from computed ends. */

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsUUID, IsDateString, IsNumber, Min, IsInt } from 'class-validator';
+import { IsOptional, IsUUID, IsDateString, IsNumber, Min, IsInt, IsBoolean, IsArray } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class RunScheduleDto {
@@ -10,6 +10,16 @@ export class RunScheduleDto {
   @ApiPropertyOptional({ description: 'Recalculate ONLY this work order — other open jobs keep their plan and pre-occupy their machines' })
   @IsOptional() @IsUUID('4')
   workOrderId?: string;
+
+  @ApiPropertyOptional({ description: 'Compute the plan and return it WITHOUT writing to the database (preview for the Gantt — review, then Save)' })
+  @IsOptional() @IsBoolean()
+  dryRun?: boolean;
+}
+
+export class SaveScheduleDto {
+  @ApiProperty({ description: 'The reviewed plan to commit — job order new start/end windows', type: [Object] })
+  @IsArray()
+  updates!: Array<{ id: string; start: string; end: string }>;
 }
 
 export class RescheduleJobDto {

@@ -27,6 +27,8 @@ import {
   HoldProductionOrderDto,
   CancelProductionOrderDto,
   AutoGenerateWOsDto,
+  CreateRescheduleRequestDto,
+  ReviewRescheduleRequestDto,
 } from './dto/work-order.dto';
 
 interface RequestUser {
@@ -508,12 +510,48 @@ export class ProductionController {
   }
 
   @Get('production-orders/:id/auto-generate-preview')
-  @ApiOperation({ summary: 'Preview work orders that would be auto-generated from recipe/routing — no changes made' })
+  @ApiOperation({ summary: 'Preview work orders + smart finish time (overlap-aware schedule + planned stoppage) — no changes made' })
+  @ApiQuery({ name: 'from', required: false, description: 'Schedule from this instant (defaults to PO planned start)' })
   async previewAutoGenerateWOs(
     @CurrentUser() user: RequestUser,
     @Param('id', ParseUUIDPipe) id: string,
+    @Query('from') from?: string,
   ) {
-    return this.productionService.previewAutoGenerateWOs(user.factoryId, id);
+    return this.productionService.previewAutoGenerateWOs(user.factoryId, id, from);
+  }
+
+  // ── Reschedule requests (governance for over-due smart finish) ──
+  @Get('reschedule-requests')
+  @ApiOperation({ summary: 'List reschedule requests (optionally by status / production order)' })
+  async listRescheduleRequests(
+    @CurrentUser() user: RequestUser,
+    @Query('status') status?: string,
+    @Query('productionOrderId') productionOrderId?: string,
+  ) {
+    return this.productionService.listRescheduleRequests(user.factoryId, { status, productionOrderId });
+  }
+
+  @Post('production-orders/:id/reschedule-requests')
+  @AuditLog('RESCHEDULE_REQUEST_CREATE')
+  @ApiOperation({ summary: 'Raise a reschedule request when the smart finish exceeds the due date' })
+  async createRescheduleRequest(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateRescheduleRequestDto,
+  ) {
+    return this.productionService.createRescheduleRequest(user.factoryId, user.id, id, dto);
+  }
+
+  @Patch('reschedule-requests/:id/review')
+  @RequirePermissions('production:manage')
+  @AuditLog('RESCHEDULE_REQUEST_REVIEW')
+  @ApiOperation({ summary: 'Approve or reject a reschedule request' })
+  async reviewRescheduleRequest(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReviewRescheduleRequestDto,
+  ) {
+    return this.productionService.reviewRescheduleRequest(user.factoryId, user.id, id, dto.approve, dto.reason);
   }
 
   @Post('production-orders/:id/auto-generate-work-orders')

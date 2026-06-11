@@ -5,6 +5,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { findProcessForSku } from '../../common/process-scope.util';
+import { scheduleOps, type SchedOp } from '../scheduling/op-scheduler';
 import { OEEService } from './oee.service';
 import { KpiService } from './kpi.service';
 import { ApsService } from '../aps/aps.service';
@@ -810,7 +811,7 @@ export class ProductionService {
     return this.convertUnits(prevQty, prevUnit, outputUnit, pkg);
   }
 
-  async previewAutoGenerateWOs(factoryId: string | null, poId: string): Promise<any> {
+  async previewAutoGenerateWOs(factoryId: string | null, poId: string, fromIso?: string): Promise<any> {
     const factoryFilter = factoryId ? { factoryId } : {};
     const po = await this.prisma.productionOrder.findFirst({
       where: { id: poId, ...factoryFilter, deletedAt: null },
@@ -830,6 +831,8 @@ export class ProductionService {
       include: {
         machine: { select: { id: true, name: true, code: true, machineType: true } },
         workCenterRef: { select: { id: true, name: true, code: true, level: true } },
+        // Typed precedence (FS/SS/SF/FF + lag) — drives overlap-aware scheduling
+        predecessors: { select: { fromStepId: true, type: true, lagMins: true } },
       },
     };
 
@@ -879,6 +882,7 @@ export class ProductionService {
         ?? ((step as any).cycleTimeMins != null ? (step as any).cycleTimeMins * 60 : null);
 
       jobOrdersToCreate.push({
+        stepId: (step as any).id,
         stepNumber: (step as any).stepNumber,
         operationName: (step as any).operationName,
         machine: resolvedMachine
@@ -898,7 +902,68 @@ export class ProductionService {
             ? process.totalCycleTimeMins / rawSteps.length
             : null),
         setupTimeMins: (step as any).setupTimeMins ?? 0,
+        // precedence for the overlap-aware finish-time estimate
+        predecessors: (step as any).predecessors ?? [],
       });
+    }
+
+    // ── Smart finish-time: schedule the steps respecting their relationships
+    // (overlap where SS/FF allow), seed each machine with its existing plan,
+    // then add the planned stoppage (breaks/cleaning/planned downtime) that
+    // intersects the run window. Surfaces a realistic completion time. ──
+    const horizon = fromIso ? new Date(fromIso).getTime() : (po.plannedStart ? +po.plannedStart : Date.now());
+    let smart: {
+      computedFinish: string | null;
+      workContentMins: number;
+      plannedStoppageMins: number;
+      totalDurationMins: number;
+      exceedsDue: boolean;
+      dueDate: string | null;
+    } | null = null;
+    if (jobOrdersToCreate.length > 0) {
+      const machineIds = [...new Set(jobOrdersToCreate.map((s) => s.machine?.id).filter(Boolean) as string[])];
+      const machineFree = await this.seedMachineFree(factoryId, machineIds, horizon);
+      const ops: SchedOp[] = jobOrdersToCreate.map((s) => {
+        const dep = (s.predecessors ?? []).find((d: any) => jobOrdersToCreate.some((x) => x.stepId === d.fromStepId));
+        return {
+          id: s.stepId,
+          machineId: s.machine?.id ?? null,
+          durationMs: Math.max((s.estimatedDurationMins ?? 5) * 60_000, 60_000),
+          predecessorId: dep?.fromStepId ?? null,
+          predecessorType: (dep?.type ?? 'FINISH_TO_START') as any,
+          predecessorLagMins: dep?.lagMins ?? 0,
+          sequenceOrder: s.stepNumber,
+        };
+      });
+      // No routed deps → fall back to a sequential FS chain by step order
+      if (ops.every((o) => !o.predecessorId)) {
+        const bySeq = [...ops].sort((a, b) => a.sequenceOrder - b.sequenceOrder);
+        for (let i = 1; i < bySeq.length; i++) {
+          bySeq[i].predecessorId = bySeq[i - 1].id;
+          bySeq[i].predecessorType = 'FINISH_TO_START' as any;
+        }
+      }
+      const sched = scheduleOps(ops, horizon, machineFree);
+      const workContentMins = Math.round((sched.finish - horizon) / 60_000);
+      const stoppage = await this.plannedStoppageMins(factoryId, horizon, sched.finish, machineIds);
+      const totalDurationMins = workContentMins + stoppage;
+      const computedFinishMs = horizon + totalDurationMins * 60_000;
+      // Attach the computed window onto each step for the preview table
+      for (const s of jobOrdersToCreate) {
+        const st = sched.start.get(s.stepId);
+        const en = sched.end.get(s.stepId);
+        s.plannedStart = st != null ? new Date(st).toISOString() : null;
+        s.plannedEnd = en != null ? new Date(en).toISOString() : null;
+      }
+      const dueMs = po.plannedEnd ? +po.plannedEnd : null;
+      smart = {
+        computedFinish: new Date(computedFinishMs).toISOString(),
+        workContentMins,
+        plannedStoppageMins: stoppage,
+        totalDurationMins,
+        exceedsDue: dueMs != null && computedFinishMs > dueMs,
+        dueDate: dueMs != null ? new Date(dueMs).toISOString() : null,
+      };
     }
 
     const existingWOCount = await this.prisma.workOrder.count({
@@ -953,16 +1018,86 @@ export class ProductionService {
       canGenerate: true,
       warning: warnings.length > 0 ? warnings.join(' | ') : null,
       mode: 'dispatch', // signals the UI that we create 1 WO + N JOs
+      smart, // computed finish time + planned-stoppage breakdown + exceedsDue
     };
+  }
+
+  /** Seed next-free instant per machine from its existing open plan (finite capacity). */
+  private async seedMachineFree(
+    factoryId: string | null, machineIds: string[], horizon: number,
+  ): Promise<Map<string, number>> {
+    const free = new Map<string, number>();
+    if (machineIds.length === 0) return free;
+    const open = await this.prisma.jobOrder.findMany({
+      where: {
+        ...(factoryId ? { factoryId } : {}),
+        machineId: { in: machineIds },
+        status: { in: ['SCHEDULED', 'READY', 'EXECUTING', 'PAUSED'] as any },
+        plannedEnd: { not: null },
+      },
+      select: { machineId: true, plannedEnd: true },
+    });
+    for (const j of open) {
+      if (!j.machineId || !j.plannedEnd) continue;
+      const e = +j.plannedEnd;
+      if (e > horizon) free.set(j.machineId, Math.max(free.get(j.machineId) ?? horizon, e));
+    }
+    return free;
+  }
+
+  /**
+   * Planned stoppage (minutes) intersecting [fromMs, toMs]: shift breaks +
+   * cleaning across the shifts the window spans, plus any planned downtime
+   * events that overlap. This is added on top of the work content so the
+   * displayed finish time reflects real planned non-productive time.
+   */
+  private async plannedStoppageMins(
+    factoryId: string | null, fromMs: number, toMs: number, machineIds?: string[],
+  ): Promise<number> {
+    if (toMs <= fromMs) return 0;
+    const windowHours = (toMs - fromMs) / 3_600_000;
+
+    let shiftMins = 0;
+    const shifts = await this.prisma.shiftTemplate.findMany({
+      where: { ...(factoryId ? { factoryId } : {}), isActive: true },
+      select: { shiftDurationHours: true, breakMinutes: true, cleaningMinutes: true },
+    });
+    if (shifts.length > 0) {
+      const avgDur = shifts.reduce((s, x) => s + (x.shiftDurationHours || 12), 0) / shifts.length || 12;
+      const avgStop = shifts.reduce((s, x) => s + (x.breakMinutes || 0) + (x.cleaningMinutes || 0), 0) / shifts.length;
+      const shiftsSpanned = Math.max(1, Math.ceil(windowHours / avgDur));
+      shiftMins = shiftsSpanned * avgStop;
+    }
+
+    let eventMins = 0;
+    const events = await this.prisma.downtimeEvent.findMany({
+      where: {
+        ...(factoryId ? { factoryId } : {}),
+        isPlanned: true,
+        startTime: { lt: new Date(toMs) },
+        OR: [{ endTime: null }, { endTime: { gt: new Date(fromMs) } }],
+        ...(machineIds && machineIds.length ? { machineId: { in: machineIds } } : {}),
+      },
+      select: { startTime: true, endTime: true, durationMinutes: true },
+    });
+    for (const e of events) {
+      const s = Math.max(+e.startTime, fromMs);
+      const en = Math.min(e.endTime ? +e.endTime : toMs, toMs);
+      if (en > s) eventMins += (en - s) / 60_000;
+    }
+
+    return Math.round(shiftMins + eventMins);
   }
 
   async autoGenerateWorkOrders(
     factoryId: string | null, userId: string, poId: string,
-    dto: { plannedStart: string; plannedEnd: string },
+    dto: { plannedStart: string; plannedEnd: string; rescheduleRequestId?: string },
   ): Promise<any> {
     if (!factoryId) throw new BadRequestException('Factory context required');
 
-    const preview = await this.previewAutoGenerateWOs(factoryId, poId);
+    // Smart finish using the chosen start. If it overruns the PO due date, an
+    // APPROVED reschedule request is required and its dates win.
+    const preview = await this.previewAutoGenerateWOs(factoryId, poId, dto.plannedStart);
     if (!preview.canGenerate) throw new BadRequestException('Cannot auto-generate: no machines available');
 
     const po = await this.prisma.productionOrder.findFirst({
@@ -970,8 +1105,31 @@ export class ProductionService {
     });
     if (!po) throw new NotFoundException('Production order not found');
 
-    const start = new Date(dto.plannedStart);
-    const end   = new Date(dto.plannedEnd);
+    let start = new Date(dto.plannedStart);
+    let end   = new Date(dto.plannedEnd);
+
+    if (preview.smart?.exceedsDue) {
+      if (!dto.rescheduleRequestId) {
+        throw new BadRequestException(
+          `Computed finish (${preview.smart.computedFinish}) exceeds the order due date. ` +
+          'A reschedule request must be approved first.',
+        );
+      }
+      const rr = await this.prisma.rescheduleRequest.findFirst({
+        where: { id: dto.rescheduleRequestId, factoryId, productionOrderId: poId },
+      });
+      if (!rr) throw new NotFoundException('Reschedule request not found');
+      if (rr.status !== 'APPROVED') {
+        throw new BadRequestException(`Reschedule request is ${rr.status} — it must be APPROVED before generating.`);
+      }
+      // Approved proposal dates are authoritative
+      start = rr.proposedStart;
+      end = rr.proposedEnd;
+    } else if (preview.smart?.computedFinish) {
+      // Within due date — extend the WO end to the realistic computed finish
+      const cf = new Date(preview.smart.computedFinish);
+      if (cf > end) end = cf;
+    }
     const year  = new Date().getFullYear();
     const existing = await this.prisma.workOrder.count({ where: { factoryId } });
 
@@ -1012,8 +1170,8 @@ export class ProductionService {
 
     // Generate dispatch list (Job Orders) for each routing step
     const joResult = await this.generateJobOrders(factoryId, wo.id, {
-      plannedStart: dto.plannedStart,
-      plannedEnd: dto.plannedEnd,
+      plannedStart: start.toISOString(),
+      plannedEnd: end.toISOString(),
       clearExisting: false,
     });
 
@@ -1035,6 +1193,81 @@ export class ProductionService {
       process: preview.process,
       warning: preview.warning,
     };
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // RESCHEDULE REQUESTS (governance when smart finish overruns the due date)
+  // ────────────────────────────────────────────────────────────
+
+  async createRescheduleRequest(
+    factoryId: string | null, userId: string, poId: string,
+    dto: { proposedStart: string; proposedEnd: string; reason?: string; workContentMins?: number; plannedStoppageMins?: number; dueDate?: string },
+  ) {
+    if (!factoryId) throw new BadRequestException('Factory context required');
+    const po = await this.prisma.productionOrder.findFirst({
+      where: { id: poId, factoryId, deletedAt: null },
+      select: { id: true, plannedEnd: true },
+    });
+    if (!po) throw new NotFoundException('Production order not found');
+
+    // Reuse any still-pending request for this PO rather than piling up duplicates
+    const existing = await this.prisma.rescheduleRequest.findFirst({
+      where: { factoryId, productionOrderId: poId, status: 'PENDING' },
+    });
+    const data = {
+      proposedStart: new Date(dto.proposedStart),
+      proposedEnd: new Date(dto.proposedEnd),
+      dueDate: dto.dueDate ? new Date(dto.dueDate) : po.plannedEnd,
+      reason: dto.reason ?? null,
+      workContentMins: dto.workContentMins ?? null,
+      plannedStoppageMins: dto.plannedStoppageMins ?? null,
+    };
+    if (existing) {
+      return this.prisma.rescheduleRequest.update({ where: { id: existing.id }, data });
+    }
+    return this.prisma.rescheduleRequest.create({
+      data: { factoryId, productionOrderId: poId, requestedById: userId, status: 'PENDING', ...data },
+    });
+  }
+
+  async listRescheduleRequests(factoryId: string | null, filters: { status?: string; productionOrderId?: string } = {}) {
+    return this.prisma.rescheduleRequest.findMany({
+      where: {
+        ...(factoryId ? { factoryId } : {}),
+        ...(filters.status ? { status: filters.status as any } : {}),
+        ...(filters.productionOrderId ? { productionOrderId: filters.productionOrderId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        productionOrder: { select: { orderNumber: true, plannedEnd: true } },
+        requestedBy: { select: { id: true, name: true } },
+        reviewedBy: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async reviewRescheduleRequest(
+    factoryId: string | null, userId: string, id: string, approve: boolean, reason?: string,
+  ) {
+    const rr = await this.prisma.rescheduleRequest.findFirst({
+      where: { id, ...(factoryId ? { factoryId } : {}) },
+    });
+    if (!rr) throw new NotFoundException('Reschedule request not found');
+    if (rr.status !== 'PENDING') throw new BadRequestException(`Request already ${rr.status}.`);
+    return this.prisma.rescheduleRequest.update({
+      where: { id },
+      data: {
+        status: approve ? 'APPROVED' : 'REJECTED',
+        reviewedById: userId,
+        reviewedAt: new Date(),
+        ...(reason ? { reason } : {}),
+      },
+      include: {
+        productionOrder: { select: { orderNumber: true } },
+        requestedBy: { select: { id: true, name: true } },
+        reviewedBy: { select: { id: true, name: true } },
+      },
+    });
   }
 
   // ────────────────────────────────────────────────────────────

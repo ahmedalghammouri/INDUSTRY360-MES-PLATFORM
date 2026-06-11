@@ -1,6 +1,6 @@
 import {
   IsString, IsInt, IsPositive, IsDateString, IsEnum, IsOptional,
-  IsUUID, MinLength, MaxLength, Min, Max, IsNumber,
+  IsUUID, MinLength, MaxLength, Min, Max, IsNumber, IsBoolean,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -372,6 +372,40 @@ export class AutoGenerateWOsDto {
   @ApiProperty({ example: '2026-06-11T19:30:00.000Z' })
   @IsDateString()
   plannedEnd!: string;
+
+  @ApiPropertyOptional({ description: 'Approved reschedule request — required when the smart finish exceeds the due date' })
+  @IsOptional()
+  @IsUUID('4')
+  rescheduleRequestId?: string;
+}
+
+export class CreateRescheduleRequestDto {
+  @ApiProperty() @IsDateString()
+  proposedStart!: string;
+
+  @ApiProperty() @IsDateString()
+  proposedEnd!: string;
+
+  @ApiPropertyOptional() @IsOptional() @IsString()
+  reason?: string;
+
+  @ApiPropertyOptional() @IsOptional() @IsInt()
+  workContentMins?: number;
+
+  @ApiPropertyOptional() @IsOptional() @IsInt()
+  plannedStoppageMins?: number;
+
+  @ApiPropertyOptional() @IsOptional() @IsDateString()
+  dueDate?: string;
+}
+
+export class ReviewRescheduleRequestDto {
+  @ApiProperty({ description: 'true = approve, false = reject' })
+  @IsBoolean()
+  approve!: boolean;
+
+  @ApiPropertyOptional() @IsOptional() @IsString()
+  reason?: string;
 }
 
 export class ProductionOrderFiltersDto {

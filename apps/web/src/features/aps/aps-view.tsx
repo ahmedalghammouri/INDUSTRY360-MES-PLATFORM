@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import {
   Zap, Gauge, Clock, AlertTriangle, Cpu, CalendarClock, PackageX,
-  CheckCircle2, XCircle, Loader2, Sparkles,
+  CheckCircle2, XCircle, Loader2, Sparkles, Undo2, Redo2, Save,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -21,8 +21,8 @@ import {
   FactoryGantt, type FactoryTask, type FactoryZoom,
   type SupplyMarker, type DemandMarker, type GanttTreeNode, type DepType,
 } from '@/components/charts/factory-gantt';
-import { apsService, type CtpResult } from '@/services/aps.service';
-import { useApsPlan, useApsMrp, useRunSchedule, useRescheduleJob } from './use-aps';
+import { apsService, type CtpResult, type RunScheduleResult } from '@/services/aps.service';
+import { useApsPlan, useApsMrp, useRunScheduleDry, useSaveSchedule, useRescheduleJob } from './use-aps';
 
 function KpiTile({ icon: Icon, label, value, unit, color, hint }: {
   icon: React.ElementType; label: string; value: string | number; unit?: string; color: string; hint?: string;
@@ -134,18 +134,63 @@ function CtpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
   );
 }
 
+// A reviewed-but-unsaved plan snapshot (dry-run result kept client-side).
+interface PlanSnapshot {
+  map: Record<string, { start: string; end: string }>;
+  metrics: RunScheduleResult;
+}
+
 export function ApsView() {
   const { data: plan, isLoading } = useApsPlan();
   const { data: mrp } = useApsMrp();
-  const runSchedule = useRunSchedule();
+  const runDry = useRunScheduleDry();
+  const saveSchedule = useSaveSchedule();
   const reschedule = useRescheduleJob();
 
   const [zoom, setZoom] = useState<FactoryZoom>('week');
   const [ctpOpen, setCtpOpen] = useState(false);
   const [tab, setTab] = useState<'mrp' | 'late'>('mrp');
 
-  const m = plan?.metrics;
-  const items = plan?.items ?? [];
+  // ── Dry-run preview history (undo/redo). histIdx = -1 → the saved server plan. ──
+  const [history, setHistory] = useState<PlanSnapshot[]>([]);
+  const [histIdx, setHistIdx] = useState(-1);
+  const overlay = histIdx >= 0 ? history[histIdx] : null;
+  const dirty = histIdx >= 0;
+  const canUndo = histIdx >= 0;
+  const canRedo = histIdx < history.length - 1;
+
+  const recalcPreview = () => {
+    runDry.mutate({}, {
+      onSuccess: (res) => {
+        const map: Record<string, { start: string; end: string }> = {};
+        for (const u of res.updates ?? []) map[u.id] = { start: u.start, end: u.end };
+        setHistory((h) => {
+          const next = h.slice(0, histIdx + 1);
+          next.push({ map, metrics: res });
+          setHistIdx(next.length - 1);
+          return next;
+        });
+      },
+    });
+  };
+  const undo = () => canUndo && setHistIdx((i) => i - 1);
+  const redo = () => canRedo && setHistIdx((i) => i + 1);
+  const discard = () => { setHistory([]); setHistIdx(-1); };
+  const commitPlan = () => {
+    if (!overlay) return;
+    const updates = Object.entries(overlay.map).map(([id, w]) => ({ id, start: w.start, end: w.end }));
+    if (!window.confirm(`Save this plan? ${updates.length} operation(s) will be rescheduled in the database.`)) return;
+    saveSchedule.mutate(updates, { onSuccess: discard });
+  };
+
+  // Server metrics, or the active preview's metrics while reviewing.
+  const m = dirty ? overlay!.metrics : plan?.metrics;
+  // Apply the preview overlay onto the server plan items for the Gantt.
+  const items = (() => {
+    const base = plan?.items ?? [];
+    if (!overlay) return base;
+    return base.map((it) => (overlay.map[it.id] ? { ...it, start: overlay.map[it.id].start, end: overlay.map[it.id].end } : it));
+  })();
 
   const handleMove = (task: FactoryTask, start: Date, end: Date) => {
     reschedule.mutate({ jobId: task.id, machineId: task.resourceId, start: start.toISOString(), end: end.toISOString() });
@@ -245,12 +290,35 @@ export function ApsView() {
           <Button variant="outline" onClick={() => setCtpOpen(true)}>
             <CalendarClock size={16} className="mr-2" /> Capable-to-Promise
           </Button>
-          <Button onClick={() => runSchedule.mutate({})} disabled={runSchedule.isPending}>
-            {runSchedule.isPending ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Zap size={16} className="mr-2" />}
+          {/* Undo / Redo over dry-run previews */}
+          <div className="flex items-center rounded-md border border-border overflow-hidden">
+            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-none" onClick={undo} disabled={!canUndo} title="Undo">
+              <Undo2 size={16} />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-none border-l border-border" onClick={redo} disabled={!canRedo} title="Redo">
+              <Redo2 size={16} />
+            </Button>
+          </div>
+          {dirty && (
+            <Button variant="ghost" onClick={discard} className="text-muted-foreground">Discard</Button>
+          )}
+          <Button variant={dirty ? 'outline' : 'default'} onClick={recalcPreview} disabled={runDry.isPending}>
+            {runDry.isPending ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Zap size={16} className="mr-2" />}
             Recalculate Plan
+          </Button>
+          <Button onClick={commitPlan} disabled={!dirty || saveSchedule.isPending}>
+            {saveSchedule.isPending ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Save size={16} className="mr-2" />}
+            Save Plan
           </Button>
         </div>
       </div>
+
+      {dirty && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          <AlertTriangle size={14} className="shrink-0" />
+          Preview only — this plan is <strong>not saved</strong>. Review the Gantt, then <strong>Save Plan</strong> to commit, or Undo/Discard.
+        </div>
+      )}
 
       {/* KPI bar */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -270,7 +338,7 @@ export function ApsView() {
       ) : items.length === 0 ? (
         <div className="rounded-xl border border-border/60 bg-card p-10 text-center">
           <p className="text-sm text-muted-foreground">No scheduled operations yet.</p>
-          <Button className="mt-3" onClick={() => runSchedule.mutate({})} disabled={runSchedule.isPending}>
+          <Button className="mt-3" onClick={recalcPreview} disabled={runDry.isPending}>
             <Zap size={16} className="mr-2" /> Generate the plan
           </Button>
         </div>
@@ -288,7 +356,10 @@ export function ApsView() {
           onZoomChange={setZoom}
           onTaskMove={handleMove}
           actions={[
-            { label: 'Recalculate Plan', icon: Zap, onClick: () => runSchedule.mutate({}), disabled: runSchedule.isPending },
+            { label: 'Recalculate (preview)', icon: Zap, onClick: recalcPreview, disabled: runDry.isPending },
+            { label: 'Undo', icon: Undo2, onClick: undo, disabled: !canUndo },
+            { label: 'Redo', icon: Redo2, onClick: redo, disabled: !canRedo },
+            { label: dirty ? 'Save Plan' : 'Saved', icon: Save, onClick: commitPlan, disabled: !dirty || saveSchedule.isPending },
           ]}
           insights={
             <div className="space-y-1.5 text-xs">

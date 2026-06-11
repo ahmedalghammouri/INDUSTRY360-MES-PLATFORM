@@ -117,6 +117,7 @@ model Factory {
   traceabilityLinks      TraceabilityLink[]
   jobOrders              JobOrder[]
   scrapLogs              ScrapLog[]
+  rescheduleRequests     RescheduleRequest[]
 
   @@map("factories")
 }
@@ -672,12 +673,50 @@ model ProductionOrder {
   updatedAt      DateTime              @updatedAt
   deletedAt      DateTime?
 
-  factory    Factory     @relation(fields: [factoryId], references: [id])
-  sku        SKU?        @relation(fields: [skuId], references: [id])
-  workOrders WorkOrder[]
+  factory            Factory             @relation(fields: [factoryId], references: [id])
+  sku                SKU?                @relation(fields: [skuId], references: [id])
+  workOrders         WorkOrder[]
+  rescheduleRequests RescheduleRequest[]
 
   @@index([factoryId, status])
   @@map("production_orders")
+}
+
+// ── RESCHEDULE GOVERNANCE ───────────────────────────────────────────────────
+// Raised when the smart finish-time of an auto-generated work order exceeds the
+// production order due date. Must be APPROVED before work orders are generated
+// with the proposed dates.
+model RescheduleRequest {
+  id                  String           @id @default(uuid())
+  factoryId           String
+  productionOrderId   String
+  status              RescheduleStatus @default(PENDING)
+  reason              String?
+  proposedStart       DateTime
+  proposedEnd         DateTime // the computed finish the user must accept
+  dueDate             DateTime?
+  workContentMins     Int?
+  plannedStoppageMins Int?
+  requestedById       String?
+  reviewedById        String?
+  reviewedAt          DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  factory         Factory         @relation(fields: [factoryId], references: [id])
+  productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  requestedBy     User?           @relation("RescheduleRequestedBy", fields: [requestedById], references: [id])
+  reviewedBy      User?           @relation("RescheduleReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([factoryId, status])
+  @@index([productionOrderId])
+  @@map("reschedule_requests")
+}
+
+enum RescheduleStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum ProductionOrderStatus {
@@ -1992,6 +2031,8 @@ model User {
   scrapLogsAsOperator    ScrapLog[]      @relation("ScrapLogOperator")
   changeRequestsRaised   ChangeRequest[] @relation("CRRequestedBy")
   changeRequestsReviewed ChangeRequest[] @relation("CRReviewedBy")
+  reschedulesRequested   RescheduleRequest[] @relation("RescheduleRequestedBy")
+  reschedulesReviewed    RescheduleRequest[] @relation("RescheduleReviewedBy")
 
   @@index([enterpriseId])
   @@index([factoryId])
