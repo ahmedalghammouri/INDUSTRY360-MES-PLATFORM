@@ -14,6 +14,10 @@ export class RunScheduleDto {
   @ApiPropertyOptional({ description: 'Compute the plan and return it WITHOUT writing to the database (preview for the Gantt — review, then Save)' })
   @IsOptional() @IsBoolean()
   dryRun?: boolean;
+
+  @ApiPropertyOptional({ description: 'Manual drag/resize overrides — each op is pinned at {start,end} and the rest reflows around it (respecting relationships)' })
+  @IsOptional() @IsArray()
+  overrides?: Array<{ id: string; start: string; end: string }>;
 }
 
 export class SaveScheduleDto {

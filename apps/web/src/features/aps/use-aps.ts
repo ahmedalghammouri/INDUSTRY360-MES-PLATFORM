@@ -42,7 +42,7 @@ export function useRunSchedule() {
 /** Recalculate as a DRY-RUN preview — returns the plan WITHOUT writing to the DB. */
 export function useRunScheduleDry() {
   return useMutation({
-    mutationFn: (body: { startFrom?: string; workOrderId?: string } = {}) =>
+    mutationFn: (body: { startFrom?: string; workOrderId?: string; overrides?: Array<{ id: string; start: string; end: string }> } = {}) =>
       apsService.runSchedule({ ...body, dryRun: true }),
     onError: (e: unknown) => toast({
       title: 'Could not compute the plan',
@@ -59,7 +59,17 @@ export function useSaveSchedule() {
     mutationFn: (updates: Array<{ id: string; start: string; end: string }>) => apsService.saveSchedule(updates),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['aps'] });
-      toast({ title: `Plan saved — ${res.saved} operation${res.saved === 1 ? '' : 's'} updated` });
+      qc.invalidateQueries({ queryKey: ['reschedule-requests'] });
+      qc.invalidateQueries({ queryKey: ['sidebar-counts'] });
+      const gated = res.gated?.length ?? 0;
+      if (gated > 0) {
+        toast({
+          title: `${res.saved} saved · ${gated} need approval`,
+          description: `${gated} order${gated === 1 ? '' : 's'} finish after the due date — a reschedule request was raised. Approve it on the Reschedule Requests page to apply.`,
+        });
+      } else {
+        toast({ title: `Plan saved — ${res.saved} operation${res.saved === 1 ? '' : 's'} updated` });
+      }
     },
     onError: (e: unknown) => toast({
       title: 'Could not save the plan',

@@ -3,6 +3,7 @@ import { JobOrderStatus, WorkOrderStatus, Priority, DependencyType } from '@pris
 
 import { PrismaService } from '../../database/prisma.service';
 import { RunScheduleDto, RescheduleJobDto, CtpDto } from './dto/aps.dto';
+import { scheduleOps, makeWorkCalendar, type SchedOp } from '../scheduling/op-scheduler';
 
 const HOUR = 3_600_000;
 const PRIORITY_WEIGHT: Record<Priority, number> = {
@@ -31,6 +32,7 @@ type JOWithRefs = {
   idealCycleTimeSec: number | null;
   plannedStart: Date | null;
   plannedEnd: Date | null;
+  actualStart: Date | null;
   machine: { id: string; name: string; code: string; designCapacity: number | null } | null;
   workOrder: {
     id: string; orderNumber: string; priority: Priority; plannedQty: number; plannedEnd: Date | null; skuId: string | null;
@@ -63,7 +65,7 @@ export class ApsService {
         id: true, workOrderId: true, machineId: true, predecessorId: true,
         predecessorType: true, predecessorLagMins: true, sequenceOrder: true,
         operationName: true, status: true, plannedQtyOut: true, plannedQtyIn: true, idealCycleTimeSec: true,
-        plannedStart: true, plannedEnd: true,
+        plannedStart: true, plannedEnd: true, actualStart: true,
         machine: { select: { id: true, name: true, code: true, designCapacity: true } },
         workOrder: {
           select: {
@@ -140,100 +142,58 @@ export class ApsService {
       const e = +d.endTime;
       if (e > horizon) machineFree.set(d.machineId, Math.max(machineFree.get(d.machineId) ?? horizon, e));
     }
+    // Working-time calendar from the factory's shift templates — the scheduler
+    // skips the weekly rest day(s) / holidays instead of planning work on them.
+    const shifts = await this.prisma.shiftTemplate.findMany({
+      where: { factoryId: fid, isActive: true },
+      select: { days: true },
+    });
+    const workingDays = [...new Set(
+      shifts.flatMap((s) => (Array.isArray(s.days) ? (s.days as number[]) : [])),
+    )];
+    const calendar = makeWorkCalendar(workingDays);
+
     const jobStart = new Map<string, number>();      // computed start per operation
     const jobEnd = new Map<string, number>();        // computed end per operation
     const updates: { id: string; start: number; end: number }[] = [];
 
+    // Manual drag/resize overrides pin an op at the user-dropped {start,end};
+    // everything else reflows around it respecting relationships + calendar.
+    const ovr = new Map((dto.overrides ?? []).map((o) => [o.id, o]));
+
     for (const woJobs of woOrder) {
-      const ops = woJobs.sort((a, b) => a.sequenceOrder - b.sequenceOrder);
-      const opById = new Map(ops.map((o) => [o.id, o]));
+      // A work order that has already started is re-anchored to the EARLIEST
+      // started op (clamped to "now"), then its whole line reflows from there —
+      // SS steps run in parallel, durations come from the expected cycle×qty.
+      // Plain (not-yet-started) work orders start at the global horizon.
+      const startedActuals = woJobs
+        .filter((j) => j.status === JobOrderStatus.EXECUTING || j.status === JobOrderStatus.PAUSED || !!j.actualStart)
+        .map((j) => +(j.actualStart ?? j.plannedStart ?? new Date(horizon)));
+      const woHorizon = startedActuals.length ? Math.max(Math.min(...startedActuals), horizon) : horizon;
 
-      // ── SS components: ops chained by START_TO_START form ONE synchronized
-      // line — they all start together and all end at the bottleneck end
-      // (the slowest member dictates the line speed).
-      const parent = new Map<string, string>();
-      const find = (x: string): string => {
-        let r = x;
-        while (parent.get(r) !== r) r = parent.get(r)!;
-        let c = x;
-        while (parent.get(c) !== c) { const n = parent.get(c)!; parent.set(c, r); c = n; }
-        return r;
-      };
-      for (const o of ops) parent.set(o.id, o.id);
-      for (const o of ops) {
-        if (o.predecessorId && o.predecessorType === DependencyType.START_TO_START && opById.has(o.predecessorId)) {
-          parent.set(find(o.id), find(o.predecessorId));
-        }
-      }
-      const comps = new Map<string, JOWithRefs[]>();
-      for (const o of ops) {
-        const r = find(o.id);
-        if (!comps.has(r)) comps.set(r, []);
-        comps.get(r)!.push(o);
-      }
-      const compList = [...comps.values()].sort(
-        (a, b) => Math.min(...a.map((o) => o.sequenceOrder)) - Math.min(...b.map((o) => o.sequenceOrder)),
-      );
+      const schedInput: SchedOp[] = woJobs.map((j) => {
+        const o = ovr.get(j.id); // only a manual drag pins an op in place
+        const dur = o ? Math.max(+new Date(o.end) - +new Date(o.start), 60_000) : this.durationMs(j);
+        return {
+          id: j.id,
+          machineId: j.machineId,
+          durationMs: dur,
+          predecessorId: j.predecessorId,
+          predecessorType: j.predecessorType,
+          predecessorLagMins: j.predecessorLagMins,
+          sequenceOrder: j.sequenceOrder,
+          pinnedStart: o ? +new Date(o.start) : undefined,
+        };
+      });
 
-      for (const comp of compList) {
-        // SS-lag offset of each member relative to the component anchor
-        const offset = new Map<string, number>();
-        for (const m of comp) {
-          if (!(m.predecessorId && m.predecessorType === DependencyType.START_TO_START && opById.has(m.predecessorId))) {
-            offset.set(m.id, 0); // anchor
-          }
-        }
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const m of comp) {
-            if (offset.has(m.id)) continue;
-            const po = offset.get(m.predecessorId!);
-            if (po !== undefined) {
-              offset.set(m.id, po + (m.predecessorLagMins ?? 0) * 60_000);
-              changed = true;
-            }
-          }
-        }
-        for (const m of comp) if (!offset.has(m.id)) offset.set(m.id, 0);
-
-        // Group start: every member's external constraints must hold at
-        // (groupStart + its offset) — cross-WO machine windows included.
-        let groupStart = horizon;
-        for (const m of comp) {
-          const off = offset.get(m.id)!;
-          const dur = this.durationMs(m);
-          let extEarliest = horizon;
-          if (m.predecessorId && m.predecessorType !== DependencyType.START_TO_START) {
-            const lag = (m.predecessorLagMins ?? 0) * 60_000;
-            const pStart = jobStart.get(m.predecessorId) ?? horizon;
-            const pEnd = jobEnd.get(m.predecessorId) ?? horizon;
-            switch (m.predecessorType) {
-              case DependencyType.FINISH_TO_FINISH: extEarliest = pEnd + lag - dur; break;
-              case DependencyType.START_TO_FINISH:  extEarliest = pStart + lag - dur; break;
-              case DependencyType.FINISH_TO_START:
-              default:                              extEarliest = pEnd + lag; break;
-            }
-          }
-          const mFree = machineFree.get(m.machineId!) ?? horizon;
-          groupStart = Math.max(groupStart, extEarliest - off, mFree - off);
-        }
-
-        // Bottleneck end: the longest member stretches the whole line —
-        // shorter SS members hold their machine until the line stops.
-        let groupEnd = groupStart;
-        for (const m of comp) {
-          groupEnd = Math.max(groupEnd, groupStart + offset.get(m.id)! + this.durationMs(m));
-        }
-
-        for (const m of comp) {
-          const s = groupStart + offset.get(m.id)!;
-          const e = comp.length > 1 ? groupEnd : s + this.durationMs(m);
-          jobStart.set(m.id, s);
-          jobEnd.set(m.id, e);
-          machineFree.set(m.machineId!, e);
-          updates.push({ id: m.id, start: s, end: e });
-        }
+      const res = scheduleOps(schedInput, woHorizon, machineFree, calendar);
+      for (const op of schedInput) {
+        const s = res.start.get(op.id);
+        const e = res.end.get(op.id);
+        if (s == null || e == null) continue;
+        jobStart.set(op.id, s);
+        jobEnd.set(op.id, e);
+        updates.push({ id: op.id, start: s, end: e });
       }
     }
 
@@ -262,32 +222,87 @@ export class ApsService {
   }
 
   /**
-   * Commit a reviewed plan (from a dry-run) to the database. Only open job
-   * orders of this factory are updated; the rest are ignored defensively.
+   * Commit a reviewed plan (from a dry-run). Per work order:
+   *  • if its new finish stays within the due date → its job orders are saved now;
+   *  • if it overruns the due date → NOTHING is written; instead an APS_RECALC
+   *    reschedule request is raised carrying the proposed plan, to be approved on
+   *    the Reschedule Requests page (which then applies it).
+   * Direct WOs with no production order are committed regardless (nothing to gate).
    */
-  async saveSchedule(factoryId: string | null, updates: Array<{ id: string; start: string; end: string }>) {
+  async saveSchedule(
+    factoryId: string | null,
+    userId: string | null,
+    updates: Array<{ id: string; start: string; end: string }>,
+  ) {
     const fid = this.requireFactory(factoryId);
     if (!Array.isArray(updates) || updates.length === 0) {
       throw new BadRequestException('No plan changes to save.');
     }
     const ids = updates.map((u) => u.id);
-    const owned = await this.prisma.jobOrder.findMany({
+    const jos = await this.prisma.jobOrder.findMany({
       where: { id: { in: ids }, factoryId: fid, status: { in: OPEN_JO } },
-      select: { id: true },
+      select: {
+        id: true, workOrderId: true,
+        workOrder: { select: { id: true, orderNumber: true, productionOrderId: true, plannedEnd: true } },
+      },
     });
-    const ownedIds = new Set(owned.map((o) => o.id));
-    const valid = updates.filter((u) => ownedIds.has(u.id));
+    const joById = new Map(jos.map((j) => [j.id, j]));
+    const valid = updates.filter((u) => joById.has(u.id));
     if (valid.length === 0) throw new BadRequestException('No matching open operations to update.');
 
-    await this.prisma.$transaction(
-      valid.map((u) =>
-        this.prisma.jobOrder.update({
-          where: { id: u.id },
-          data: { plannedStart: new Date(u.start), plannedEnd: new Date(u.end) },
-        }),
-      ),
-    );
-    return { saved: valid.length, skipped: updates.length - valid.length };
+    // Group the plan by work order
+    const byWo = new Map<string, { wo: (typeof jos)[number]['workOrder']; ups: typeof valid }>();
+    for (const u of valid) {
+      const jo = joById.get(u.id)!;
+      const key = jo.workOrderId;
+      if (!byWo.has(key)) byWo.set(key, { wo: jo.workOrder, ups: [] });
+      byWo.get(key)!.ups.push(u);
+    }
+
+    const commit: typeof valid = [];
+    const gated: Array<{ orderNumber: string; requestId: string; lateHours: number }> = [];
+
+    for (const { wo, ups } of byWo.values()) {
+      const newStart = Math.min(...ups.map((u) => +new Date(u.start)));
+      const newFinish = Math.max(...ups.map((u) => +new Date(u.end)));
+      const due = wo.plannedEnd ? +wo.plannedEnd : null;
+      const overruns = due !== null && newFinish > due;
+
+      if (overruns && wo.productionOrderId) {
+        // Gate: raise an APS_RECALC reschedule request carrying this WO's plan.
+        const rr = await this.prisma.rescheduleRequest.create({
+          data: {
+            factoryId: fid,
+            productionOrderId: wo.productionOrderId,
+            workOrderId: wo.id,
+            source: 'APS_RECALC',
+            status: 'PENDING',
+            proposedStart: new Date(newStart),
+            proposedEnd: new Date(newFinish),
+            dueDate: wo.plannedEnd,
+            requestedById: userId ?? undefined,
+            reason: `Recalculated plan finishes ${Math.round((newFinish - (due ?? newFinish)) / HOUR * 10) / 10}h after the due date.`,
+            details: { updates: ups, makespanHours: Math.round((newFinish - newStart) / HOUR * 10) / 10 },
+          },
+          select: { id: true },
+        });
+        gated.push({ orderNumber: wo.orderNumber, requestId: rr.id, lateHours: Math.round((newFinish - (due ?? newFinish)) / HOUR * 10) / 10 });
+      } else {
+        commit.push(...ups);
+      }
+    }
+
+    if (commit.length > 0) {
+      await this.prisma.$transaction(
+        commit.map((u) =>
+          this.prisma.jobOrder.update({
+            where: { id: u.id },
+            data: { plannedStart: new Date(u.start), plannedEnd: new Date(u.end) },
+          }),
+        ),
+      );
+    }
+    return { saved: commit.length, gated };
   }
 
   /** Aggregate schedule KPIs from computed ends. */
@@ -533,7 +548,11 @@ export class ApsService {
     const fid = this.requireFactory(factoryId);
     const wos = await this.prisma.workOrder.findMany({
       where: { factoryId: fid, status: { in: OPEN_WO }, skuId: { not: null }, deletedAt: null },
-      select: { id: true, orderNumber: true, skuId: true, plannedQty: true, plannedStart: true },
+      select: {
+        id: true, orderNumber: true, skuId: true, plannedQty: true, plannedStart: true,
+        productionOrder: { select: { unit: true } },
+        sku: { select: { unitsPerInner: true, innersPerCarton: true, cartonsPerPallet: true, baseUnit: true } },
+      },
     });
     if (wos.length === 0) return { requirements: [], shortages: 0, ordersConsidered: 0 };
 
@@ -546,14 +565,33 @@ export class ApsService {
     const bomBySku = new Map<string, typeof boms[number]['items']>();
     for (const b of boms) if (!bomBySku.has(b.skuId)) bomBySku.set(b.skuId, b.items);
 
+    // BOM quantityPer is expressed per ONE SKU base unit (e.g. per carton), but
+    // a work order's plannedQty is in the PO unit (often PALLET). Convert through
+    // the packaging ladder (piece → inner → carton → pallet) before exploding,
+    // otherwise 10 pallets is mistaken for 10 cartons and requirements collapse.
+    const piecesPer = (pkg: any) => {
+      const inner = pkg?.unitsPerInner || 1;
+      const carton = (pkg?.innersPerCarton || 1) * inner;
+      const pallet = (pkg?.cartonsPerPallet || 1) * carton;
+      return { PIECE: 1, EA: 1, PCS: 1, UNIT: 1, INNER: inner, CARTON: carton, PALLET: pallet } as Record<string, number>;
+    };
+    const toBaseUnits = (qty: number, fromUnit: string, baseUnit: string, pkg: any) => {
+      const f = piecesPer(pkg);
+      const norm = (u: string) => f[(u || '').toUpperCase()] ?? 1;
+      return (qty * norm(fromUnit)) / norm(baseUnit);
+    };
+
     // Aggregate gross requirement per material + earliest need date.
     const need = new Map<string, { required: number; date: number }>();
     for (const wo of wos) {
       const items = bomBySku.get(wo.skuId!);
       if (!items) continue;
       const when = wo.plannedStart ? +wo.plannedStart : Date.now();
+      const baseUnit = wo.sku?.baseUnit ?? 'CARTON';
+      const woUnit = wo.productionOrder?.unit ?? baseUnit;
+      const qtyInBase = toBaseUnits(wo.plannedQty, woUnit, baseUnit, wo.sku);
       for (const it of items) {
-        const gross = wo.plannedQty * it.quantityPer * (1 + (it.scrapFactor ?? 0));
+        const gross = qtyInBase * it.quantityPer * (1 + (it.scrapFactor ?? 0));
         const cur = need.get(it.rawMaterialId);
         if (cur) { cur.required += gross; cur.date = Math.min(cur.date, when); }
         else need.set(it.rawMaterialId, { required: gross, date: when });

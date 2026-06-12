@@ -27,18 +27,27 @@ type Status = 'PENDING' | 'APPROVED' | 'REJECTED';
 interface RescheduleRequest {
   id: string;
   status: Status;
+  source: string;
   reason: string | null;
   proposedStart: string;
   proposedEnd: string;
   dueDate: string | null;
   workContentMins: number | null;
   plannedStoppageMins: number | null;
+  details: any;
   reviewedAt: string | null;
   createdAt: string;
   productionOrder: { orderNumber: string; plannedEnd: string | null } | null;
+  workOrder: { orderNumber: string } | null;
   requestedBy: { id: string; name: string } | null;
   reviewedBy: { id: string; name: string } | null;
 }
+
+const SOURCE_CFG: Record<string, { label: string; cls: string }> = {
+  AUTO_GENERATE: { label: 'Auto-Generate WO', cls: 'text-sky-400 bg-sky-500/15 border-sky-500/30' },
+  APS_RECALC:    { label: 'Recalculate Plan', cls: 'text-violet-400 bg-violet-500/15 border-violet-500/30' },
+};
+const sourceCfg = (s: string) => SOURCE_CFG[s] ?? { label: s || '—', cls: 'text-muted-foreground bg-muted/40 border-border' };
 
 const STATUS_CFG: Record<Status, { label: string; cls: string; icon: React.ElementType }> = {
   PENDING:  { label: 'Pending',  cls: 'text-amber-400 bg-amber-500/15 border-amber-500/30',  icon: Hourglass },
@@ -179,6 +188,7 @@ export function RescheduleRequestsView() {
             <thead className="bg-muted/40 text-muted-foreground">
               <tr className="text-left">
                 <th className="px-4 py-2.5 font-medium">Production Order</th>
+                <th className="px-4 py-2.5 font-medium">Source</th>
                 <th className="px-4 py-2.5 font-medium">Requested by</th>
                 <th className="px-4 py-2.5 font-medium">Proposed window</th>
                 <th className="px-4 py-2.5 font-medium">Due</th>
@@ -200,6 +210,12 @@ export function RescheduleRequestsView() {
                   >
                     <td className="px-4 py-3">
                       <div className="font-mono text-xs flex items-center gap-1.5"><GitCommit size={12} className="text-muted-foreground" />{r.productionOrder?.orderNumber ?? '—'}</div>
+                      {r.workOrder?.orderNumber && <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{r.workOrder.orderNumber}</div>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={cn('inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border', sourceCfg(r.source).cls)}>
+                        {sourceCfg(r.source).label}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       <span className="inline-flex items-center gap-1.5"><User size={12} />{r.requestedBy?.name ?? '—'}</span>
@@ -247,9 +263,12 @@ export function RescheduleRequestsView() {
                     <CalendarClock size={18} className="text-primary" />
                     Reschedule — {detail.productionOrder?.orderNumber ?? 'PO'}
                   </DialogTitle>
-                  <DialogDescription className="flex items-center gap-2">
+                  <DialogDescription className="flex items-center gap-2 flex-wrap">
                     <span className={cn('inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border', cfg.cls)}>
                       <cfg.icon size={11} /> {cfg.label}
+                    </span>
+                    <span className={cn('inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border', sourceCfg(detail.source).cls)}>
+                      {sourceCfg(detail.source).label}
                     </span>
                     <span className={cn('text-xs font-medium', over > 0 ? 'text-red-400' : 'text-emerald-400')}>{fmtSpan(over)}</span>
                   </DialogDescription>
@@ -278,6 +297,18 @@ export function RescheduleRequestsView() {
                     </div>
                   </div>
 
+                  {/* Source-specific details */}
+                  {detail.details && (
+                    <div className="rounded-lg border border-border/60 p-3 text-xs space-y-1">
+                      <div className="font-medium text-foreground flex items-center gap-1.5"><GitCommit size={12} /> Request details</div>
+                      {detail.details.origin && <div className="text-muted-foreground">Origin: <span className="text-foreground">{detail.details.origin}</span></div>}
+                      {detail.workOrder?.orderNumber && <div className="text-muted-foreground">Work order: <span className="text-foreground font-mono">{detail.workOrder.orderNumber}</span></div>}
+                      {detail.details.makespanHours != null && <div className="text-muted-foreground">Run makespan: <span className="text-foreground">{detail.details.makespanHours}h</span></div>}
+                      {Array.isArray(detail.details.updates) && (
+                        <div className="text-muted-foreground">Plan covers <span className="text-foreground font-medium">{detail.details.updates.length}</span> operation(s) — approving applies these exact times.</div>
+                      )}
+                    </div>
+                  )}
                   {detail.reason && (
                     <div className="text-xs text-muted-foreground"><span className="font-medium text-foreground">Reason: </span>{detail.reason}</div>
                   )}

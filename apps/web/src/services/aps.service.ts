@@ -95,11 +95,11 @@ export interface MrpResult {
 export const apsService = {
   getPlan: () => api.get<ApsPlan>('/aps/plan'),
 
-  runSchedule: (body: { startFrom?: string; workOrderId?: string; dryRun?: boolean } = {}) =>
+  runSchedule: (body: { startFrom?: string; workOrderId?: string; dryRun?: boolean; overrides?: Array<{ id: string; start: string; end: string }> } = {}) =>
     api.post<RunScheduleResult>('/aps/schedule', body),
 
   saveSchedule: (updates: Array<{ id: string; start: string; end: string }>) =>
-    api.post<{ saved: number; skipped: number }>('/aps/save-schedule', { updates }),
+    api.post<{ saved: number; gated: Array<{ orderNumber: string; requestId: string; lateHours: number }> }>('/aps/save-schedule', { updates }),
 
   rescheduleJob: (body: { jobId: string; machineId?: string; start: string; end?: string }) =>
     api.post<{ id: string; start: string; end: string; rippledSuccessors: number }>('/aps/reschedule-job', body),

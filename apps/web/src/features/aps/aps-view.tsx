@@ -21,8 +21,9 @@ import {
   FactoryGantt, type FactoryTask, type FactoryZoom,
   type SupplyMarker, type DemandMarker, type GanttTreeNode, type DepType,
 } from '@/components/charts/factory-gantt';
+import { toast } from '@/components/ui/use-toast';
 import { apsService, type CtpResult, type RunScheduleResult } from '@/services/aps.service';
-import { useApsPlan, useApsMrp, useRunScheduleDry, useSaveSchedule, useRescheduleJob } from './use-aps';
+import { useApsPlan, useApsMrp, useRunScheduleDry, useSaveSchedule } from './use-aps';
 
 function KpiTile({ icon: Icon, label, value, unit, color, hint }: {
   icon: React.ElementType; label: string; value: string | number; unit?: string; color: string; hint?: string;
@@ -135,9 +136,11 @@ function CtpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
 }
 
 // A reviewed-but-unsaved plan snapshot (dry-run result kept client-side).
+// `overrides` are the manual drag/resize pins that produced this snapshot.
 interface PlanSnapshot {
   map: Record<string, { start: string; end: string }>;
   metrics: RunScheduleResult;
+  overrides: Record<string, { start: string; end: string }>;
 }
 
 export function ApsView() {
@@ -145,7 +148,6 @@ export function ApsView() {
   const { data: mrp } = useApsMrp();
   const runDry = useRunScheduleDry();
   const saveSchedule = useSaveSchedule();
-  const reschedule = useRescheduleJob();
 
   const [zoom, setZoom] = useState<FactoryZoom>('week');
   const [ctpOpen, setCtpOpen] = useState(false);
@@ -159,17 +161,26 @@ export function ApsView() {
   const canUndo = histIdx >= 0;
   const canRedo = histIdx < history.length - 1;
 
+  const currentOverrides = overlay?.overrides ?? {};
+
+  // Append a snapshot and advance the cursor. Both state updates are PURE and
+  // separate (no setState inside an updater — that breaks under StrictMode).
+  const pushSnapshot = (res: RunScheduleResult, overrides: Record<string, { start: string; end: string }>) => {
+    const map: Record<string, { start: string; end: string }> = {};
+    for (const u of res.updates ?? []) map[u.id] = { start: u.start, end: u.end };
+    setHistory((h) => [...h.slice(0, histIdx + 1), { map, metrics: res, overrides }]);
+    setHistIdx(histIdx + 1);
+  };
+
+  // Full auto recompute — clears any manual drag pins.
   const recalcPreview = () => {
     runDry.mutate({}, {
       onSuccess: (res) => {
-        const map: Record<string, { start: string; end: string }> = {};
-        for (const u of res.updates ?? []) map[u.id] = { start: u.start, end: u.end };
-        setHistory((h) => {
-          const next = h.slice(0, histIdx + 1);
-          next.push({ map, metrics: res });
-          setHistIdx(next.length - 1);
-          return next;
-        });
+        if (!res.updates || res.updates.length === 0) {
+          toast({ title: 'Nothing to replan', description: 'All operations are already running or fixed.' });
+          return;
+        }
+        pushSnapshot(res, {});
       },
     });
   };
@@ -177,8 +188,11 @@ export function ApsView() {
   const redo = () => canRedo && setHistIdx((i) => i + 1);
   const discard = () => { setHistory([]); setHistIdx(-1); };
   const commitPlan = () => {
-    if (!overlay) return;
-    const updates = Object.entries(overlay.map).map(([id, w]) => ({ id, start: w.start, end: w.end }));
+    const updates = overlay ? Object.entries(overlay.map).map(([id, w]) => ({ id, start: w.start, end: w.end })) : [];
+    if (updates.length === 0) {
+      toast({ title: 'No plan changes to save', description: 'Recalculate or drag an operation first.' });
+      return;
+    }
     if (!window.confirm(`Save this plan? ${updates.length} operation(s) will be rescheduled in the database.`)) return;
     saveSchedule.mutate(updates, { onSuccess: discard });
   };
@@ -192,8 +206,27 @@ export function ApsView() {
     return base.map((it) => (overlay.map[it.id] ? { ...it, start: overlay.map[it.id].start, end: overlay.map[it.id].end } : it));
   })();
 
+  // Range must cover the (possibly longer) previewed plan so the Gantt visibly
+  // reflects the recalculation, not just the saved server window.
+  const ganttRange = (() => {
+    const base = plan?.range;
+    if (!base) return base;
+    const times = items.flatMap((it) => [+new Date(it.start), +new Date(it.end)]);
+    if (times.length === 0) return base;
+    const from = Math.min(+new Date(base.from), ...times);
+    const to = Math.max(+new Date(base.to), ...times);
+    return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
+  })();
+
+  // Drag / resize on the Gantt is a PREVIEW edit: pin the moved op at its new
+  // window and reflow the rest through the same engine (relationships + calendar
+  // + late-date recompute). Nothing is written until Save Plan.
   const handleMove = (task: FactoryTask, start: Date, end: Date) => {
-    reschedule.mutate({ jobId: task.id, machineId: task.resourceId, start: start.toISOString(), end: end.toISOString() });
+    const overrides = { ...currentOverrides, [task.id]: { start: start.toISOString(), end: end.toISOString() } };
+    runDry.mutate(
+      { overrides: Object.entries(overrides).map(([id, w]) => ({ id, ...w })) },
+      { onSuccess: (res) => pushSnapshot(res, overrides) },
+    );
   };
 
   const shortages = mrp?.requirements.filter((r) => r.shortage > 0) ?? [];
@@ -350,8 +383,8 @@ export function ApsView() {
           tree={tree}
           supply={supplyMarkers}
           demand={demandMarkers}
-          rangeFrom={plan!.range.from}
-          rangeTo={plan!.range.to}
+          rangeFrom={ganttRange!.from}
+          rangeTo={ganttRange!.to}
           zoom={zoom}
           onZoomChange={setZoom}
           onTaskMove={handleMove}

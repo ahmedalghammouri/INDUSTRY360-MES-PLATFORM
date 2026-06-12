@@ -5,7 +5,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { findProcessForSku } from '../../common/process-scope.util';
-import { scheduleOps, type SchedOp } from '../scheduling/op-scheduler';
+import { scheduleOps, makeWorkCalendar, type SchedOp } from '../scheduling/op-scheduler';
 import { OEEService } from './oee.service';
 import { KpiService } from './kpi.service';
 import { ApsService } from '../aps/aps.service';
@@ -924,6 +924,7 @@ export class ProductionService {
     if (jobOrdersToCreate.length > 0) {
       const machineIds = [...new Set(jobOrdersToCreate.map((s) => s.machine?.id).filter(Boolean) as string[])];
       const machineFree = await this.seedMachineFree(factoryId, machineIds, horizon);
+      const calendar = await this.buildWorkCalendar(factoryId);
       const ops: SchedOp[] = jobOrdersToCreate.map((s) => {
         const dep = (s.predecessors ?? []).find((d: any) => jobOrdersToCreate.some((x) => x.stepId === d.fromStepId));
         return {
@@ -944,7 +945,7 @@ export class ProductionService {
           bySeq[i].predecessorType = 'FINISH_TO_START' as any;
         }
       }
-      const sched = scheduleOps(ops, horizon, machineFree);
+      const sched = scheduleOps(ops, horizon, machineFree, calendar);
       const workContentMins = Math.round((sched.finish - horizon) / 60_000);
       const stoppage = await this.plannedStoppageMins(factoryId, horizon, sched.finish, machineIds);
       const totalDurationMins = workContentMins + stoppage;
@@ -1021,6 +1022,18 @@ export class ProductionService {
       mode: 'dispatch', // signals the UI that we create 1 WO + N JOs
       smart, // computed finish time + planned-stoppage breakdown + exceedsDue
     };
+  }
+
+  /** Working-time calendar from shift templates — skips the rest day(s) / holidays. */
+  private async buildWorkCalendar(factoryId: string | null) {
+    const shifts = await this.prisma.shiftTemplate.findMany({
+      where: { ...(factoryId ? { factoryId } : {}), isActive: true },
+      select: { days: true },
+    });
+    const workingDays = [...new Set(
+      shifts.flatMap((s) => (Array.isArray(s.days) ? (s.days as number[]) : [])),
+    )];
+    return makeWorkCalendar(workingDays);
   }
 
   /** Seed next-free instant per machine from its existing open plan (finite capacity). */
@@ -1223,6 +1236,13 @@ export class ProductionService {
       reason: dto.reason ?? null,
       workContentMins: dto.workContentMins ?? null,
       plannedStoppageMins: dto.plannedStoppageMins ?? null,
+      // Auto-generate origin — store the smart-finish breakdown for display.
+      source: 'AUTO_GENERATE',
+      details: {
+        origin: 'Auto-Generate Work Order',
+        workContentMins: dto.workContentMins ?? null,
+        plannedStoppageMins: dto.plannedStoppageMins ?? null,
+      } as any,
     };
     if (existing) {
       return this.prisma.rescheduleRequest.update({ where: { id: existing.id }, data });
@@ -1242,6 +1262,7 @@ export class ProductionService {
       orderBy: { createdAt: 'desc' },
       include: {
         productionOrder: { select: { orderNumber: true, plannedEnd: true } },
+        workOrder: { select: { orderNumber: true } },
         requestedBy: { select: { id: true, name: true } },
         reviewedBy: { select: { id: true, name: true } },
       },
@@ -1272,14 +1293,52 @@ export class ProductionService {
       },
     });
 
-    // On approval the proposed window becomes authoritative everywhere: the PO
-    // and any already-generated work orders + their job-order dispatch list are
-    // shifted to the new Production Start/End.
+    // On approval the proposal becomes authoritative. APS_RECALC carries an exact
+    // job-order plan in `details.updates` — apply it verbatim. AUTO_GENERATE shifts
+    // the whole PO window (+ its WOs/JOs) to the proposed Start/End.
     if (approve) {
-      await this.applyRescheduleWindow(rr.factoryId, rr.productionOrderId, rr.proposedStart, rr.proposedEnd);
+      const details = rr.details as any;
+      const planUpdates: Array<{ id: string; start: string; end: string }> | undefined = details?.updates;
+      if (rr.source === 'APS_RECALC' && Array.isArray(planUpdates) && planUpdates.length > 0) {
+        await this.applyReschedulePlan(rr.factoryId, rr.workOrderId, planUpdates, rr.proposedStart, rr.proposedEnd, rr.productionOrderId);
+      } else {
+        await this.applyRescheduleWindow(rr.factoryId, rr.productionOrderId, rr.proposedStart, rr.proposedEnd);
+      }
     }
 
     return updated;
+  }
+
+  /** Apply an APS_RECALC plan: write each job-order window, then sync WO + PO ends. */
+  private async applyReschedulePlan(
+    factoryId: string, workOrderId: string | null,
+    updates: Array<{ id: string; start: string; end: string }>,
+    proposedStart: Date, proposedEnd: Date, poId: string,
+  ) {
+    const ids = updates.map((u) => u.id);
+    const owned = await this.prisma.jobOrder.findMany({
+      where: { id: { in: ids }, factoryId, status: { in: ['SCHEDULED', 'READY', 'EXECUTING', 'PAUSED'] as any } },
+      select: { id: true },
+    });
+    const ownedIds = new Set(owned.map((o) => o.id));
+    const valid = updates.filter((u) => ownedIds.has(u.id));
+
+    await this.prisma.$transaction([
+      ...valid.map((u) =>
+        this.prisma.jobOrder.update({
+          where: { id: u.id },
+          data: { plannedStart: new Date(u.start), plannedEnd: new Date(u.end) },
+        }),
+      ),
+      ...(workOrderId ? [this.prisma.workOrder.update({
+        where: { id: workOrderId },
+        data: { plannedStart: proposedStart, plannedEnd: proposedEnd },
+      })] : []),
+      this.prisma.productionOrder.update({
+        where: { id: poId },
+        data: { plannedEnd: proposedEnd },
+      }),
+    ]);
   }
 
   /** Propagate an approved reschedule window to the PO + its open WOs + their JOs. */
@@ -1343,7 +1402,8 @@ export class ProductionService {
         sequenceOrder: j.sequenceOrder,
       };
     });
-    const sched = scheduleOps(ops, startMs);
+    const calendar = await this.buildWorkCalendar(factoryId);
+    const sched = scheduleOps(ops, startMs, new Map(), calendar);
 
     await this.prisma.$transaction([
       ...open.map((j) =>

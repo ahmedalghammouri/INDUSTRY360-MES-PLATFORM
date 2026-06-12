@@ -29,7 +29,7 @@ export class ApsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Commit a reviewed (dry-run) plan to the database' })
   saveSchedule(@CurrentUser() user: User, @Body() dto: SaveScheduleDto) {
-    return this.aps.saveSchedule(user.factoryId, dto.updates);
+    return this.aps.saveSchedule(user.factoryId, user.id, dto.updates);
   }
 
   @Post('reschedule-job')

@@ -690,6 +690,10 @@ model RescheduleRequest {
   id                  String           @id @default(uuid())
   factoryId           String
   productionOrderId   String
+  workOrderId         String? // the specific WO (APS recalc requests)
+  // Where the request came from: AUTO_GENERATE (auto-gen WO finish overrun) or
+  // APS_RECALC (Recalculate-Plan save made an order late).
+  source              String           @default("AUTO_GENERATE")
   status              RescheduleStatus @default(PENDING)
   reason              String?
   proposedStart       DateTime
@@ -697,6 +701,9 @@ model RescheduleRequest {
   dueDate             DateTime?
   workContentMins     Int?
   plannedStoppageMins Int?
+  // Source-specific payload: APS plan updates [{id,start,end}], step breakdown,
+  // makespan, lateBy, etc. — applied on approval and shown with the request.
+  details             Json?
   requestedById       String?
   reviewedById        String?
   reviewedAt          DateTime?
@@ -705,6 +712,7 @@ model RescheduleRequest {
 
   factory         Factory         @relation(fields: [factoryId], references: [id])
   productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  workOrder       WorkOrder?      @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
   requestedBy     User?           @relation("RescheduleRequestedBy", fields: [requestedById], references: [id])
   reviewedBy      User?           @relation("RescheduleReviewedBy", fields: [reviewedById], references: [id])
 
@@ -791,6 +799,7 @@ model WorkOrder {
   maintenanceOrders    MaintenanceWO[]       @relation("MaintLinkedProdWO")
   jobOrders            JobOrder[]
   scrapLogs            ScrapLog[]
+  rescheduleRequests   RescheduleRequest[]
 
   @@index([factoryId, status])
   @@index([factoryId, plannedStart])
