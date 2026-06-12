@@ -59,17 +59,17 @@ async function bootstrap() {
   const corsOrigins = configService.get<string>('CORS_ORIGINS', 'http://localhost:3000').split(',').map(o => o.trim());
   const appLogger = new Logger('Bootstrap');
   appLogger.log(`CORS enabled for origins: ${corsOrigins.join(', ')}`);
+  // Allow localhost AND private LAN ranges (10/8, 172.16/12, 192.168/16) so the
+  // app can be opened by IP from phones/tablets on the factory network. The app
+  // is single-origin behind nginx, so reflecting the request origin is safe here.
+  const LAN_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+  const allowOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin || LAN_ORIGIN.test(origin) || corsOrigins.includes(origin)) callback(null, true);
+    else callback(new Error(`CORS: origin ${origin} not allowed`));
+  };
+  void isDev;
   app.enableCors({
-    origin: isDev
-      ? (origin, callback) => {
-          // In dev allow any localhost/127.0.0.1 origin plus the explicit list
-          if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || corsOrigins.includes(origin)) {
-            callback(null, true);
-          } else {
-            callback(new Error(`CORS: origin ${origin} not allowed`));
-          }
-        }
-      : corsOrigins,
+    origin: allowOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'X-Request-ID'],

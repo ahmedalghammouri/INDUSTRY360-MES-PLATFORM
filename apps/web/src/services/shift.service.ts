@@ -18,6 +18,7 @@ export interface ShiftTemplate {
   cleaningMinutes: number;
   days: number[];           // 0=Sun … 6=Sat
   targetQtyPerShift: number | null;
+  targetUnit?: string;      // PIECE/INNER/CARTON/PALLET
   isActive: boolean;
   plannedProductionMinutes: number;
   instanceCount: number;
@@ -35,6 +36,7 @@ export interface ShiftTemplateInput {
   cleaningMinutes?: number;
   days: number[];
   targetQtyPerShift?: number;
+  targetUnit?: string;
   isActive?: boolean;
 }
 

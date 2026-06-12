@@ -18,7 +18,7 @@ import {
   type JOActionTarget,
 } from './shop-floor-actions';
 import { JobFilterBar } from './job-filter-bar';
-import { ShiftSummaryBand } from './shift-summary-band';
+import { JobShiftBand } from './shift-summary-band';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -187,7 +187,7 @@ function useElapsed(jo: ShopFloorJO) {
 function ShopFloorCard({
   jo, users, pending,
   onTransition, onRecord, onAssignOperator,
-  onOpenLive, onAction,
+  onOpenLive, onAction, shiftStatus, machineShift,
 }: {
   jo: ShopFloorJO;
   users: Operator[];
@@ -197,6 +197,8 @@ function ShopFloorCard({
   onAssignOperator: (id: string, operatorId: string | null) => void;
   onOpenLive: (jo: ShopFloorJO) => void;
   onAction: (kind: 'maintenance' | 'state' | 'alarm', jo: ShopFloorJO) => void;
+  shiftStatus?: any;
+  machineShift?: any;
 }) {
   // Incremental entry — each save ADDS to the running totals (never replaces)
   const [addGood,      setAddGood]      = useState('');
@@ -350,6 +352,13 @@ function ShopFloorCard({
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* ── Per-JO shift band (this shift, this job order's data) ── */}
+      {shiftStatus?.active && (
+        <div className="px-5 pb-3">
+          <JobShiftBand status={shiftStatus} machine={machineShift} machineName={jo.machine?.name} />
         </div>
       )}
 
@@ -725,6 +734,14 @@ export function ShopFloorView() {
   });
 
   const allJobs: ShopFloorJO[] = (rawData as any) ?? [];
+
+  // Per-machine shift context (this shift) keyed by machineId → drives each card's shift band
+  const shiftA: any = shiftAnalysis;
+  const machineShiftMap = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const row of (shiftA?.machines ?? [])) m.set(row.id, row);
+    return m;
+  }, [shiftA]);
   const users: Operator[] = (((usersData as any)?.data) ?? []).map((u: any) => ({
     id: u.id, name: u.name, nameAr: u.nameAr,
   }));
@@ -937,9 +954,6 @@ export function ShopFloorView() {
 
       {/* ── Main grid ── */}
       <div className="flex-1 p-4 max-w-screen-2xl mx-auto w-full space-y-4">
-        {/* Smart current-shift summary band */}
-        <ShiftSummaryBand shift={shiftAnalysis} />
-
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -970,6 +984,8 @@ export function ShopFloorView() {
                   onAssignOperator={(id, operatorId) => operatorMut.mutate({ id, operatorId })}
                   onOpenLive={openLive}
                   onAction={openAction}
+                  shiftStatus={shiftA?.status}
+                  machineShift={jo.machine?.id ? machineShiftMap.get(jo.machine.id) : undefined}
                 />
               ))}
             </div>

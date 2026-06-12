@@ -995,7 +995,8 @@ model ShiftTemplate {
   breakMinutes           Int      @default(30)
   cleaningMinutes        Int      @default(30)
   days                   Json // [0=Sun,1=Mon,...,6=Sat]
-  targetQtyPerShift      Int? // default production target per shift per line (boxes/packs)
+  targetQtyPerShift      Int? // default production target per shift per line
+  targetUnit             String   @default("CARTON") // unit of targetQtyPerShift: PIECE/INNER/CARTON/PALLET
   isActive               Boolean  @default(true)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt

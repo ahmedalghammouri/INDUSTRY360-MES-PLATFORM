@@ -59,6 +59,10 @@ export class CreateShiftTemplateDto {
   @IsOptional() @IsInt() @Min(0)
   targetQtyPerShift?: number;
 
+  @ApiPropertyOptional({ example: 'CARTON', description: 'Unit of the target: PIECE/INNER/CARTON/PALLET' })
+  @IsOptional() @IsString()
+  targetUnit?: string;
+
   @ApiPropertyOptional({ default: true })
   @IsOptional() @IsBoolean()
   isActive?: boolean;

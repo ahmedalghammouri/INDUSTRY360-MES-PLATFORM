@@ -31,7 +31,7 @@ type FormState = {
   startTime: string; endTime: string;
   shiftDurationHours: string; plannedProductionHours: string;
   breakMinutes: string; cleaningMinutes: string;
-  days: number[]; targetQtyPerShift: string; isActive: boolean;
+  days: number[]; targetQtyPerShift: string; targetUnit: string; isActive: boolean;
 };
 
 const EMPTY: FormState = {
@@ -39,7 +39,7 @@ const EMPTY: FormState = {
   startTime: '07:30', endTime: '19:30',
   shiftDurationHours: '12', plannedProductionHours: '11',
   breakMinutes: '30', cleaningMinutes: '30',
-  days: [6, 0, 1, 2, 3, 4], targetQtyPerShift: '3000', isActive: true,
+  days: [6, 0, 1, 2, 3, 4], targetQtyPerShift: '3000', targetUnit: 'CARTON', isActive: true,
 };
 
 function toForm(t: ShiftTemplate): FormState {
@@ -50,6 +50,7 @@ function toForm(t: ShiftTemplate): FormState {
     plannedProductionHours: String(t.plannedProductionHours),
     breakMinutes: String(t.breakMinutes), cleaningMinutes: String(t.cleaningMinutes),
     days: t.days ?? [], targetQtyPerShift: t.targetQtyPerShift != null ? String(t.targetQtyPerShift) : '',
+    targetUnit: (t as any).targetUnit ?? 'CARTON',
     isActive: t.isActive,
   };
 }
@@ -65,6 +66,7 @@ function toPayload(f: FormState): ShiftTemplateInput {
     cleaningMinutes: Number(f.cleaningMinutes) || 0,
     days: f.days,
     targetQtyPerShift: f.targetQtyPerShift ? Number(f.targetQtyPerShift) : undefined,
+    targetUnit: f.targetUnit,
     isActive: f.isActive,
   };
 }
@@ -437,6 +439,32 @@ export function ShiftConfigView() {
           <div className="space-y-1.5 col-span-2">
             <Label>Target qty / shift</Label>
             <Input type="number" value={form.targetQtyPerShift} onChange={(e) => patch({ targetQtyPerShift: e.target.value })} placeholder="3000" />
+            {/* Unit of the target — used to convert per-step targets & finished output */}
+            <div className="flex items-center gap-2 pt-1">
+              {[
+                { value: 'PIECE', label: 'PCS' },
+                { value: 'INNER', label: 'INNER' },
+                { value: 'CARTON', label: 'CARTON' },
+                { value: 'PALLET', label: 'PALLET' },
+              ].map((u) => (
+                <button
+                  key={u.value}
+                  type="button"
+                  onClick={() => patch({ targetUnit: u.value })}
+                  className={`flex-1 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                    form.targetUnit === u.value
+                      ? 'border-brand-400 bg-brand-500/15 text-brand-400'
+                      : 'border-border bg-muted/40 text-muted-foreground hover:border-brand-400/40'
+                  }`}
+                >
+                  {u.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              The target unit defines the finished-goods unit. Per-step targets are auto-converted
+              from this via the product packaging (e.g. cartons → inners / pallets).
+            </p>
           </div>
 
           <div className="space-y-2 col-span-2">

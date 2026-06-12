@@ -19,6 +19,53 @@ const fmtMins = (m: number | null | undefined) => {
   return h > 0 ? `${h}h ${mm}m` : `${mm}m`;
 };
 
+/**
+ * Per-job-order shift band — the CURRENT shift, but with THIS job order's data:
+ * its production this shift vs the shift target converted to this step's own
+ * output unit (base unit → outUnit via the product packaging). Used on each shop
+ * floor card and on the live dashboard (below the filters).
+ */
+export function JobShiftBand({ status, machine, machineName }: { status: any; machine: any; machineName?: string }) {
+  if (!status?.active) return null;
+  const a = status.active;
+  const timePct = Math.min(100, status.timeProgressPct ?? 0);
+  const good = machine?.good ?? 0;
+  const unit = machine?.unit ?? '';
+  const target = machine?.shiftTarget ?? null;
+  const outPct = machine?.shiftTargetPct ?? (target ? Math.round((good / target) * 1000) / 10 : null);
+  const onTrack = outPct != null ? outPct >= timePct - 5 : true;
+  return (
+    <div className="rounded-xl border border-border/50 bg-muted/20 px-3 py-2">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold">
+          <Clock className={`w-3.5 h-3.5 ${status.isActiveNow ? 'text-green-400' : 'text-muted-foreground'}`} />
+          {a.name}
+          <span className="text-muted-foreground/60 font-mono font-normal">{a.window}</span>
+        </span>
+        <span className="text-[10px] text-muted-foreground">{fmtMins(status.elapsedMin)} / {fmtMins(status.elapsedMin + status.remainingMin)}</span>
+      </div>
+      {/* Time progress */}
+      <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-1.5">
+        <div className="h-full rounded-full bg-brand-500/60" style={{ width: `${timePct}%` }} />
+      </div>
+      {/* This JO's shift output vs step target */}
+      {target != null ? (
+        <>
+          <div className="flex items-center justify-between text-[10px] mb-0.5">
+            <span className="text-muted-foreground">Shift output {good.toLocaleString()} / {target.toLocaleString()} {unit}</span>
+            <span className={onTrack ? 'text-green-400' : 'text-amber-400'}>{onTrack ? 'On track' : 'Behind'} · {outPct ?? 0}%</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+            <div className={`h-full rounded-full ${onTrack ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(100, outPct ?? 0)}%` }} />
+          </div>
+        </>
+      ) : (
+        <div className="text-[10px] text-muted-foreground">Shift output {good.toLocaleString()} {unit}{machineName ? ` · ${machineName}` : ''}</div>
+      )}
+    </div>
+  );
+}
+
 export function ShiftSummaryBand({ shift, compact }: { shift: any; compact?: boolean }) {
   if (!shift?.status?.active) return null;
   const s = shift.status;
@@ -53,7 +100,7 @@ export function ShiftSummaryBand({ shift, compact }: { shift: any; compact?: boo
           {t?.target != null && (
             <div>
               <div className="flex items-center justify-between text-[11px] mb-0.5">
-                <span className="text-muted-foreground">Output {t.good.toLocaleString()} / {t.target.toLocaleString()}</span>
+                <span className="text-muted-foreground">Finished output {t.good.toLocaleString()} / {t.target.toLocaleString()} {t.unit ?? ''}</span>
                 <span className={onTrack ? 'text-green-400' : 'text-amber-400'}>{onTrack ? 'On track' : 'Behind pace'} · {outPct}%</span>
               </div>
               <div className="h-2 rounded-full bg-muted overflow-hidden"><div className={`h-full rounded-full ${onTrack ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(100, outPct ?? 0)}%` }} /></div>
@@ -62,7 +109,7 @@ export function ShiftSummaryBand({ shift, compact }: { shift: any; compact?: boo
         </div>
         {!compact && t && (
           <div className="flex items-center divide-x divide-border/50 text-center">
-            <div className="px-3"><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Good</div><div className="text-base font-bold tabular-nums text-green-400">{t.good.toLocaleString()}</div></div>
+            <div className="px-3"><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Good · {t.unit ?? 'base'}</div><div className="text-base font-bold tabular-nums text-green-400">{t.good.toLocaleString()}</div></div>
             {t.scrap > 0 && <div className="px-3"><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Scrap</div><div className="text-base font-bold tabular-nums text-red-400">{t.scrap.toLocaleString()}</div></div>}
             {t.quality != null && <div className="px-3"><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Quality</div><div className="text-base font-bold tabular-nums">{t.quality}%</div></div>}
             <div className="px-3"><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Running</div><div className="text-base font-bold tabular-nums">{t.runningMachines}/{t.totalMachines}</div></div>

@@ -4,6 +4,7 @@ import {
 import { Prisma, DowntimeCategory, DowntimeReasonCode } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
+import { toBaseUnits, convertUnits } from '../../common/units.util';
 import {
   CreateShiftTemplateDto, UpdateShiftTemplateDto, GenerateInstancesDto,
   ListInstancesQueryDto, StartShiftDto, CompleteShiftDto,
@@ -99,6 +100,8 @@ export class ShiftService {
         breakMinutes: dto.breakMinutes ?? 0,
         cleaningMinutes: dto.cleaningMinutes ?? 0,
         days: dto.days,
+        targetQtyPerShift: dto.targetQtyPerShift ?? null,
+        targetUnit: dto.targetUnit ?? 'CARTON',
         isActive: dto.isActive ?? true,
       },
       include: { _count: { select: { instances: true } } },
@@ -140,6 +143,8 @@ export class ShiftService {
         ...(dto.breakMinutes !== undefined && { breakMinutes: dto.breakMinutes }),
         ...(dto.cleaningMinutes !== undefined && { cleaningMinutes: dto.cleaningMinutes }),
         ...(dto.days !== undefined && { days: dto.days }),
+        ...(dto.targetQtyPerShift !== undefined && { targetQtyPerShift: dto.targetQtyPerShift }),
+        ...(dto.targetUnit !== undefined && { targetUnit: dto.targetUnit }),
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
       },
       include: { _count: { select: { instances: true } } },
@@ -400,6 +405,7 @@ export class ShiftService {
         shiftDurationHours: active.shiftDurationHours,
         breakMinutes: active.breakMinutes, cleaningMinutes: active.cleaningMinutes,
         targetQtyPerShift: active.targetQtyPerShift,
+        targetUnit: active.targetUnit ?? 'CARTON',
       },
       shiftStart: startDt.toISOString(),
       shiftEnd: endDt.toISOString(),
@@ -429,7 +435,7 @@ export class ShiftService {
     const from = new Date(status.shiftStart);
     const to = new Date(status.now);
 
-    const [events, downtimeEvents, machines, oeeRecords] = await Promise.all([
+    const [events, downtimeEvents, machines, oeeRecords, activeJos] = await Promise.all([
       this.prisma.productionEvent.findMany({
         where: { factoryId: fid, eventType: 'COUNT_UPDATE', timestamp: { gte: from, lte: to } },
         select: { machineId: true, metadata: true },
@@ -453,9 +459,33 @@ export class ShiftService {
         where: { factoryId: fid, recordDate: { gte: new Date(from.getFullYear(), from.getMonth(), from.getDate()) } },
         select: { machineId: true, oee: true, availability: true, performance: true, quality: true },
       }),
+      // Active job orders give each machine its output UNIT + product packaging, so
+      // production can be normalised to the base unit before aggregating.
+      this.prisma.jobOrder.findMany({
+        where: { factoryId: fid, status: { in: ['EXECUTING', 'PAUSED', 'COMPLETE'] }, machineId: { not: null }, actualStart: { not: null } },
+        select: {
+          machineId: true, workOrderId: true, sequenceOrder: true, outputUnit: true,
+          workOrder: { select: { sku: { select: { baseUnit: true, unitsPerInner: true, innersPerCarton: true, cartonsPerPallet: true, name: true } } } },
+        },
+      }),
     ]);
 
-    // Per-machine production from recorded count deltas
+    // ── Unit-aware production: each step records output in its own packaging unit
+    // (inners → cartons → pallets), so we convert to base units. To avoid double
+    // counting the SAME material as it flows through the line, the shift "finished
+    // output" is taken from the TERMINAL step of each work order; scrap is summed
+    // across all steps (every reject is a real loss). ──
+    const joByMachine = new Map<string, any>();
+    const maxSeqByWO = new Map<string, number>();
+    for (const jo of activeJos) {
+      if (!jo.machineId) continue;
+      // keep the latest-sequence JO per machine (the step it's running now)
+      const prev = joByMachine.get(jo.machineId);
+      if (!prev || jo.sequenceOrder > prev.sequenceOrder) joByMachine.set(jo.machineId, jo);
+      maxSeqByWO.set(jo.workOrderId, Math.max(maxSeqByWO.get(jo.workOrderId) ?? 0, jo.sequenceOrder));
+    }
+
+    // Per-machine production from recorded count deltas (in the machine's own unit)
     const prodByMachine = new Map<string, { good: number; scrap: number }>();
     for (const ev of events) {
       const meta = (ev.metadata ?? {}) as any;
@@ -465,6 +495,11 @@ export class ShiftService {
       cur.scrap += meta.scrapDelta ?? 0;
       prodByMachine.set(ev.machineId, cur);
     }
+
+    // Resolve the shift's base unit from the products in play (single product → its
+    // base unit; otherwise fall back to base pieces).
+    const baseUnits = new Set(activeJos.map((j) => j.workOrder?.sku?.baseUnit ?? 'EA'));
+    const shiftBaseUnit = baseUnits.size === 1 ? [...baseUnits][0] : 'EA';
 
     // Per-machine downtime (clamped to the shift window) + reason tally
     const clamp = (s: Date, e: Date | null) => {
@@ -492,42 +527,72 @@ export class ShiftService {
       oeeByMachine.set(o.machineId, o.oee);
     }
 
+    // The shift target is defined in a chosen unit (PIECE/INNER/CARTON/PALLET);
+    // express finished output + scrap in that SAME unit so the comparison is direct.
+    const targetQty = status.active.targetQtyPerShift ?? null;
+    const targetUnit = (status.active as any).targetUnit ?? shiftBaseUnit;
+
+    let finishedGoodTarget = 0; // finished output (terminal steps) in target unit
+    let totalScrapTarget = 0;   // all rejects across steps in target unit
+
     const machineRows = machines.map((m) => {
       const p = prodByMachine.get(m.id) ?? { good: 0, scrap: 0 };
+      const jo = joByMachine.get(m.id);
+      const unit = jo?.outputUnit ?? null;
+      const sku = jo?.workOrder?.sku ?? null;
+      const isTerminal = jo ? jo.sequenceOrder >= (maxSeqByWO.get(jo.workOrderId) ?? jo.sequenceOrder) : false;
+      // Convert this step's output to the target unit (and to base, for reference)
+      const goodTarget = sku && unit ? convertUnits(p.good, unit, targetUnit, sku) : p.good;
+      const scrapTarget = sku && unit ? convertUnits(p.scrap, unit, targetUnit, sku) : p.scrap;
+      const goodBase = sku ? toBaseUnits(p.good, unit, sku) : p.good;
+      if (isTerminal) finishedGoodTarget += goodTarget;
+      totalScrapTarget += scrapTarget;
       const total = p.good + p.scrap;
+      // This step's shift target, converted from the target unit to the step's own
+      // output unit via the packaging relationship.
+      const stepTarget = targetQty != null && sku && unit
+        ? Math.round(convertUnits(targetQty, targetUnit, unit, sku))
+        : targetQty;
       return {
         id: m.id, name: m.name, code: m.code,
         state: m.currentStatus?.state ?? 'OFFLINE',
         good: Math.round(p.good), scrap: Math.round(p.scrap),
+        unit,                              // the machine's own packaging unit
+        goodBase: Math.round(goodBase),    // equivalent in the product base unit
+        isTerminal,                        // true = finished-goods step of its WO
+        shiftTarget: stepTarget,           // shift target in THIS step's unit
+        shiftTargetPct: stepTarget ? Math.round((p.good / stepTarget) * 1000) / 10 : null,
         quality: total > 0 ? Math.round((p.good / total) * 1000) / 10 : null,
         downtimeMins: Math.round((downByMachine.get(m.id) ?? 0) * 10) / 10,
         oee: m.currentStatus?.oee ?? oeeByMachine.get(m.id) ?? null,
       };
-    }).sort((a, b) => b.good - a.good);
+    }).sort((a, b) => b.goodBase - a.goodBase);
 
-    const totalGood = machineRows.reduce((s, m) => s + m.good, 0);
-    const totalScrap = machineRows.reduce((s, m) => s + m.scrap, 0);
-    const grand = totalGood + totalScrap;
-    const target = status.active.targetQtyPerShift ?? null;
+    const finishedGood = Math.round(finishedGoodTarget);
+    const scrapTarget = Math.round(totalScrapTarget);
+    const grand = finishedGood + scrapTarget;
+    const target = targetQty;
     const runningMachines = machineRows.filter((m) => m.state === 'RUNNING').length;
 
     return {
       status,
       totals: {
-        good: totalGood,
-        scrap: totalScrap,
+        // finished output + scrap expressed in the shift TARGET unit
+        good: finishedGood,
+        scrap: scrapTarget,
         total: grand,
-        quality: grand > 0 ? Math.round((totalGood / grand) * 1000) / 10 : null,
+        unit: targetUnit,
+        quality: grand > 0 ? Math.round((finishedGood / grand) * 1000) / 10 : null,
         target,
-        targetProgressPct: target ? Math.round((totalGood / target) * 1000) / 10 : null,
+        targetProgressPct: target ? Math.round((finishedGood / target) * 1000) / 10 : null,
         runningMachines,
         totalMachines: machineRows.length,
         downtimeMins: Math.round(totalDownMins * 10) / 10,
         plannedDownMins: Math.round(plannedDownMins * 10) / 10,
         unplannedDownMins: Math.round((totalDownMins - plannedDownMins) * 10) / 10,
-        // pace vs the time elapsed in the shift
-        paceGoodPerHr: status.elapsedMin > 0 ? Math.round((totalGood / status.elapsedMin) * 60) : null,
-        projectedGood: status.elapsedMin > 0 ? Math.round((totalGood / status.elapsedMin) * status.totalMin) : null,
+        // pace vs the time elapsed in the shift (finished base units / hr)
+        paceGoodPerHr: status.elapsedMin > 0 ? Math.round((finishedGood / status.elapsedMin) * 60) : null,
+        projectedGood: status.elapsedMin > 0 ? Math.round((finishedGood / status.elapsedMin) * status.totalMin) : null,
       },
       machines: machineRows,
       downtime: {

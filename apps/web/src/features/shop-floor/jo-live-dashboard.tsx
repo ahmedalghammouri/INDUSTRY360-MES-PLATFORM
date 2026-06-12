@@ -37,7 +37,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { useBreadcrumbStore } from '@/store/breadcrumb-store';
 import { JobFilterBar } from './job-filter-bar';
-import { ShiftSummaryBand } from './shift-summary-band';
+import { ShiftSummaryBand, JobShiftBand } from './shift-summary-band';
 import {
   MaintenanceRequestDialog, MachineStateDialog, AlarmDialog,
   type JOActionTarget,
@@ -656,8 +656,8 @@ function ShiftAnalysisPanel({ shift, currentMachineId }: { shift: any; currentMa
 
       {/* Shift KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-        <KpiTile icon={<Package className="w-4 h-4" />} label="Good (shift)" value={t.good.toLocaleString()} tone="bg-green-500/15 text-green-400" />
-        <KpiTile icon={<AlertTriangle className="w-4 h-4" />} label="Scrap (shift)" value={t.scrap.toLocaleString()} tone="bg-red-500/15 text-red-400" />
+        <KpiTile icon={<Package className="w-4 h-4" />} label={`Finished · ${t.unit ?? 'base'}`} value={t.good.toLocaleString()} sub="terminal step, base-unit" tone="bg-green-500/15 text-green-400" />
+        <KpiTile icon={<AlertTriangle className="w-4 h-4" />} label="Scrap (shift)" value={t.scrap.toLocaleString()} sub={`in ${t.unit ?? 'base'}`} tone="bg-red-500/15 text-red-400" />
         <KpiTile icon={<CheckCircle2 className="w-4 h-4" />} label="Quality" value={t.quality != null ? `${t.quality}%` : '—'} />
         <KpiTile icon={<Zap className="w-4 h-4" />} label="Pace" value={t.paceGoodPerHr != null ? `${t.paceGoodPerHr.toLocaleString()}/hr` : '—'} sub={t.projectedGood != null ? `proj. ${t.projectedGood.toLocaleString()}` : undefined} />
         <KpiTile icon={<Cpu className="w-4 h-4" />} label="Running" value={`${t.runningMachines}/${t.totalMachines}`} sub="machines" />
@@ -665,15 +665,25 @@ function ShiftAnalysisPanel({ shift, currentMachineId }: { shift: any; currentMa
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Per-machine breakdown */}
-        <SectionCard title="Machines this Shift" icon={<Cpu className="w-4 h-4 text-brand-400" />}>
+        {/* Per-machine breakdown — own packaging unit + base-unit equivalent */}
+        <SectionCard title="Machines this Shift" icon={<Cpu className="w-4 h-4 text-brand-400" />}
+          right={<span className="text-[10px] text-muted-foreground">★ = finished-goods step</span>}>
           <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
             {shift.machines.map((m: any) => (
               <div key={m.id} className={`rounded-lg border px-3 py-2 flex items-center gap-2 ${m.id === currentMachineId ? 'border-brand-400/50 bg-brand-500/5' : 'border-border/40 bg-background/40'}`}>
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: STATE_COLORS[m.state] ?? '#64748b' }} />
                 <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">{m.code}</span>
-                <span className="text-sm font-medium truncate flex-1">{m.name}{m.id === currentMachineId && <span className="text-[9px] text-brand-400 ml-1.5">this JO</span>}</span>
-                <span className="text-xs text-green-400 tabular-nums">{m.good.toLocaleString()}</span>
+                <span className="text-sm font-medium truncate flex-1 flex items-center gap-1">
+                  {m.isTerminal && <span className="text-amber-400" title="Finished-goods (terminal) step">★</span>}
+                  {m.name}
+                  {m.id === currentMachineId && <span className="text-[9px] text-brand-400 ml-1">this JO</span>}
+                </span>
+                <span className="text-xs text-green-400 tabular-nums">
+                  {m.good.toLocaleString()}<span className="text-[9px] text-muted-foreground ml-0.5">{m.unit ?? ''}</span>
+                </span>
+                {m.unit && m.goodBase !== m.good && (
+                  <span className="text-[10px] text-muted-foreground tabular-nums" title="Base-unit equivalent">≈{m.goodBase.toLocaleString()}</span>
+                )}
                 {m.scrap > 0 && <span className="text-[10px] text-red-400 tabular-nums">✗{m.scrap}</span>}
                 {m.oee != null && <span className="text-[10px] text-muted-foreground tabular-nums w-12 text-right">OEE {Math.round(m.oee)}%</span>}
               </div>
@@ -990,8 +1000,14 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
           {navJobs.length === 0 && <span className="text-xs text-muted-foreground py-1.5">No job orders match the filters.</span>}
         </div>
 
-        {/* ── Current shift summary (below the filters) ── */}
-        <ShiftSummaryBand shift={shiftData} />
+        {/* ── This job order's shift context (below the filters) ── */}
+        {(shiftData as any)?.status?.active && (
+          <JobShiftBand
+            status={(shiftData as any).status}
+            machine={((shiftData as any).machines ?? []).find((m: any) => m.id === d.machine?.id)}
+            machineName={d.machine?.name}
+          />
+        )}
 
         {/* ── Open downtime banner ── */}
         {dt.open && (
