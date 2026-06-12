@@ -35,7 +35,7 @@ type DowntimeCategory = 'MECHANICAL' | 'ELECTRICAL' | 'PROCESS' | 'MATERIAL' | '
 
 interface Machine { id: string; name: string; code: string; }
 interface WorkOrderRef { id: string; orderNumber: string; status: string; }
-interface ReasonNode {
+export interface ReasonNode {
   id: string;
   code: string;
   name: string;
@@ -73,7 +73,7 @@ interface DowntimeEvent {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const REASON_CODE_CFG: Record<DowntimeReasonCode, { label: string; color: string; bg: string; icon: React.ElementType }> = {
+export const REASON_CODE_CFG: Record<DowntimeReasonCode, { label: string; color: string; bg: string; icon: React.ElementType }> = {
   PLANNED_MAINTENANCE:  { label: 'Planned Maintenance', color: 'text-blue-400',   bg: 'bg-blue-500/15 border-blue-500/30',   icon: Wrench },
   CHANGEOVER:           { label: 'Changeover',          color: 'text-violet-400', bg: 'bg-violet-500/15 border-violet-500/30', icon: RefreshCw },
   UNPLANNED_BREAKDOWN:  { label: 'Breakdown',           color: 'text-red-400',    bg: 'bg-red-500/15 border-red-500/30',     icon: AlertTriangle },
@@ -116,7 +116,7 @@ const L1_ICON = Network;
 const L2_ICON = GitBranch;
 const L3_ICON = CircleDot;
 
-interface CauseSelection {
+export interface CauseSelection {
   id: string;
   l1Name: string;
   l2Name: string;
@@ -148,7 +148,7 @@ function flattenTree(tree: ReasonNode[], machineId?: string): CauseSelection[] {
   return out;
 }
 
-function CauseTreeSelect({
+export function CauseTreeSelect({
   reasonTree,
   value,
   machineId,
@@ -1384,24 +1384,15 @@ function LiveTab({ machines, reasonTree }: { machines: Machine[]; reasonTree: Re
                   )}
                 </div>
 
-                {/* Row 3: Work Center + Start Time */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <Label className="text-xs font-medium">Work Center (optional)</Label>
-                    <WorkCenterPicker
-                      value={form.workCenterId || null}
-                      onChange={handleWCChange}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label className="text-xs font-medium">Start Time (leave blank = now)</Label>
-                    <Input
-                      type="datetime-local"
-                      value={form.startTime}
-                      onChange={e => setForm(p => ({ ...p, startTime: e.target.value }))}
-                      className="h-10 text-sm"
-                    />
-                  </div>
+                {/* Row 3: Start Time */}
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs font-medium">Start Time (leave blank = now)</Label>
+                  <Input
+                    type="datetime-local"
+                    value={form.startTime}
+                    onChange={e => setForm(p => ({ ...p, startTime: e.target.value }))}
+                    className="h-10 text-sm"
+                  />
                 </div>
 
                 {/* Row 4: Notes */}

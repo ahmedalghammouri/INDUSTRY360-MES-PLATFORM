@@ -18,8 +18,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
+import {
+  CauseTreeSelect, type ReasonNode, type CauseSelection,
+} from '@/features/production/production-downtime-view';
 
 // ─────────────────────────────────────────────────────────────
 // Shared bits
@@ -161,15 +165,6 @@ const MACHINE_STATES: Array<{ value: string; label: string; tone: string; down: 
   { value: 'MAINTENANCE', label: 'Maintenance',      tone: 'text-cyan-400',   down: true },
 ];
 
-interface CauseNode {
-  id: string;
-  name: string;
-  nameAr?: string;
-  code: string;
-  category: string;
-  isPlanned?: boolean;
-}
-
 export function MachineStateDialog({
   open, onOpenChange, target,
 }: {
@@ -181,18 +176,18 @@ export function MachineStateDialog({
   const qc = useQueryClient();
   const [state, setState] = useState('BREAKDOWN');
   const [causeId, setCauseId] = useState('');
+  const [cause, setCause] = useState<CauseSelection | null>(null);
   const [reason, setReason] = useState('');
 
   const isDown = MACHINE_STATES.find((s) => s.value === state)?.down ?? false;
 
-  // Downtime reason codes scoped to this machine (factory-level + machine-specific)
-  const { data: causesData } = useQuery({
-    queryKey: ['downtime-causes', target?.machineId],
-    queryFn: () => api.get('/production/downtime/causes', { params: { machineId: target?.machineId } }),
-    enabled: open && !!target?.machineId,
+  // 3-level NCC reason tree (Category → Sub-category → Specific Reason)
+  const { data: reasonTree = [] } = useQuery<ReasonNode[]>({
+    queryKey: ['downtime-reason-tree'],
+    queryFn: () => api.get('/production/downtime/reasons/tree'),
+    enabled: open,
     staleTime: 300_000,
   });
-  const causes: CauseNode[] = ((causesData as any) ?? []).filter((c: any) => c.isActive !== false);
 
   const mut = useMutation({
     mutationFn: () =>
@@ -209,7 +204,7 @@ export function MachineStateDialog({
       qc.invalidateQueries({ queryKey: ['shop-floor-jobs'] });
       qc.invalidateQueries({ queryKey: ['jo-live'] });
       onOpenChange(false);
-      setReason(''); setCauseId('');
+      setReason(''); setCauseId(''); setCause(null);
     },
     onError: (e: any) => toast({
       variant: 'destructive', title: 'State change failed', description: e?.response?.data?.message,
@@ -251,14 +246,19 @@ export function MachineStateDialog({
           </Field>
           {isDown && (
             <Field label="Stop reason (downtime cause)">
-              <select value={causeId} onChange={(e) => setCauseId(e.target.value)} className={inputCls}>
-                <option value="">— Select reason code —</option>
-                {causes.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    [{c.code}] {c.name} ({c.category})
-                  </option>
-                ))}
-              </select>
+              <CauseTreeSelect
+                reasonTree={reasonTree}
+                value={causeId}
+                machineId={target?.machineId || undefined}
+                onChange={(id, sel) => { setCauseId(id); setCause(sel); }}
+              />
+              {cause && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span className="text-[10px] text-muted-foreground">Category:</span>
+                  <Badge variant="outline" className="text-[10px] h-4">{cause.category}</Badge>
+                  {cause.isPlanned && <Badge variant="outline" className="text-[10px] h-4 text-blue-400 border-blue-500/30">Planned Stop</Badge>}
+                </div>
+              )}
             </Field>
           )}
           <Field label={isDown ? 'Details / root cause' : 'Note (optional)'}>

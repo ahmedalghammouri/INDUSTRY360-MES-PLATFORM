@@ -36,12 +36,14 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { useBreadcrumbStore } from '@/store/breadcrumb-store';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { JobFilterBar } from './job-filter-bar';
 import { ShiftSummaryBand, JobShiftBand } from './shift-summary-band';
 import {
   MaintenanceRequestDialog, MachineStateDialog, AlarmDialog,
   type JOActionTarget,
 } from './shop-floor-actions';
+import { LogDowntimeDialog } from './log-downtime-dialog';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -790,7 +792,7 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
   const router = useRouter();
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [actionKind, setActionKind] = useState<'maintenance' | 'state' | 'alarm' | null>(null);
+  const [actionKind, setActionKind] = useState<'maintenance' | 'state' | 'alarm' | 'downtime' | null>(null);
   const [machineSel, setMachineSel] = useState<string[]>([]);
   const [poSel, setPoSel] = useState('');
   const [woSel, setWoSel] = useState('');
@@ -862,6 +864,15 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
     .filter((j) => ['READY', 'EXECUTING', 'PAUSED', 'COMPLETE'].includes(j.status))
     .sort((a, b) => (a.workOrder?.orderNumber ?? '').localeCompare(b.workOrder?.orderNumber ?? '') || a.sequenceOrder - b.sequenceOrder),
     [jobs, machineSel, poSel, woSel]);
+
+  // Make the filters actually DO something: when a filter excludes the current job
+  // order, jump to the first matching one so picking a machine/PO/WO navigates.
+  useEffect(() => {
+    if (!navJobs.length) return;
+    if (!navJobs.some((j: any) => j.id === jobOrderId)) {
+      router.push(`/shop-floor/live/${navJobs[0].id}`);
+    }
+  }, [navJobs, jobOrderId, router]);
 
   // Trend series → chart data
   const trendData = useMemo(() => {
@@ -945,8 +956,11 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
             <Button variant="outline" size="sm" className="text-amber-400 border-amber-400/40" onClick={() => setActionKind('maintenance')}>
               <Wrench className="w-3.5 h-3.5 mr-1.5" />Maintenance
             </Button>
+            <Button variant="outline" size="sm" className="text-red-400 border-red-400/40" onClick={() => setActionKind('downtime')}>
+              <AlertTriangle className="w-3.5 h-3.5 mr-1.5" />Log Downtime
+            </Button>
             <Button variant="outline" size="sm" className="text-orange-400 border-orange-400/40" onClick={() => setActionKind('state')}>
-              <AlertTriangle className="w-3.5 h-3.5 mr-1.5" />Stop / State
+              <AlertTriangle className="w-3.5 h-3.5 mr-1.5" />State
             </Button>
             <Button variant="outline" size="sm" className="text-red-400 border-red-400/40" onClick={() => setActionKind('alarm')}>
               <BellRing className="w-3.5 h-3.5 mr-1.5" />Alarm
@@ -962,7 +976,7 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
       </div>
 
       <div className="max-w-screen-2xl mx-auto p-4 space-y-4">
-        {/* ── Smart filters (same as Shop Floor) + job-order navigation chips ── */}
+        {/* ── Smart filters (same as Shop Floor) — switch job order via WO/machine ── */}
         <JobFilterBar
           machines={machineOptions}
           pos={poOptions}
@@ -973,32 +987,23 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
           onPo={setPoSel}
           wo={woSel}
           onWo={setWoSel}
-          right={<span className="text-xs text-muted-foreground tabular-nums">{navJobs.length} job{navJobs.length === 1 ? '' : 's'}</span>}
+          right={
+            navJobs.length > 0 ? (
+              <SelectMenu
+                value={jobOrderId}
+                onValueChange={(v) => v && v !== jobOrderId && router.push(`/shop-floor/live/${v}`)}
+                options={navJobs.map((j: any) => ({
+                  value: j.id,
+                  label: `${j.workOrder?.orderNumber ?? ''} · #${j.sequenceOrder} ${j.operationName} (${j.status})`,
+                }))}
+                placeholder="Switch job order"
+                size="sm"
+              />
+            ) : (
+              <span className="text-xs text-muted-foreground">No matching job orders</span>
+            )
+          }
         />
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 -mt-1">
-          {navJobs.map((j) => {
-            const active = j.id === jobOrderId;
-            const dot = j.status === 'EXECUTING' ? 'bg-green-400' : j.status === 'PAUSED' ? 'bg-amber-400' : j.status === 'COMPLETE' ? 'bg-emerald-400' : 'bg-blue-400';
-            return (
-              <button
-                key={j.id}
-                onClick={() => !active && router.push(`/shop-floor/live/${j.id}`)}
-                className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors ${
-                  active
-                    ? 'border-brand-400 bg-brand-500/15 text-brand-400 font-semibold'
-                    : 'border-border/60 bg-muted/30 text-muted-foreground hover:border-brand-400/40 hover:text-foreground'
-                }`}
-                title={`${j.workOrder?.orderNumber ?? ''} · ${j.operationName} (${j.status})`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${dot} ${j.status === 'EXECUTING' ? 'animate-pulse' : ''}`} />
-                <span className="font-mono">#{j.sequenceOrder}</span>
-                <span className="truncate max-w-[120px]">{j.operationName}</span>
-                {j.machine?.code && <span className="text-[10px] opacity-60 font-mono">{j.machine.code}</span>}
-              </button>
-            );
-          })}
-          {navJobs.length === 0 && <span className="text-xs text-muted-foreground py-1.5">No job orders match the filters.</span>}
-        </div>
 
         {/* ── This job order's shift context (below the filters) ── */}
         {(shiftData as any)?.status?.active && (
@@ -1559,6 +1564,7 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
       {/* ── Action dialogs (shared with shop floor cards) ── */}
       <MaintenanceRequestDialog open={actionKind === 'maintenance'} onOpenChange={(v) => !v && setActionKind(null)} target={target} />
       <MachineStateDialog open={actionKind === 'state'} onOpenChange={(v) => !v && setActionKind(null)} target={target} />
+      <LogDowntimeDialog open={actionKind === 'downtime'} onOpenChange={(v) => !v && setActionKind(null)} target={target} />
       <AlarmDialog open={actionKind === 'alarm'} onOpenChange={(v) => !v && setActionKind(null)} target={target} />
     </div>
   );
