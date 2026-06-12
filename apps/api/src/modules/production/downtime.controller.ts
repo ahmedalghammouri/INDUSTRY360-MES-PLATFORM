@@ -204,6 +204,30 @@ export class DowntimeController {
     return this.downtimeService.getDowntimeSummary(user.factoryId, from, to, { areaId, lineId, machineId });
   }
 
+  // ── Machine state (operator, shop floor) ──────────────────────
+
+  @Patch('machines/:id/state')
+  @RequirePermissions('production:execute')
+  @AuditLog('MACHINE_STATE_CHANGE')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Operator machine-state change — syncs state timeline, downtime event and linked job order' })
+  async setMachineState(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: {
+      state: string;
+      downtimeCauseId?: string;
+      reasonCode?: string;
+      category?: string;
+      reason?: string;
+      notes?: string;
+      jobOrderId?: string;
+      workOrderId?: string;
+    },
+  ) {
+    return this.downtimeService.setMachineState(user.factoryId, user.id, id, dto);
+  }
+
   // ── Reason Tree ────────────────────────────────────────────────
 
   @Get('reasons/tree')

@@ -572,12 +572,27 @@ export class ProductionController {
 
   @Get('job-orders')
   @ApiOperation({ summary: 'List all job orders for the factory (dispatch list overview)' })
+  @ApiQuery({ name: 'machineIds', required: false, description: 'Comma-separated machine ids (multi-machine filter)' })
+  @ApiQuery({ name: 'productionOrderId', required: false })
   async listAllJobOrders(
     @CurrentUser() user: RequestUser,
     @Query('status') status?: string,
     @Query('workOrderId') workOrderId?: string,
+    @Query('productionOrderId') productionOrderId?: string,
+    @Query('machineIds') machineIds?: string,
   ) {
-    return this.productionService.listAllJobOrders(user.factoryId, { status, workOrderId });
+    return this.productionService.listAllJobOrders(user.factoryId, {
+      status, workOrderId, productionOrderId, machineIds,
+    });
+  }
+
+  @Get('job-orders/:id/live')
+  @ApiOperation({ summary: 'Live job-order dashboard payload — OEE, six losses, downtime, scrap, trends, alarms, maintenance' })
+  async jobOrderLiveDashboard(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.productionService.getJobOrderLiveDashboard(user.factoryId, id);
   }
 
   @Get('work-orders/:id/job-orders')

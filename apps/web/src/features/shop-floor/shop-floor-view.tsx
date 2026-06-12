@@ -1,17 +1,28 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Play, Pause, CheckSquare, RefreshCw, Factory, Timer,
   Cpu, Layers, Package, Box, Boxes, User, Check, X,
   AlertCircle, ClipboardList, ArrowDownCircle, GitBranch,
   GitMerge, Shuffle, ChevronRight, BarChart2, TrendingUp,
-  Clock, Zap,
+  Clock, Zap, Wrench, BellRing, AlertTriangle, Activity,
+  Filter, ChevronDown,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { api } from '@/services/api.client';
+import {
+  MaintenanceRequestDialog, MachineStateDialog, AlarmDialog,
+  type JOActionTarget,
+} from './shop-floor-actions';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -40,10 +51,10 @@ interface ShopFloorJO {
     id: string;
     orderNumber: string;
     sku?: { name: string; code: string };
-    productionOrder?: { orderNumber: string };
+    productionOrder?: { id: string; orderNumber: string };
   };
-  machine?: { name: string; code: string };
-  workCenter?: { name: string; code: string };
+  machine?: { id?: string; name: string; code: string };
+  workCenter?: { id?: string; name: string; code: string };
   predecessor?: { id: string; operationName: string; status: JOStatus };
   joQuality?: number;
   joPerformance?: number;
@@ -177,6 +188,7 @@ function useElapsed(jo: ShopFloorJO) {
 function ShopFloorCard({
   jo, users, pending,
   onTransition, onCount, onAssignOperator,
+  onOpenLive, onAction,
 }: {
   jo: ShopFloorJO;
   users: Operator[];
@@ -184,6 +196,8 @@ function ShopFloorCard({
   onTransition: (id: string, status: JOStatus, qty?: number) => void;
   onCount: (id: string, good: number, scrap: number, reason: string, category?: string) => void;
   onAssignOperator: (id: string, operatorId: string | null) => void;
+  onOpenLive: (jo: ShopFloorJO) => void;
+  onAction: (kind: 'maintenance' | 'state' | 'alarm', jo: ShopFloorJO) => void;
 }) {
   const [goodQty,      setGoodQty]      = useState(String(jo.actualQtyGood || ''));
   const [scrapQty,     setScrapQty]     = useState(String(jo.actualQtyRejected || ''));
@@ -210,8 +224,12 @@ function ShopFloorCard({
   return (
     <div className={`glass-card rounded-2xl overflow-hidden flex flex-col border-l-4 ${statusCfg.border}`}>
 
-      {/* ── Card header ── */}
-      <div className="px-5 py-4 flex items-start justify-between gap-3">
+      {/* ── Card header (click → live dashboard) ── */}
+      <div
+        className="px-5 py-4 flex items-start justify-between gap-3 cursor-pointer hover:bg-brand-500/5 transition-colors"
+        onClick={() => onOpenLive(jo)}
+        title="Open live dashboard"
+      >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <DepTag type={jo.depType} />
@@ -219,6 +237,7 @@ function ShopFloorCard({
             {jo.workOrder && (
               <span className="text-xs text-brand-400/70 font-mono">{jo.workOrder.orderNumber}</span>
             )}
+            <Activity className="w-3 h-3 text-brand-400/50 ml-auto" />
           </div>
           <h3 className="text-xl font-bold tracking-wide truncate">{jo.operationName}</h3>
           <div className="flex items-center gap-2 flex-wrap mt-1 text-sm text-muted-foreground">
@@ -440,8 +459,42 @@ function ShopFloorCard({
         </div>
       )}
 
+      {/* ── Operator quick actions: live page · maintenance · stop/state · alarm ── */}
+      <div className="px-5 py-2 border-t border-border/20 flex items-center gap-1.5 mt-auto">
+        <button
+          onClick={() => onOpenLive(jo)}
+          className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 bg-brand-500/10 hover:bg-brand-500/20 border border-brand-400/30 text-brand-400 transition-colors"
+          title="Live dashboard — KPIs, OEE, downtime, alarms"
+        >
+          <Activity className="w-3.5 h-3.5" />Live
+        </button>
+        <button
+          onClick={() => onAction('maintenance', jo)}
+          disabled={!jo.machine}
+          className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/30 text-amber-400 transition-colors disabled:opacity-30"
+          title="Request maintenance for this machine"
+        >
+          <Wrench className="w-3.5 h-3.5" />Maint.
+        </button>
+        <button
+          onClick={() => onAction('state', jo)}
+          disabled={!jo.machine}
+          className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-400/30 text-orange-400 transition-colors disabled:opacity-30"
+          title="Change machine state / log stop reason"
+        >
+          <AlertTriangle className="w-3.5 h-3.5" />Stop
+        </button>
+        <button
+          onClick={() => onAction('alarm', jo)}
+          className="flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-400/30 text-red-400 transition-colors"
+          title="Raise an alarm"
+        >
+          <BellRing className="w-3.5 h-3.5" />Alarm
+        </button>
+      </div>
+
       {/* ── Action buttons ── */}
-      <div className="px-5 py-4 border-t border-border/20 flex gap-3 mt-auto">
+      <div className="px-5 py-4 border-t border-border/20 flex gap-3">
         {jo.status === 'READY' && (
           <button
             disabled={pending}
@@ -673,7 +726,17 @@ function ShiftProgressBar({ status, jobs }: { status?: ShiftStatus; jobs: ShopFl
 export function ShopFloorView() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const router = useRouter();
   const [statusFilter, setStatusFilter] = useState('ACTIVE');
+
+  // ── Smart filters: machines (multi) · production order · work order ──
+  const [machineSel, setMachineSel] = useState<string[]>([]);
+  const [poSel, setPoSel] = useState('');
+  const [woSel, setWoSel] = useState('');
+
+  // ── Action dialogs (maintenance / state / alarm) ──
+  const [actionKind, setActionKind] = useState<'maintenance' | 'state' | 'alarm' | null>(null);
+  const [actionTarget, setActionTarget] = useState<JOActionTarget | null>(null);
 
   const QK = ['shop-floor-jobs', statusFilter] as const;
 
@@ -701,13 +764,60 @@ export function ShopFloorView() {
     id: u.id, name: u.name, nameAr: u.nameAr,
   }));
 
-  const filteredJobs = useMemo(() => {
-    if (statusFilter === 'ACTIVE') {
-      return allJobs.filter((j) => ['READY', 'EXECUTING', 'PAUSED'].includes(j.status));
+  // ── Filter options derived from the live data (no mock lists) ──
+  const machineOptions = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; code: string }>();
+    for (const j of allJobs) {
+      if (j.machine?.id) map.set(j.machine.id, { id: j.machine.id, name: j.machine.name, code: j.machine.code });
     }
-    if (statusFilter === 'ALL') return allJobs;
-    return allJobs.filter((j) => j.status === statusFilter);
-  }, [allJobs, statusFilter]);
+    return [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
+  }, [allJobs]);
+
+  const poOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const j of allJobs) {
+      const po = j.workOrder?.productionOrder;
+      if (po?.id) map.set(po.id, po.orderNumber);
+    }
+    return [...map.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  }, [allJobs]);
+
+  const woOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const j of allJobs) {
+      // Respect the PO filter so the WO list narrows intelligently
+      if (poSel && j.workOrder?.productionOrder?.id !== poSel) continue;
+      if (j.workOrder?.id) map.set(j.workOrder.id, j.workOrder.orderNumber);
+    }
+    return [...map.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  }, [allJobs, poSel]);
+
+  const hasFilters = machineSel.length > 0 || !!poSel || !!woSel;
+
+  const filteredJobs = useMemo(() => {
+    let jobs = allJobs;
+    if (machineSel.length) jobs = jobs.filter((j) => j.machine?.id && machineSel.includes(j.machine.id));
+    if (poSel) jobs = jobs.filter((j) => j.workOrder?.productionOrder?.id === poSel);
+    if (woSel) jobs = jobs.filter((j) => j.workOrder?.id === woSel);
+    if (statusFilter === 'ACTIVE') {
+      return jobs.filter((j) => ['READY', 'EXECUTING', 'PAUSED'].includes(j.status));
+    }
+    if (statusFilter === 'ALL') return jobs;
+    return jobs.filter((j) => j.status === statusFilter);
+  }, [allJobs, statusFilter, machineSel, poSel, woSel]);
+
+  const openLive = (jo: ShopFloorJO) => router.push(`/shop-floor/live/${jo.id}`);
+
+  const openAction = (kind: 'maintenance' | 'state' | 'alarm', jo: ShopFloorJO) => {
+    setActionTarget({
+      jobOrderId: jo.id,
+      workOrderId: jo.workOrder?.id,
+      machineId: jo.machine?.id,
+      machineName: jo.machine?.name,
+      operationName: jo.operationName,
+    });
+    setActionKind(kind);
+  };
 
   // Sort: EXECUTING first, then PAUSED, then READY, then others; within group by seq
   const sorted = useMemo(() => {
@@ -826,6 +936,120 @@ export function ShopFloorView() {
             </Button>
           </div>
         </div>
+
+        {/* ── Smart filters: machines (multi) · PO · WO ── */}
+        <div className="max-w-screen-2xl mx-auto mt-2.5">
+          <div className="flex items-center gap-2 flex-wrap rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground pr-1">
+              <Filter className="w-3.5 h-3.5 text-brand-400" />Filters
+            </span>
+            <span className="h-5 w-px bg-border/60" />
+
+            {/* Machine multi-select */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">Machines</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className={`h-8 text-xs ${machineSel.length ? 'border-brand-400/60 text-brand-400 bg-brand-500/5' : ''}`}>
+                    <Cpu className="w-3.5 h-3.5 mr-1.5" />
+                    {machineSel.length === 0
+                      ? 'All'
+                      : machineSel.length === 1
+                      ? machineOptions.find((m) => m.id === machineSel[0])?.code ?? '1'
+                      : `${machineSel.length} selected`}
+                    <ChevronDown className="w-3 h-3 ml-1.5 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-72">
+                  <div className="flex items-center justify-between px-2 py-1.5">
+                    <DropdownMenuLabel className="text-xs p-0">
+                      Filter by machine
+                      <span className="ml-1.5 text-muted-foreground/60 font-normal">({machineOptions.length})</span>
+                    </DropdownMenuLabel>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <button
+                        className="text-brand-400 hover:underline disabled:opacity-40"
+                        disabled={machineSel.length === machineOptions.length}
+                        onClick={(e) => { e.preventDefault(); setMachineSel(machineOptions.map((m) => m.id)); }}
+                      >
+                        All
+                      </button>
+                      <button
+                        className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                        disabled={machineSel.length === 0}
+                        onClick={(e) => { e.preventDefault(); setMachineSel([]); }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <DropdownMenuSeparator />
+                  {machineOptions.length === 0 && (
+                    <div className="px-2 py-3 text-xs text-muted-foreground text-center">No machines in current jobs</div>
+                  )}
+                  <div className="max-h-72 overflow-y-auto">
+                    {machineOptions.map((m) => {
+                      const count = allJobs.filter((j) => j.machine?.id === m.id).length;
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={m.id}
+                          checked={machineSel.includes(m.id)}
+                          onCheckedChange={(checked) =>
+                            setMachineSel((prev) => (checked ? [...prev, m.id] : prev.filter((id) => id !== m.id)))
+                          }
+                          onSelect={(e) => e.preventDefault()}
+                          className="gap-2"
+                        >
+                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">{m.code}</span>
+                          <span className="flex-1 truncate">{m.name}</span>
+                          <span className="text-[10px] text-muted-foreground/60 tabular-nums">{count}</span>
+                        </DropdownMenuCheckboxItem>
+                      );
+                    })}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            {/* Production order */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">PO</span>
+              <SelectMenu
+                value={poSel}
+                onValueChange={(v) => { setPoSel(v); setWoSel(''); }}
+                options={[{ value: '', label: 'All POs' }, ...poOptions]}
+                placeholder="All POs"
+                size="sm"
+              />
+            </div>
+
+            {/* Work order */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">WO</span>
+              <SelectMenu
+                value={woSel}
+                onValueChange={setWoSel}
+                options={[{ value: '', label: 'All WOs' }, ...woOptions]}
+                placeholder="All WOs"
+                size="sm"
+              />
+            </div>
+
+            {hasFilters && (
+              <button
+                onClick={() => { setMachineSel([]); setPoSel(''); setWoSel(''); }}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-red-400 hover:bg-red-500/10 border border-red-400/30"
+              >
+                <X className="w-3 h-3" />Clear all
+              </button>
+            )}
+
+            <span className="text-xs text-muted-foreground ml-auto flex items-center gap-1.5">
+              <span className="font-semibold text-foreground tabular-nums">{filteredJobs.length}</span>
+              <span className="text-muted-foreground/60">/ {allJobs.length} jobs</span>
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* ── Main grid ── */}
@@ -860,11 +1084,30 @@ export function ShopFloorView() {
                 onTransition={(id, status, qty) => transitionMut.mutate({ id, status, qty })}
                 onCount={(id, good, scrap, reason, category) => countMut.mutate({ id, good, scrap, reason, category })}
                 onAssignOperator={(id, operatorId) => operatorMut.mutate({ id, operatorId })}
+                onOpenLive={openLive}
+                onAction={openAction}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* ── Operator action dialogs ── */}
+      <MaintenanceRequestDialog
+        open={actionKind === 'maintenance'}
+        onOpenChange={(v) => !v && setActionKind(null)}
+        target={actionTarget}
+      />
+      <MachineStateDialog
+        open={actionKind === 'state'}
+        onOpenChange={(v) => !v && setActionKind(null)}
+        target={actionTarget}
+      />
+      <AlarmDialog
+        open={actionKind === 'alarm'}
+        onOpenChange={(v) => !v && setActionKind(null)}
+        target={actionTarget}
+      />
     </div>
   );
 }

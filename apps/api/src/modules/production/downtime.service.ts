@@ -683,4 +683,149 @@ export class DowntimeService {
       this.logger.error('Failed to update machine state for downtime', err);
     }
   }
+
+  // ── Operator machine-state change (shop floor) ────────────────
+  // One smart action: updates MachineCurrentStatus, closes/opens the
+  // MachineStateRecord timeline, opens/closes the matching DowntimeEvent,
+  // and optionally pauses/resumes the linked job order.
+
+  async setMachineState(
+    factoryId: string | null,
+    userId: string,
+    machineId: string,
+    dto: {
+      state: string;
+      downtimeCauseId?: string;
+      reasonCode?: string;
+      category?: string;
+      reason?: string;
+      notes?: string;
+      jobOrderId?: string;
+      workOrderId?: string;
+    },
+  ) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const machine = await this.prisma.machine.findFirst({
+      where: { id: machineId, ...factoryFilter },
+      select: { id: true, factoryId: true, name: true, code: true },
+    });
+    if (!machine) throw new NotFoundException('Machine not found');
+
+    const VALID_STATES = [
+      'RUNNING', 'IDLE', 'PLANNED_STOP', 'BREAKDOWN', 'SETUP',
+      'CHANGEOVER', 'STARVED', 'BLOCKED', 'OFFLINE', 'MAINTENANCE',
+    ];
+    if (!VALID_STATES.includes(dto.state)) {
+      throw new BadRequestException(`Invalid machine state: ${dto.state}`);
+    }
+
+    const DOWN_STATES = new Set(['PLANNED_STOP', 'BREAKDOWN', 'SETUP', 'CHANGEOVER', 'STARVED', 'BLOCKED', 'MAINTENANCE']);
+    const isDown = DOWN_STATES.has(dto.state);
+
+    // Default ISA-95 reason-code / category per state (overridable from the dialog)
+    const STATE_DEFAULTS: Record<string, { reasonCode: string; category: string; planned: boolean }> = {
+      BREAKDOWN:    { reasonCode: 'UNPLANNED_BREAKDOWN', category: 'MECHANICAL', planned: false },
+      PLANNED_STOP: { reasonCode: 'PLANNED_MAINTENANCE', category: 'PLANNED_BREAK', planned: true },
+      MAINTENANCE:  { reasonCode: 'PLANNED_MAINTENANCE', category: 'PLANNED_MAINTENANCE', planned: true },
+      SETUP:        { reasonCode: 'CHANGEOVER', category: 'CHANGEOVER', planned: true },
+      CHANGEOVER:   { reasonCode: 'CHANGEOVER', category: 'CHANGEOVER', planned: true },
+      STARVED:      { reasonCode: 'STARVED', category: 'MATERIAL', planned: false },
+      BLOCKED:      { reasonCode: 'BLOCKED', category: 'PROCESS', planned: false },
+    };
+    const defaults = STATE_DEFAULTS[dto.state];
+    const now = new Date();
+
+    // 1. Close the open state-timeline record + start the new one
+    const openRecord = await this.prisma.machineStateRecord.findFirst({
+      where: { machineId, endTime: null },
+      orderBy: { startTime: 'desc' },
+    });
+    if (openRecord) {
+      await this.prisma.machineStateRecord.update({
+        where: { id: openRecord.id },
+        data: {
+          endTime: now,
+          durationMinutes: (now.getTime() - openRecord.startTime.getTime()) / 60_000,
+        },
+      });
+    }
+    await this.prisma.machineStateRecord.create({
+      data: {
+        factoryId: machine.factoryId,
+        machineId,
+        state: dto.state as any,
+        startTime: now,
+        isPlannedStop: isDown ? (defaults?.planned ?? false) : false,
+        downtimeCauseId: dto.downtimeCauseId ?? null,
+        workOrderId: dto.workOrderId ?? null,
+        notes: dto.reason ?? dto.notes ?? null,
+        source: 'OPERATOR',
+      },
+    });
+
+    // 2. Live snapshot
+    await this.prisma.machineCurrentStatus.upsert({
+      where: { machineId },
+      create: { machineId, state: dto.state as any, lastEventAt: now },
+      update: { state: dto.state as any, lastEventAt: now },
+    });
+
+    // 3. Downtime-event integration
+    const openDowntime = await this.prisma.downtimeEvent.findFirst({
+      where: { machineId, endTime: null },
+    });
+
+    let downtimeEvent: any = null;
+    if (isDown && !openDowntime) {
+      downtimeEvent = await this.createDowntimeEvent(machine.factoryId, userId, {
+        machineId,
+        workOrderId: dto.workOrderId,
+        causeId: dto.downtimeCauseId,
+        reasonCode: (dto.reasonCode ?? defaults?.reasonCode ?? 'UNPLANNED_BREAKDOWN') as any,
+        category: (dto.category ?? defaults?.category ?? 'OTHER') as any,
+        description: dto.reason,
+        notes: dto.notes,
+        isPlanned: defaults?.planned ?? false,
+      } as any);
+    } else if (!isDown && openDowntime) {
+      downtimeEvent = await this.endDowntimeEvent(machine.factoryId, openDowntime.id, userId, {
+        resolution: dto.reason ?? `Machine set to ${dto.state}`,
+      } as any);
+    }
+
+    // 4. Job-order integration: pause on stop, resume on run
+    let jobOrder: any = null;
+    if (dto.jobOrderId) {
+      const jo = await this.prisma.jobOrder.findFirst({
+        where: { id: dto.jobOrderId, factoryId: machine.factoryId },
+        select: { id: true, status: true },
+      });
+      if (jo) {
+        if (isDown && jo.status === 'EXECUTING') {
+          jobOrder = await this.prisma.jobOrder.update({
+            where: { id: jo.id },
+            data: { status: 'PAUSED', notes: dto.reason ?? `Paused: machine ${dto.state}` },
+          });
+        } else if (dto.state === 'RUNNING' && jo.status === 'PAUSED') {
+          jobOrder = await this.prisma.jobOrder.update({
+            where: { id: jo.id },
+            data: { status: 'EXECUTING' },
+          });
+        }
+      }
+    }
+
+    this.eventEmitter.emit('machine.state.changed', {
+      machineId, machineName: machine.name, state: dto.state, factoryId: machine.factoryId,
+    });
+    this.logger.log(`Machine ${machine.code} state → ${dto.state} (by operator)`);
+
+    return {
+      machineId,
+      state: dto.state,
+      stateRecordClosed: !!openRecord,
+      downtimeEvent,
+      jobOrder,
+    };
+  }
 }

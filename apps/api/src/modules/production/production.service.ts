@@ -2487,25 +2487,35 @@ export class ProductionService {
 
   async listAllJobOrders(
     factoryId: string | null,
-    filters: { status?: string; workOrderId?: string },
+    filters: { status?: string; workOrderId?: string; productionOrderId?: string; machineIds?: string },
   ) {
+    // machineIds: comma-separated multi-machine filter from the shop-floor smart filter
+    const machineIdList = (filters.machineIds ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
     const where: any = {
       ...(factoryId ? { factoryId } : {}),
       ...(filters.status ? { status: filters.status } : {}),
       ...(filters.workOrderId ? { workOrderId: filters.workOrderId } : {}),
+      ...(machineIdList.length ? { machineId: { in: machineIdList } } : {}),
+      ...(filters.productionOrderId
+        ? { workOrder: { productionOrderId: filters.productionOrderId } }
+        : {}),
     };
 
     const jos = await this.prisma.jobOrder.findMany({
       where,
       orderBy: [{ workOrderId: 'asc' }, { sequenceOrder: 'asc' }],
       include: {
-        machine: { select: { name: true, code: true } },
-        workCenter: { select: { name: true, code: true } },
+        machine: { select: { id: true, name: true, code: true } },
+        workCenter: { select: { id: true, name: true, code: true } },
         workOrder: {
           select: {
             id: true, orderNumber: true,
             sku: { select: { name: true, code: true } },
-            productionOrder: { select: { orderNumber: true } },
+            productionOrder: { select: { id: true, orderNumber: true } },
           },
         },
         operator: { select: { id: true, name: true, nameAr: true } },
@@ -2935,6 +2945,11 @@ export class ProductionService {
       },
     });
 
+    // Keep the machine state + live snapshot consistent with the JO it runs
+    if (jo.machineId) {
+      await this.syncMachineStateWithJobOrder(jo.factoryId, jo.machineId, status, jo.workOrderId, jo.actualStart ?? updated.actualStart);
+    }
+
     // ── Auto-promote successors based on their dep type ───────────────────
     const successors = await this.prisma.jobOrder.findMany({
       where: { predecessorId: jobOrderId, status: 'SCHEDULED' },
@@ -2960,6 +2975,25 @@ export class ProductionService {
           this.logger.log(`[${dep}] "${succ.operationName}" promoted READY after "${jo.operationName}" → ${status}`);
         }
       }
+    }
+
+    // Timeline event for the live dashboard (start / pause / resume / complete)
+    const evType =
+      status === 'EXECUTING' ? (jo.status === 'PAUSED' ? 'DOWNTIME_END' : 'WO_STARTED')
+      : status === 'PAUSED' ? 'WO_PAUSED'
+      : status === 'COMPLETE' ? 'WO_COMPLETED'
+      : null;
+    if (evType) {
+      await this.prisma.productionEvent.create({
+        data: {
+          factoryId: jo.factoryId,
+          workOrderId: jo.workOrderId,
+          machineId: jo.machineId,
+          eventType: evType as any,
+          value: updated.actualQtyGood,
+          metadata: { jobOrderId: jo.id, joStatus: status, operationName: jo.operationName },
+        },
+      }).catch(() => undefined);
     }
 
     // Roll up live OEE + propagate WO/PO status & broadcast
@@ -2991,6 +3025,7 @@ export class ProductionService {
 
     const newRejected = dto.actualQtyRejected ?? jo.actualQtyRejected;
     const delta = Math.max(0, newRejected - jo.actualQtyRejected);
+    const goodDelta = dto.actualQtyGood - jo.actualQtyGood;
 
     const updated = await this.prisma.jobOrder.update({
       where: { id: jobOrderId },
@@ -3000,6 +3035,27 @@ export class ProductionService {
         ...(dto.scrapReason !== undefined && { scrapReason: dto.scrapReason }),
       },
     });
+
+    // Real time-series for the live dashboard: every count report becomes a
+    // COUNT_UPDATE production event (cumulative totals in metadata).
+    if (goodDelta !== 0 || delta > 0) {
+      await this.prisma.productionEvent.create({
+        data: {
+          factoryId: jo.factoryId,
+          workOrderId: jo.workOrderId,
+          machineId: jo.machineId,
+          eventType: 'COUNT_UPDATE',
+          value: goodDelta,
+          metadata: {
+            jobOrderId: jo.id,
+            good: dto.actualQtyGood,
+            rejected: newRejected,
+            goodDelta,
+            scrapDelta: delta,
+          },
+        },
+      }).catch(() => undefined);
+    }
 
     // Create audit trail entry whenever new scrap is added
     if (delta > 0) {
@@ -3072,6 +3128,80 @@ export class ProductionService {
       data: { operatorId },
       include: { operator: { select: { id: true, name: true, nameAr: true } } },
     });
+  }
+
+  /**
+   * Keep MachineCurrentStatus + the MachineStateRecord timeline aligned with the
+   * job order actually running on the machine. Called on every JO transition so the
+   * shop-floor card, the live dashboard and the machine-status strip never disagree:
+   *   EXECUTING → RUNNING (open a RUNNING record from the JO start)
+   *   PAUSED    → IDLE    (close the open record)
+   *   COMPLETE / CANCELLED → IDLE unless another JO is still EXECUTING here
+   * Down states (BREAKDOWN/SETUP/…) are owned by DowntimeService.setMachineState and
+   * left untouched here.
+   */
+  private async syncMachineStateWithJobOrder(
+    factoryId: string,
+    machineId: string,
+    joStatus: string,
+    workOrderId: string,
+    joStart?: Date | null,
+  ) {
+    try {
+      const DOWN = new Set(['BREAKDOWN', 'PLANNED_STOP', 'SETUP', 'CHANGEOVER', 'STARVED', 'BLOCKED', 'MAINTENANCE']);
+      const current = await this.prisma.machineCurrentStatus.findUnique({ where: { machineId } });
+      // Don't override an operator-declared downtime — that's resolved via setMachineState.
+      if (current && DOWN.has(current.state as string)) return;
+
+      let target: string | null = null;
+      if (joStatus === 'EXECUTING') target = 'RUNNING';
+      else if (joStatus === 'PAUSED') target = 'IDLE';
+      else if (joStatus === 'COMPLETE' || joStatus === 'CANCELLED') {
+        const stillRunning = await this.prisma.jobOrder.count({
+          where: { machineId, status: 'EXECUTING', id: { not: undefined } },
+        });
+        target = stillRunning > 0 ? 'RUNNING' : 'IDLE';
+      }
+      if (!target) return;
+      if (current?.state === target) {
+        // Still ensure a RUNNING record is open while executing
+        if (target !== 'RUNNING') return;
+      }
+
+      const now = new Date();
+      // Close any open state record
+      const open = await this.prisma.machineStateRecord.findFirst({
+        where: { machineId, endTime: null },
+        orderBy: { startTime: 'desc' },
+      });
+      if (open && open.state !== target) {
+        await this.prisma.machineStateRecord.update({
+          where: { id: open.id },
+          data: { endTime: now, durationMinutes: (now.getTime() - open.startTime.getTime()) / 60_000 },
+        });
+      }
+      // Open a new record for the target state (RUNNING anchored to the JO start)
+      if (!open || open.state !== target) {
+        await this.prisma.machineStateRecord.create({
+          data: {
+            factoryId,
+            machineId,
+            state: target as any,
+            startTime: target === 'RUNNING' && joStart ? joStart : now,
+            workOrderId,
+            isPlannedStop: false,
+            source: 'SYSTEM',
+          },
+        });
+      }
+      await this.prisma.machineCurrentStatus.upsert({
+        where: { machineId },
+        create: { machineId, state: target as any, currentWOId: target === 'RUNNING' ? workOrderId : null, lastEventAt: now },
+        update: { state: target as any, currentWOId: target === 'RUNNING' ? workOrderId : null, lastEventAt: now },
+      });
+    } catch (err) {
+      this.logger.error('syncMachineStateWithJobOrder failed', err as any);
+    }
   }
 
   // ────────────────────────────────────────────────────────────
@@ -3152,5 +3282,492 @@ export class ProductionService {
 
     const { count } = await this.prisma.jobOrder.deleteMany({ where: { workOrderId } });
     return { deleted: count };
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // JOB ORDER LIVE DASHBOARD
+  // One comprehensive, real-data payload for the shop-floor live page:
+  // OEE (ISO 22400) + benchmark class, six big losses, time model
+  // waterfall, downtime Pareto + MTTR/MTBF/MTTA, production trend,
+  // scrap analysis, machine state timeline, alarms, maintenance.
+  // ────────────────────────────────────────────────────────────
+
+  async getJobOrderLiveDashboard(factoryId: string | null, jobOrderId: string) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+
+    const jo = await this.prisma.jobOrder.findFirst({
+      where: { id: jobOrderId, ...factoryFilter },
+      include: {
+        machine: {
+          include: {
+            currentStatus: true,
+            line: { select: { id: true, name: true, code: true } },
+            area: { select: { id: true, name: true, code: true } },
+          },
+        },
+        workCenter: { select: { id: true, name: true, code: true } },
+        routingStep: { select: { stepNumber: true, operationName: true, cycleTimeSec: true, setupTimeMins: true } },
+        operator: { select: { id: true, name: true, nameAr: true } },
+        materials: true,
+        predecessor: { select: { id: true, operationName: true, status: true, routingStepId: true, actualStart: true } },
+        successors: { select: { id: true, operationName: true, status: true, sequenceOrder: true } },
+        workOrder: {
+          select: {
+            id: true, orderNumber: true, status: true, plannedQty: true,
+            plannedStart: true, plannedEnd: true, actualStart: true, actualEnd: true,
+            sku: { select: { id: true, name: true, code: true } },
+            productionOrder: { select: { id: true, orderNumber: true, targetQty: true, unit: true, plannedEnd: true, customer: true } },
+          },
+        },
+      },
+    });
+    if (!jo) throw new NotFoundException('Job order not found');
+
+    const [withDep] = await this.attachDepTypes([jo]);
+    const oee = this.calcJobOrderOEE(jo);
+
+    // ── Analysis window: actual start (or planned) → actual end (or now) ──
+    const now = new Date();
+    const windowStart = jo.actualStart ?? jo.plannedStart ?? jo.createdAt;
+    const windowEnd = jo.actualEnd ?? now;
+    const windowMins = Math.max(0, (windowEnd.getTime() - windowStart.getTime()) / 60_000);
+
+    const machineId = jo.machineId;
+    const machineHistoryFrom = new Date(now.getTime() - 30 * 86_400_000); // 30-day reliability window
+
+    const [
+      downtimeEvents,
+      scrapLogs,
+      countEvents,
+      stateRecords,
+      alarms,
+      maintenanceWOs,
+      reliabilityEvents,
+      oeeTrendRecords,
+    ] = await Promise.all([
+      // Downtime overlapping the JO window — scoped to THIS machine (a WO spans
+      // multiple machines, one per step, so machine-scoping keeps the per-JO view
+      // about this operation only). Falls back to the WO when no machine is set.
+      this.prisma.downtimeEvent.findMany({
+        where: {
+          ...(factoryId ? { factoryId } : {}),
+          ...(machineId ? { machineId } : { workOrderId: jo.workOrderId }),
+          startTime: { lte: windowEnd },
+          OR: [{ endTime: null }, { endTime: { gte: windowStart } }],
+        },
+        include: {
+          cause: { select: { code: true, name: true, nameAr: true, category: true } },
+          operator: { select: { name: true } },
+        },
+        orderBy: { startTime: 'desc' },
+      }),
+      this.prisma.scrapLog.findMany({
+        where: { jobOrderId: jo.id },
+        orderBy: { createdAt: 'desc' },
+        include: { operator: { select: { name: true } } },
+      }),
+      // COUNT_UPDATE + transition events for this JO (real recorded series)
+      this.prisma.productionEvent.findMany({
+        where: {
+          workOrderId: jo.workOrderId,
+          timestamp: { gte: windowStart },
+          metadata: { path: ['jobOrderId'], equals: jo.id },
+        },
+        orderBy: { timestamp: 'asc' },
+        take: 1000,
+      }),
+      // Machine state timeline strip
+      machineId
+        ? this.prisma.machineStateRecord.findMany({
+            where: {
+              machineId,
+              startTime: { lte: windowEnd },
+              OR: [{ endTime: null }, { endTime: { gte: windowStart } }],
+            },
+            include: { downtimeCause: { select: { name: true, code: true } } },
+            orderBy: { startTime: 'asc' },
+            take: 500,
+          })
+        : Promise.resolve([] as any[]),
+      // Alarms: machine alarms in window + alarms explicitly tagged with this JO
+      this.prisma.alarmEvent.findMany({
+        where: {
+          ...(factoryId ? { factoryId } : {}),
+          OR: [
+            ...(machineId ? [{ machineId, triggeredAt: { gte: windowStart } }] : []),
+            { metadata: { path: ['jobOrderId'], equals: jo.id } },
+          ],
+        },
+        orderBy: { triggeredAt: 'desc' },
+        take: 100,
+        include: { machine: { select: { name: true, code: true } } },
+      }),
+      // Maintenance on this machine: open + recent
+      machineId
+        ? this.prisma.maintenanceWO.findMany({
+            where: {
+              machineId,
+              deletedAt: null,
+              OR: [
+                { status: { in: ['OPEN', 'AWAITING_PARTS', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD'] } },
+                { createdAt: { gte: machineHistoryFrom } },
+              ],
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+            include: {
+              assignedTo: { select: { name: true } },
+              requestedBy: { select: { name: true } },
+            },
+          })
+        : Promise.resolve([] as any[]),
+      // 30-day unplanned downtime history → MTTR / MTBF
+      machineId
+        ? this.prisma.downtimeEvent.findMany({
+            where: {
+              machineId,
+              isPlanned: false,
+              startTime: { gte: machineHistoryFrom },
+            },
+            orderBy: { startTime: 'asc' },
+            select: {
+              startTime: true, endTime: true, durationMinutes: true,
+              acknowledgedAt: true, reasonCode: true,
+            },
+          })
+        : Promise.resolve([] as Array<{ startTime: Date; endTime: Date | null; durationMinutes: number | null; acknowledgedAt: Date | null; reasonCode: string }>),
+      // OEE history for trend lines (last 14 days, this machine + this SKU when known)
+      machineId
+        ? this.prisma.oEERecord.findMany({
+            where: {
+              machineId,
+              recordDate: { gte: new Date(now.getTime() - 14 * 86_400_000) },
+            },
+            orderBy: { recordDate: 'asc' },
+            take: 400,
+            select: {
+              recordDate: true, shiftCode: true,
+              availability: true, performance: true, quality: true, oee: true,
+            },
+          })
+        : Promise.resolve([] as Array<{ recordDate: Date; shiftCode: string | null; availability: number; performance: number; quality: number; oee: number }>),
+    ]);
+
+    // ── Downtime aggregation within the JO window ──────────────
+    const clampMins = (s: Date, e: Date | null) => {
+      const from = Math.max(s.getTime(), windowStart.getTime());
+      const to = Math.min((e ?? now).getTime(), windowEnd.getTime());
+      return Math.max(0, (to - from) / 60_000);
+    };
+
+    let plannedStopMins = 0;
+    let unplannedStopMins = 0;
+    let microStopMins = 0;
+    let changeoverMins = 0;
+    const paretoMap = new Map<string, { label: string; mins: number; count: number; category: string }>();
+
+    for (const ev of downtimeEvents) {
+      const mins = clampMins(ev.startTime, ev.endTime);
+      if (mins <= 0) continue;
+      if (ev.isPlanned) plannedStopMins += mins;
+      else unplannedStopMins += mins;
+      if (ev.reasonCode === 'MICRO_STOP') microStopMins += mins;
+      if (ev.reasonCode === 'CHANGEOVER') changeoverMins += mins;
+
+      const key = ev.cause?.name ?? ev.reason ?? ev.reasonCode ?? 'Unspecified';
+      const cur = paretoMap.get(key) ?? { label: key, mins: 0, count: 0, category: ev.category as string };
+      cur.mins += mins;
+      cur.count += 1;
+      paretoMap.set(key, cur);
+    }
+    const pareto = [...paretoMap.values()].sort((a, b) => b.mins - a.mins);
+    const totalDowntimeMins = plannedStopMins + unplannedStopMins;
+    const openDowntime = downtimeEvents.find((e) => !e.endTime) ?? null;
+
+    // ── ISO 22400 time model (minutes, within the JO window) ───
+    const totalProduced = (jo.actualQtyGood ?? 0) + (jo.actualQtyRejected ?? 0);
+    const ict = jo.idealCycleTimeSec ?? null;
+    const operationalMins = Math.max(0, windowMins - plannedStopMins);
+    const netProductionMins = Math.max(0, operationalMins - unplannedStopMins);
+    const idealProductionMins = ict ? (ict * totalProduced) / 60 : null;
+    // Performance loss = running slower than ideal (excl. recorded micro stops)
+    const performanceLossMins = idealProductionMins != null
+      ? Math.max(0, netProductionMins - idealProductionMins)
+      : null;
+    const netOperatingMins = idealProductionMins != null
+      ? Math.min(netProductionMins, idealProductionMins)
+      : netProductionMins;
+    const qualityLossMins = ict ? (ict * (jo.actualQtyRejected ?? 0)) / 60 : null;
+    const usedOperationalMins = qualityLossMins != null
+      ? Math.max(0, netOperatingMins - qualityLossMins)
+      : null;
+
+    // ── Six Big Losses (ISO/TPM) — all from recorded data ──────
+    const setupScrap = scrapLogs.filter((s) => s.category === 'SETUP').reduce((t, s) => t + s.qty, 0);
+    const processScrap = (jo.actualQtyRejected ?? 0) - setupScrap;
+    const sixLosses = {
+      availability: {
+        equipmentFailure: {
+          mins: Math.round(Math.max(0, unplannedStopMins - microStopMins) * 10) / 10,
+          count: downtimeEvents.filter((e) => !e.isPlanned && e.reasonCode !== 'MICRO_STOP').length,
+        },
+        setupAdjustments: {
+          mins: Math.round((changeoverMins + plannedStopMins) * 10) / 10,
+          count: downtimeEvents.filter((e) => e.isPlanned || e.reasonCode === 'CHANGEOVER').length,
+        },
+      },
+      performance: {
+        idlingMinorStops: {
+          mins: Math.round(microStopMins * 10) / 10,
+          count: downtimeEvents.filter((e) => e.reasonCode === 'MICRO_STOP').length,
+        },
+        reducedSpeed: {
+          mins: performanceLossMins != null ? Math.round(performanceLossMins * 10) / 10 : null,
+        },
+      },
+      quality: {
+        processDefects: {
+          qty: Math.max(0, processScrap),
+          mins: ict ? Math.round(((ict * Math.max(0, processScrap)) / 60) * 10) / 10 : null,
+        },
+        startupRejects: {
+          qty: setupScrap,
+          mins: ict ? Math.round(((ict * setupScrap) / 60) * 10) / 10 : null,
+        },
+      },
+    };
+
+    // ── Reliability (30-day machine history): MTTR / MTBF / MTTA ──
+    const closed = reliabilityEvents.filter((e) => e.endTime && (e.durationMinutes ?? 0) > 0);
+    const mttrMins = closed.length
+      ? closed.reduce((t, e) => t + (e.durationMinutes ?? 0), 0) / closed.length
+      : null;
+    let mtbfMins: number | null = null;
+    if (reliabilityEvents.length >= 2) {
+      let gaps = 0;
+      let gapTotal = 0;
+      for (let i = 1; i < reliabilityEvents.length; i++) {
+        const prevEnd = reliabilityEvents[i - 1].endTime;
+        if (!prevEnd) continue;
+        const gap = (reliabilityEvents[i].startTime.getTime() - prevEnd.getTime()) / 60_000;
+        if (gap > 0) { gaps++; gapTotal += gap; }
+      }
+      mtbfMins = gaps ? gapTotal / gaps : null;
+    }
+    const acked = reliabilityEvents.filter((e) => e.acknowledgedAt);
+    // MTTA / MTTD — mean time from failure to acknowledgement (detect + respond)
+    const mttaMins = acked.length
+      ? acked.reduce((t, e) => t + (e.acknowledgedAt!.getTime() - e.startTime.getTime()) / 60_000, 0) / acked.length
+      : null;
+    // Repair time — mean time from acknowledgement to resume (the wrench-on time)
+    const repairCandidates = closed.filter((e) => e.acknowledgedAt && e.endTime);
+    const repairTimeMins = repairCandidates.length
+      ? repairCandidates.reduce((t, e) => t + (e.endTime!.getTime() - e.acknowledgedAt!.getTime()) / 60_000, 0) / repairCandidates.length
+      : null;
+
+    // ── Downtime statistics within the window (occurrence/total/median/average) ──
+    const windowDurations = downtimeEvents
+      .map((e) => clampMins(e.startTime, e.endTime))
+      .filter((m) => m > 0)
+      .sort((a, b) => a - b);
+    const dtMedianMins = windowDurations.length
+      ? windowDurations[Math.floor(windowDurations.length / 2)]
+      : null;
+    const dtAvgMins = windowDurations.length
+      ? windowDurations.reduce((t, m) => t + m, 0) / windowDurations.length
+      : null;
+
+    // ── Microstop Pareto (Performance loss category, separate from breakdowns) ──
+    const microMap = new Map<string, { label: string; mins: number; count: number; category: string }>();
+    for (const ev of downtimeEvents) {
+      if (ev.reasonCode !== 'MICRO_STOP') continue;
+      const mins = clampMins(ev.startTime, ev.endTime);
+      if (mins <= 0) continue;
+      const key = ev.cause?.name ?? ev.reason ?? 'Micro-stop';
+      const cur = microMap.get(key) ?? { label: key, mins: 0, count: 0, category: ev.category as string };
+      cur.mins += mins; cur.count += 1;
+      microMap.set(key, cur);
+    }
+    const microstopPareto = [...microMap.values()].sort((a, b) => b.mins - a.mins);
+
+    // ── Machine state distribution (time-model: Run / Idle / Down split) ──
+    const stateMap = new Map<string, { state: string; mins: number; count: number }>();
+    for (const r of stateRecords) {
+      const mins = clampMins(r.startTime, r.endTime);
+      if (mins <= 0) continue;
+      const cur = stateMap.get(r.state) ?? { state: r.state, mins: 0, count: 0 };
+      cur.mins += mins; cur.count += 1;
+      stateMap.set(r.state, cur);
+    }
+    const stateDurations = [...stateMap.values()].map((s) => s.mins).sort((a, b) => a - b);
+    const stateOccurrences = [...stateMap.values()].reduce((t, s) => t + s.count, 0);
+    const stateTotalMins = [...stateMap.values()].reduce((t, s) => t + s.mins, 0);
+    const stateDistribution = {
+      occurrences: stateOccurrences,
+      totalMins: Math.round(stateTotalMins * 10) / 10,
+      medianMins: stateDurations.length ? Math.round(stateDurations[Math.floor(stateDurations.length / 2)] * 10) / 10 : null,
+      avgMins: stateDurations.length ? Math.round((stateTotalMins / [...stateMap.values()].length) * 10) / 10 : null,
+      byState: [...stateMap.values()]
+        .sort((a, b) => b.mins - a.mins)
+        .map((s) => ({ ...s, mins: Math.round(s.mins * 10) / 10 })),
+    };
+
+    // ── Top reject reasons + when rejects peaked ──────────────
+    const rejectMap = new Map<string, { reason: string; qty: number; count: number; category: string }>();
+    for (const s of scrapLogs) {
+      const key = s.reason || 'Not specified';
+      const cur = rejectMap.get(key) ?? { reason: key, qty: 0, count: 0, category: s.category as string };
+      cur.qty += s.qty; cur.count += 1;
+      rejectMap.set(key, cur);
+    }
+    const topRejectReasons = [...rejectMap.values()].sort((a, b) => b.qty - a.qty).slice(0, 8);
+    const highestRejectLog = scrapLogs.reduce<any>((max, s) => (!max || s.qty > max.qty ? s : max), null);
+
+    // ── Production trend from recorded COUNT_UPDATE events ─────
+    const trend = countEvents.map((ev) => {
+      const meta = (ev.metadata ?? {}) as any;
+      return {
+        t: ev.timestamp,
+        type: ev.eventType,
+        delta: ev.value ?? 0,
+        good: meta.good ?? null,
+        rejected: meta.rejected ?? null,
+        scrapDelta: meta.scrapDelta ?? 0,
+      };
+    });
+
+    // ── Pace / ETA ─────────────────────────────────────────────
+    const elapsedHrs = jo.actualStart ? Math.max(0.001, (windowEnd.getTime() - jo.actualStart.getTime()) / 3_600_000) : null;
+    const paceGoodPerHr = elapsedHrs && jo.actualQtyGood > 0 ? jo.actualQtyGood / elapsedHrs : null;
+    const remainingQty = Math.max(0, (jo.plannedQtyOut ?? 0) - jo.actualQtyGood);
+    const etaMins = paceGoodPerHr && remainingQty > 0 ? (remainingQty / paceGoodPerHr) * 60 : null;
+    const idealRatePerHr = ict ? 3600 / ict : null;
+
+    // ── OEE benchmark classification (world-class ≥85 / good / fair / poor) ──
+    const benchmark = (v: number | null) =>
+      v == null ? null : v >= 85 ? 'WORLD_CLASS' : v >= 70 ? 'GOOD' : v >= 60 ? 'FAIR' : 'POOR';
+
+    const r1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
+
+    // ── TEEP = OEE × Utilization (utilization = scheduled/operational vs all time) ──
+    const utilizationPct = windowMins > 0 ? Math.min(100, (operationalMins / windowMins) * 100) : null;
+    const teepPct = oee.joOEE != null && utilizationPct != null
+      ? (oee.joOEE * utilizationPct) / 100
+      : null;
+
+    // ── OEE trend (real OEERecord history, last 14 days) ──────
+    const oeeTrend = oeeTrendRecords.map((o) => ({
+      date: o.recordDate,
+      shiftCode: o.shiftCode,
+      availability: r1(o.availability),
+      performance: r1(o.performance),
+      quality: r1(o.quality),
+      oee: r1(o.oee),
+    }));
+
+    return {
+      generatedAt: now,
+      jobOrder: { ...withDep, ...oee },
+      window: { start: windowStart, end: jo.actualEnd ?? null, isLive: !jo.actualEnd, minutes: r1(windowMins) },
+      oee: {
+        ...oee,
+        oeeClass: benchmark(oee.joOEE),
+        availabilityClass: benchmark(oee.joAvailability),
+        performanceClass: benchmark(oee.joPerformance),
+        qualityClass: benchmark(oee.joQuality),
+        utilizationPct: r1(utilizationPct),
+        teepPct: r1(teepPct),
+        teepClass: benchmark(teepPct),
+        trend: oeeTrend,
+      },
+      production: {
+        plannedQty: jo.plannedQtyOut,
+        good: jo.actualQtyGood,
+        rejected: jo.actualQtyRejected,
+        total: totalProduced,
+        unit: jo.outputUnit,
+        progressPct: (jo.plannedQtyOut ?? 0) > 0 ? r1(Math.min(100, (jo.actualQtyGood / jo.plannedQtyOut!) * 100)) : null,
+        rejectRatePct: totalProduced > 0 ? r1((jo.actualQtyRejected / totalProduced) * 100) : null,
+        paceGoodPerHr: r1(paceGoodPerHr),
+        idealRatePerHr: r1(idealRatePerHr),
+        etaMins: r1(etaMins),
+        idealCycleTimeSec: ict,
+        trend,
+      },
+      timeModel: {
+        totalMins: r1(windowMins),
+        plannedStopMins: r1(plannedStopMins),
+        operationalMins: r1(operationalMins),
+        availabilityLossMins: r1(unplannedStopMins),
+        netProductionMins: r1(netProductionMins),
+        performanceLossMins: r1(performanceLossMins),
+        microStopMins: r1(microStopMins),
+        netOperatingMins: r1(netOperatingMins),
+        qualityLossMins: r1(qualityLossMins),
+        usedOperationalMins: r1(usedOperationalMins),
+        utilizationPct: r1(utilizationPct),
+        teepPct: r1(teepPct),
+      },
+      sixLosses,
+      stateDistribution,
+      downtime: {
+        totalMins: r1(totalDowntimeMins),
+        plannedMins: r1(plannedStopMins),
+        unplannedMins: r1(unplannedStopMins),
+        occurrences: downtimeEvents.length,
+        medianMins: r1(dtMedianMins),
+        avgMins: r1(dtAvgMins),
+        open: openDowntime,
+        events: downtimeEvents,
+        pareto: pareto.map((p) => ({ ...p, mins: r1(p.mins) })),
+        microstopPareto: microstopPareto.map((p) => ({ ...p, mins: r1(p.mins) })),
+        mttrMins: r1(mttrMins),
+        mtbfMins: r1(mtbfMins),
+        mttaMins: r1(mttaMins),
+        repairTimeMins: r1(repairTimeMins),
+        reliabilityWindowDays: 30,
+      },
+      scrap: {
+        total: jo.actualQtyRejected,
+        logs: scrapLogs,
+        highestRejectAt: highestRejectLog?.createdAt ?? null,
+        highestRejectQty: highestRejectLog?.qty ?? null,
+        topReasons: topRejectReasons,
+        byCategory: Object.entries(
+          scrapLogs.reduce((acc: Record<string, number>, s) => {
+            acc[s.category] = (acc[s.category] ?? 0) + s.qty;
+            return acc;
+          }, {}),
+        ).map(([category, qty]) => ({ category, qty })).sort((a, b) => (b.qty as number) - (a.qty as number)),
+      },
+      machine: jo.machine
+        ? {
+            id: jo.machine.id,
+            name: jo.machine.name,
+            code: jo.machine.code,
+            line: jo.machine.line,
+            area: jo.machine.area,
+            designCapacity: jo.machine.designCapacity,
+            criticality: jo.machine.criticality,
+            currentStatus: jo.machine.currentStatus,
+            stateTimeline: stateRecords,
+          }
+        : null,
+      alarms: {
+        events: alarms,
+        active: alarms.filter((a) => !a.resolvedAt).length,
+        unacknowledged: alarms.filter((a) => !a.acknowledgedAt && !a.resolvedAt).length,
+        bySeverity: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'].map((sev) => ({
+          severity: sev,
+          count: alarms.filter((a) => a.severity === sev).length,
+        })).filter((s) => s.count > 0),
+      },
+      maintenance: {
+        workOrders: maintenanceWOs,
+        open: maintenanceWOs.filter((m) =>
+          ['OPEN', 'AWAITING_PARTS', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD'].includes(m.status as string),
+        ).length,
+      },
+    };
   }
 }

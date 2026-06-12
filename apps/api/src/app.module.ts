@@ -29,6 +29,7 @@ import { ApsModule } from './modules/aps/aps.module';
 import { PlmModule } from './modules/plm/plm.module';
 import { WebSocketGatewayModule } from './gateways/websocket.module';
 import { HealthModule } from './modules/health/health.module';
+import { AlarmsModule } from './modules/alarms/alarms.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RbacGuard } from './common/guards/rbac.guard';
 import { TenantGuard } from './common/guards/tenant.guard';
@@ -106,6 +107,7 @@ import { configuration } from './config/configuration';
     SchedulingModule,
     ApsModule,
     PlmModule,
+    AlarmsModule,
     WebSocketGatewayModule,
     HealthModule,
   ],

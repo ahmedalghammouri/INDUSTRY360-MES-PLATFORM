@@ -42,6 +42,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useWebSocketStatus } from '@/hooks/use-websocket';
+import { useBreadcrumbStore } from '@/store/breadcrumb-store';
 
 const breadcrumbLabels: Record<string, string> = {
   dashboard: 'Dashboard',
@@ -77,24 +78,46 @@ const breadcrumbLabels: Record<string, string> = {
   notifications: 'Notifications',
   users: 'Users & Roles',
   settings: 'Settings',
+  'shop-floor': 'Shop Floor',
+  live: 'Live Dashboard',
+  'dashboard-center': 'Dashboard Center',
+  'reschedule-requests': 'Reschedule Requests',
 };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function titleCase(seg: string) {
+  return seg.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 function Breadcrumb() {
   const pathname = usePathname();
+  const router = useRouter();
+  const dynamicLabels = useBreadcrumbStore((s) => s.labels);
   const segments = pathname.split('/').filter(Boolean);
 
   return (
-    <nav className="flex items-center gap-1.5 text-sm">
+    <nav className="flex items-center gap-1.5 text-sm min-w-0">
       {segments.map((seg, i) => {
-        const label = breadcrumbLabels[seg] || seg;
+        // Resolve label: dynamic store (e.g. JO title) → static map → titlecase → "Details" for bare UUIDs
+        const label =
+          dynamicLabels[seg] ||
+          breadcrumbLabels[seg] ||
+          (UUID_RE.test(seg) ? 'Details' : titleCase(seg));
         const isLast = i === segments.length - 1;
+        const href = '/' + segments.slice(0, i + 1).join('/');
         return (
-          <React.Fragment key={seg}>
+          <React.Fragment key={`${seg}-${i}`}>
             {i > 0 && <span className="text-muted-foreground/40">/</span>}
             <span
+              onClick={() => !isLast && router.push(href)}
               className={cn(
-                isLast ? 'text-foreground font-semibold' : 'text-muted-foreground hover:text-foreground cursor-pointer transition-colors',
+                'truncate max-w-[220px]',
+                isLast
+                  ? 'text-foreground font-semibold'
+                  : 'text-muted-foreground hover:text-foreground cursor-pointer transition-colors',
               )}
+              title={label}
             >
               {label}
             </span>
