@@ -22,7 +22,7 @@ import {
   Wrench, BellRing, AlertTriangle, Check, CheckCircle2, Target,
   TrendingUp, TrendingDown, Clock, Zap, Gauge as GaugeIcon,
   ShieldAlert, BarChart2, PieChart as PieIcon, ListChecks, HardHat, Layers,
-  BookOpen, Crosshair,
+  BookOpen, Crosshair, Sparkles,
 } from 'lucide-react';
 import {
   ResponsiveContainer, ComposedChart, BarChart, Bar, Line, LineChart,
@@ -33,10 +33,11 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { SelectMenu } from '@/components/ui/select-menu';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { useBreadcrumbStore } from '@/store/breadcrumb-store';
+import { JobFilterBar } from './job-filter-bar';
+import { ShiftSummaryBand } from './shift-summary-band';
 import {
   MaintenanceRequestDialog, MachineStateDialog, AlarmDialog,
   type JOActionTarget,
@@ -118,6 +119,47 @@ function Gauge({ value, label, cls, size = 120 }: { value: number | null; label:
       </div>
       <span className="text-xs font-semibold text-muted-foreground">{label}</span>
       <BenchBadge cls={cls} />
+    </div>
+  );
+}
+
+// One availability calculation method (classic schedule-based or time-based),
+// with its formula, resulting value/class and the OEE it produces.
+function AvailabilityMethod({
+  title, subtitle, value, cls, formula, oeeValue, oeeCls, rows, highlight,
+}: {
+  title: string; subtitle: string; value: number | null; cls: string | null;
+  formula: string; oeeValue: number | null; oeeCls: string | null;
+  rows: Array<[string, string]>; highlight?: boolean;
+}) {
+  const color = cls && BENCH[cls] ? BENCH[cls].color : '#64748b';
+  return (
+    <div className={`rounded-xl border p-3 ${highlight ? 'border-brand-400/40 bg-brand-500/5' : 'border-border/50 bg-background/40'}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-bold">{title}</div>
+          <div className="text-[10px] text-muted-foreground">{subtitle}</div>
+        </div>
+        <BenchBadge cls={cls} />
+      </div>
+      <div className="flex items-baseline gap-2 mt-2">
+        <span className="text-3xl font-bold tabular-nums leading-none" style={{ color }}>
+          {value != null ? value.toFixed(1) : '—'}
+        </span>
+        <span className="text-sm text-muted-foreground">%</span>
+        <span className="ml-auto text-[11px] text-muted-foreground">
+          OEE <span className="font-bold text-foreground tabular-nums">{oeeValue != null ? `${oeeValue}%` : '—'}</span>
+        </span>
+      </div>
+      <code className="block mt-2 text-[10px] text-muted-foreground bg-muted/40 rounded px-2 py-1 font-mono">{formula}</code>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2 text-[11px]">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex justify-between">
+            <span className="text-muted-foreground">{k}</span>
+            <span className="tabular-nums font-medium">{v}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -211,25 +253,39 @@ function StateTimeline({ records, windowStart, windowEnd }: {
   );
 }
 
-// ── Metric trend lines (real OEERecord history) ──
-function MetricTrend({ data }: { data: any[] }) {
+// ── Metric trend lines (real InfluxDB historian series) ──
+// `mode` toggles between the OEE comparison (classic vs time-based) and the
+// full A/P/Q breakdown — both fed by the TSDB.
+function MetricTrend({ data, mode }: { data: any[]; mode: 'oee' | 'components' }) {
   const chartData = useMemo(() => data.map((d) => ({ ...d, label: fmtDay(d.date) })), [data]);
   if (!chartData.length) {
-    return <div className="text-xs text-muted-foreground py-8 text-center">No historical OEE records for this machine yet — daily OEE will plot here as shifts close.</div>;
+    return <div className="text-xs text-muted-foreground py-8 text-center">No historian series for this machine yet — the time-series builds every minute and via backfill.</div>;
   }
+  const interval = chartData.length > 16 ? Math.floor(chartData.length / 12) : 0;
   return (
-    <ResponsiveContainer width="100%" height={240}>
+    <ResponsiveContainer width="100%" height={260}>
       <LineChart data={chartData}>
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} />
-        <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+        <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" interval={interval} />
         <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
         <RTooltip {...CHART_TOOLTIP} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <ReferenceLine y={85} stroke="#22c55e" strokeDasharray="4 4" label={{ value: 'World class 85%', fontSize: 9, fill: '#22c55e', position: 'insideTopRight' }} />
-        <Line type="monotone" dataKey="oee" name="OEE" stroke="#0ea5e9" strokeWidth={2.5} dot={false} />
-        <Line type="monotone" dataKey="availability" name="Availability" stroke="#22c55e" strokeWidth={1.5} dot={false} />
-        <Line type="monotone" dataKey="performance" name="Performance" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
-        <Line type="monotone" dataKey="quality" name="Quality" stroke="#a855f7" strokeWidth={1.5} dot={false} />
+        {mode === 'oee' ? (
+          <>
+            <Line type="monotone" dataKey="oee" name="OEE (schedule)" stroke="#0ea5e9" strokeWidth={2.5} dot={false} />
+            <Line type="monotone" dataKey="oeeTb" name="OEE (time-based)" stroke="#f59e0b" strokeWidth={2.5} strokeDasharray="5 3" dot={false} />
+            <Line type="monotone" dataKey="availability" name="Availability (schedule)" stroke="#22c55e" strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="availabilityTb" name="Availability (time-based)" stroke="#a855f7" strokeWidth={1.5} strokeDasharray="5 3" dot={false} />
+          </>
+        ) : (
+          <>
+            <Line type="monotone" dataKey="availability" name="Availability" stroke="#22c55e" strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="availabilityTb" name="Availability (time-based)" stroke="#a855f7" strokeWidth={1.5} strokeDasharray="5 3" dot={false} />
+            <Line type="monotone" dataKey="performance" name="Performance" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="quality" name="Quality" stroke="#ec4899" strokeWidth={1.5} dot={false} />
+          </>
+        )}
       </LineChart>
     </ResponsiveContainer>
   );
@@ -460,38 +516,246 @@ function AvailabilityMetricsDiagram({ dt }: { dt: any }) {
   );
 }
 
-// ── OEE Industry Benchmarks & Standards (reference) ──
-function IndustryBenchmarks({ oeeValue }: { oeeValue: number | null }) {
+// ── AI Analysis — deterministic, rule-based insights derived from the live data
+// (no mock — same philosophy as the project's /ai detectors, scoped to this JO). ──
+function buildAiInsights(d: any) {
+  const o = d.oee, prod = d.production, dt = d.downtime, tm = d.timeModel, sl = d.sixLosses;
+  const out: Array<{ sev: 'high' | 'medium' | 'low' | 'good'; title: string; detail: string; rec: string; confidence: number }> = [];
+
+  // Constraint analysis — which OEE factor is the bottleneck
+  const factors = [
+    { k: 'Availability', v: o.joAvailability },
+    { k: 'Performance', v: o.joPerformance },
+    { k: 'Quality', v: o.joQuality },
+  ].filter((f) => f.v != null).sort((a, b) => (a.v! - b.v!));
+  if (factors.length) {
+    const worst = factors[0];
+    out.push({
+      sev: worst.v! < 60 ? 'high' : worst.v! < 75 ? 'medium' : 'good',
+      title: `${worst.k} is the limiting factor (${worst.v}%)`,
+      detail: `Of the three OEE factors, ${worst.k} scores lowest, capping overall OEE at ${o.joOEE ?? '—'}%.`,
+      rec: worst.k === 'Availability'
+        ? 'Target the top downtime reasons in the Pareto and reduce unplanned stops.'
+        : worst.k === 'Performance'
+        ? 'Investigate speed losses and micro-stops; verify the ideal cycle time.'
+        : 'Review the top reject reasons and tighten in-process quality checks.',
+      confidence: 92,
+    });
+  }
+
+  // Availability method divergence
+  if (o.joAvailability != null && o.availabilityTimeBased != null) {
+    const gap = Math.round((o.availabilityTimeBased - o.joAvailability) * 10) / 10;
+    if (Math.abs(gap) >= 5) {
+      out.push({
+        sev: 'low',
+        title: `Availability methods diverge by ${gap > 0 ? '+' : ''}${gap} pts`,
+        detail: `Time-based availability is ${o.availabilityTimeBased}% vs schedule-based ${o.joAvailability}%. The gap reflects planned stops counted by the schedule method but excluded by the time-based one.`,
+        rec: 'Use time-based for equipment reliability and schedule-based for plan adherence.',
+        confidence: 88,
+      });
+    }
+  }
+
+  // Dominant loss
+  const losses = [
+    { k: 'Equipment failures', v: sl.availability.equipmentFailure.mins },
+    { k: 'Setup & adjustments', v: sl.availability.setupAdjustments.mins },
+    { k: 'Idling & minor stops', v: sl.performance.idlingMinorStops.mins },
+    { k: 'Reduced speed', v: sl.performance.reducedSpeed.mins ?? 0 },
+  ].sort((a, b) => b.v - a.v);
+  if (losses[0]?.v > 0) {
+    out.push({
+      sev: losses[0].v > (tm.totalMins ?? 0) * 0.15 ? 'high' : 'medium',
+      title: `Largest loss: ${losses[0].k} (${fmtMins(losses[0].v)})`,
+      detail: `This is the biggest single contributor to lost time in the current window.`,
+      rec: 'Prioritise a countermeasure here for the fastest OEE gain.',
+      confidence: 85,
+    });
+  }
+
+  // Reliability signal
+  if (dt.mtbfMins != null && dt.mttrMins != null) {
+    out.push({
+      sev: dt.mtbfMins < 60 ? 'high' : dt.mtbfMins < 180 ? 'medium' : 'good',
+      title: `Reliability: MTBF ${fmtMins(dt.mtbfMins)} · MTTR ${fmtMins(dt.mttrMins)}`,
+      detail: `Failures occur roughly every ${fmtMins(dt.mtbfMins)} and take ${fmtMins(dt.mttrMins)} to repair (30-day machine history).`,
+      rec: dt.mtbfMins < 120 ? 'Frequent failures — schedule preventive maintenance for this asset.' : 'Reliability is acceptable; keep monitoring the trend.',
+      confidence: 80,
+    });
+  }
+
+  // Pace vs target
+  if (prod.paceGoodPerHr != null && prod.idealRatePerHr != null) {
+    const ratio = prod.idealRatePerHr > 0 ? prod.paceGoodPerHr / prod.idealRatePerHr : 1;
+    out.push({
+      sev: ratio < 0.7 ? 'high' : ratio < 0.9 ? 'medium' : 'good',
+      title: ratio >= 0.9 ? `On pace (${Math.round(prod.paceGoodPerHr)}/hr)` : `Behind ideal pace by ${Math.round((1 - ratio) * 100)}%`,
+      detail: `Current ${Math.round(prod.paceGoodPerHr)}/hr vs ideal ${Math.round(prod.idealRatePerHr)}/hr.${prod.etaMins != null ? ` ETA to target ${fmtMins(prod.etaMins)}.` : ''}`,
+      rec: ratio < 0.9 ? 'Recover speed to hit the due date, or flag a reschedule.' : 'Maintain the current rate to finish on time.',
+      confidence: 83,
+    });
+  }
+
+  const sevRank = { high: 0, medium: 1, low: 2, good: 3 };
+  return out.sort((a, b) => sevRank[a.sev] - sevRank[b.sev] || b.confidence - a.confidence);
+}
+
+const AI_SEV: Record<string, { cls: string; label: string }> = {
+  high: { cls: 'border-red-500/40 bg-red-500/5 text-red-400', label: 'High' },
+  medium: { cls: 'border-amber-500/40 bg-amber-500/5 text-amber-400', label: 'Medium' },
+  low: { cls: 'border-blue-500/40 bg-blue-500/5 text-blue-400', label: 'Info' },
+  good: { cls: 'border-green-500/40 bg-green-500/5 text-green-400', label: 'Healthy' },
+};
+
+function AiAnalysisPanel({ d }: { d: any }) {
+  const insights = useMemo(() => buildAiInsights(d), [d]);
+  const high = insights.filter((i) => i.sev === 'high').length;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <KpiTile icon={<Sparkles className="w-4 h-4" />} label="Insights" value={insights.length} sub="rule-based detectors" />
+        <KpiTile icon={<AlertTriangle className="w-4 h-4" />} label="High priority" value={high} tone={high > 0 ? 'bg-red-500/15 text-red-400' : 'bg-green-500/15 text-green-400'} />
+        <KpiTile icon={<GaugeIcon className="w-4 h-4" />} label="OEE (schedule)" value={d.oee.joOEE != null ? `${d.oee.joOEE}%` : '—'} />
+        <KpiTile icon={<GaugeIcon className="w-4 h-4" />} label="OEE (time-based)" value={d.oee.oeeTimeBased != null ? `${d.oee.oeeTimeBased}%` : '—'} />
+      </div>
+      <div className="space-y-2">
+        {insights.map((it, i) => {
+          const s = AI_SEV[it.sev];
+          return (
+            <div key={i} className={`rounded-lg border px-3 py-2.5 ${s.cls}`}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-foreground">{it.title}</p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded border border-current font-bold">{s.label}</span>
+                  <span className="text-[10px] text-muted-foreground">{it.confidence}%</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">{it.detail}</p>
+              <p className="text-[11px] mt-1 flex items-start gap-1.5"><Sparkles className="w-3 h-3 mt-0.5 shrink-0 text-brand-400" /><span className="text-foreground/90">{it.rec}</span></p>
+            </div>
+          );
+        })}
+        {insights.length === 0 && <div className="text-xs text-muted-foreground py-6 text-center">Not enough data for analysis yet.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Shift data analysis (current shift window, factory-wide) ──
+function ShiftAnalysisPanel({ shift, currentMachineId }: { shift: any; currentMachineId?: string }) {
+  if (!shift?.status?.active) {
+    return <div className="text-xs text-muted-foreground py-8 text-center">No active shift configured for this factory.</div>;
+  }
+  const t = shift.totals;
+
+  return (
+    <div className="space-y-4">
+      {/* Shift identity + progress */}
+      <ShiftSummaryBand shift={shift} />
+
+      {/* Shift KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+        <KpiTile icon={<Package className="w-4 h-4" />} label="Good (shift)" value={t.good.toLocaleString()} tone="bg-green-500/15 text-green-400" />
+        <KpiTile icon={<AlertTriangle className="w-4 h-4" />} label="Scrap (shift)" value={t.scrap.toLocaleString()} tone="bg-red-500/15 text-red-400" />
+        <KpiTile icon={<CheckCircle2 className="w-4 h-4" />} label="Quality" value={t.quality != null ? `${t.quality}%` : '—'} />
+        <KpiTile icon={<Zap className="w-4 h-4" />} label="Pace" value={t.paceGoodPerHr != null ? `${t.paceGoodPerHr.toLocaleString()}/hr` : '—'} sub={t.projectedGood != null ? `proj. ${t.projectedGood.toLocaleString()}` : undefined} />
+        <KpiTile icon={<Cpu className="w-4 h-4" />} label="Running" value={`${t.runningMachines}/${t.totalMachines}`} sub="machines" />
+        <KpiTile icon={<Timer className="w-4 h-4" />} label="Downtime" value={fmtMins(t.downtimeMins)} sub={`${fmtMins(t.unplannedDownMins)} unplanned`} tone="bg-amber-500/15 text-amber-400" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Per-machine breakdown */}
+        <SectionCard title="Machines this Shift" icon={<Cpu className="w-4 h-4 text-brand-400" />}>
+          <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+            {shift.machines.map((m: any) => (
+              <div key={m.id} className={`rounded-lg border px-3 py-2 flex items-center gap-2 ${m.id === currentMachineId ? 'border-brand-400/50 bg-brand-500/5' : 'border-border/40 bg-background/40'}`}>
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: STATE_COLORS[m.state] ?? '#64748b' }} />
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">{m.code}</span>
+                <span className="text-sm font-medium truncate flex-1">{m.name}{m.id === currentMachineId && <span className="text-[9px] text-brand-400 ml-1.5">this JO</span>}</span>
+                <span className="text-xs text-green-400 tabular-nums">{m.good.toLocaleString()}</span>
+                {m.scrap > 0 && <span className="text-[10px] text-red-400 tabular-nums">✗{m.scrap}</span>}
+                {m.oee != null && <span className="text-[10px] text-muted-foreground tabular-nums w-12 text-right">OEE {Math.round(m.oee)}%</span>}
+              </div>
+            ))}
+            {shift.machines.length === 0 && <div className="text-xs text-muted-foreground py-6 text-center">No machines</div>}
+          </div>
+        </SectionCard>
+
+        {/* Shift downtime reasons */}
+        <SectionCard title="Shift Downtime Reasons" icon={<PieIcon className="w-4 h-4 text-brand-400" />}
+          right={<span className="text-[10px] text-muted-foreground">{shift.downtime.occurrences} events · {fmtMins(shift.downtime.totalMins)}</span>}>
+          {shift.downtime.byReason.length === 0 ? (
+            <div className="text-xs text-muted-foreground py-8 text-center">No downtime this shift</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={shift.downtime.byReason} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} />
+                <XAxis type="number" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                <YAxis type="category" dataKey="label" tick={{ fontSize: 10 }} width={120} stroke="hsl(var(--muted-foreground))" />
+                <RTooltip {...CHART_TOOLTIP} formatter={(v: any) => [fmtMins(v as number), 'Duration']} />
+                <Bar dataKey="mins" name="Duration" fill="#dc2626" radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </SectionCard>
+      </div>
+    </div>
+  );
+}
+
+// ── OEE Industry Benchmarks & Standards — both availability methods compared ──
+function classify(v: number | null) {
+  return v == null ? null : v >= 85 ? 'WORLD_CLASS' : v >= 70 ? 'GOOD' : v >= 60 ? 'FAIR' : 'POOR';
+}
+function IndustryBenchmarks({ oeeValue, oeeTimeBasedValue }: { oeeValue: number | null; oeeTimeBasedValue: number | null }) {
   const levels = [
     { name: 'World Class', range: '85%+', desc: 'Exceptional performance with minimal losses', key: 'WORLD_CLASS' },
     { name: 'Good', range: '70–85%', desc: 'Above average with room for improvement', key: 'GOOD' },
     { name: 'Fair', range: '60–70%', desc: 'Average performance with significant opportunities', key: 'FAIR' },
     { name: 'Poor', range: '<60%', desc: 'Requires immediate attention and improvement', key: 'POOR' },
   ];
-  // Industry-typical OEE ranges (well-established manufacturing standards)
   const industries = [
     ['Automotive', '60–75%'], ['Food & Beverage', '50–65%'], ['Pharmaceuticals', '65–80%'],
     ['Electronics', '70–85%'], ['Packaging', '55–70%'], ['Textiles', '45–60%'],
   ];
-  const current = oeeValue == null ? null : oeeValue >= 85 ? 'WORLD_CLASS' : oeeValue >= 70 ? 'GOOD' : oeeValue >= 60 ? 'FAIR' : 'POOR';
+  const schedLevel = classify(oeeValue);
+  const tbLevel = classify(oeeTimeBasedValue);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div>
-        <p className="text-xs font-bold text-muted-foreground mb-2">OEE Performance Levels</p>
-        <div className="space-y-2">
-          {levels.map((l) => (
-            <div key={l.key} className={`rounded-lg border px-3 py-2 flex items-center justify-between ${BENCH[l.key].bg} ${current === l.key ? 'ring-2 ring-current' : ''}`}>
-              <div>
-                <div className="text-sm font-bold flex items-center gap-2">
-                  {l.name}
-                  {current === l.key && <Badge variant="outline" className="text-[9px] py-0">this JO</Badge>}
-                </div>
-                <div className="text-[10px] opacity-80">{l.desc}</div>
-              </div>
-              <span className="text-sm font-bold">{l.range}</span>
-            </div>
-          ))}
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-bold text-muted-foreground">OEE Performance Levels</p>
+          <div className="flex items-center gap-2 text-[10px]">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" />Schedule {oeeValue != null ? `${oeeValue}%` : '—'}</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" />Time-based {oeeTimeBasedValue != null ? `${oeeTimeBasedValue}%` : '—'}</span>
+          </div>
         </div>
+        <div className="space-y-2">
+          {levels.map((l) => {
+            const isSched = schedLevel === l.key;
+            const isTb = tbLevel === l.key;
+            return (
+              <div key={l.key} className={`rounded-lg border px-3 py-2 flex items-center justify-between ${BENCH[l.key].bg} ${isSched || isTb ? 'ring-2 ring-current' : ''}`}>
+                <div>
+                  <div className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
+                    {l.name}
+                    {isSched && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/40 font-semibold">Schedule</span>}
+                    {isTb && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/40 font-semibold">Time-based</span>}
+                  </div>
+                  <div className="text-[10px] opacity-80">{l.desc}</div>
+                </div>
+                <span className="text-sm font-bold">{l.range}</span>
+              </div>
+            );
+          })}
+        </div>
+        {schedLevel && tbLevel && schedLevel !== tbLevel && (
+          <p className="text-[10px] text-muted-foreground mt-2">
+            The two availability methods place this job order in <span className="font-semibold">different</span> benchmark tiers —
+            the time-based method (excludes planned stops) reads higher.
+          </p>
+        )}
       </div>
       <div>
         <p className="text-xs font-bold text-muted-foreground mb-2">Industry Typical OEE</p>
@@ -517,6 +781,9 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [actionKind, setActionKind] = useState<'maintenance' | 'state' | 'alarm' | null>(null);
+  const [machineSel, setMachineSel] = useState<string[]>([]);
+  const [poSel, setPoSel] = useState('');
+  const [woSel, setWoSel] = useState('');
 
   const { data, isLoading, isError, error, dataUpdatedAt } = useQuery({
     queryKey: ['jo-live', jobOrderId],
@@ -529,6 +796,13 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
     queryKey: ['shop-floor-jobs', 'switcher'],
     queryFn: () => api.get('/production/job-orders'),
     staleTime: 30_000,
+  });
+
+  // Shift analysis (factory-wide, current shift window)
+  const { data: shiftData } = useQuery({
+    queryKey: ['shift-analysis'],
+    queryFn: () => api.get('/shifts/analysis'),
+    refetchInterval: 30_000,
   });
 
   const d: any = data;
@@ -550,12 +824,34 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
     operationName: jo.operationName,
   } : null;
 
-  const joOptions = useMemo(() => ((allJos as any[]) ?? [])
+  // ── Smart filters (same bar as the Shop Floor) → narrow the job-order nav chips ──
+  const jobs = (allJos as any[]) ?? [];
+  const machineOptions = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; code: string; count: number }>();
+    for (const j of jobs) if (j.machine?.id) {
+      const cur = m.get(j.machine.id) ?? { id: j.machine.id, name: j.machine.name, code: j.machine.code, count: 0 };
+      cur.count += 1; m.set(j.machine.id, cur);
+    }
+    return [...m.values()].sort((a, b) => a.code.localeCompare(b.code));
+  }, [jobs]);
+  const poOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const j of jobs) { const po = j.workOrder?.productionOrder; if (po?.id) m.set(po.id, po.orderNumber); }
+    return [...m.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  }, [jobs]);
+  const woOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const j of jobs) { if (poSel && j.workOrder?.productionOrder?.id !== poSel) continue; if (j.workOrder?.id) m.set(j.workOrder.id, j.workOrder.orderNumber); }
+    return [...m.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  }, [jobs, poSel]);
+
+  const navJobs = useMemo(() => jobs
+    .filter((j) => !machineSel.length || (j.machine?.id && machineSel.includes(j.machine.id)))
+    .filter((j) => !poSel || j.workOrder?.productionOrder?.id === poSel)
+    .filter((j) => !woSel || j.workOrder?.id === woSel)
     .filter((j) => ['READY', 'EXECUTING', 'PAUSED', 'COMPLETE'].includes(j.status))
-    .map((j) => ({
-      value: j.id,
-      label: `${j.workOrder?.orderNumber ?? ''} · #${j.sequenceOrder} ${j.operationName} (${j.status})`,
-    })), [allJos]);
+    .sort((a, b) => (a.workOrder?.orderNumber ?? '').localeCompare(b.workOrder?.orderNumber ?? '') || a.sequenceOrder - b.sequenceOrder),
+    [jobs, machineSel, poSel, woSel]);
 
   // Trend series → chart data
   const trendData = useMemo(() => {
@@ -636,13 +932,6 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
           </div>
 
           <div className="ml-auto flex items-center gap-2 flex-wrap">
-            <SelectMenu
-              value={jobOrderId}
-              onValueChange={(v) => v && router.push(`/shop-floor/live/${v}`)}
-              options={joOptions}
-              placeholder="Switch job order"
-              size="sm"
-            />
             <Button variant="outline" size="sm" className="text-amber-400 border-amber-400/40" onClick={() => setActionKind('maintenance')}>
               <Wrench className="w-3.5 h-3.5 mr-1.5" />Maintenance
             </Button>
@@ -663,6 +952,47 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
       </div>
 
       <div className="max-w-screen-2xl mx-auto p-4 space-y-4">
+        {/* ── Smart filters (same as Shop Floor) + job-order navigation chips ── */}
+        <JobFilterBar
+          machines={machineOptions}
+          pos={poOptions}
+          wos={woOptions}
+          machineSel={machineSel}
+          onMachineSel={setMachineSel}
+          po={poSel}
+          onPo={setPoSel}
+          wo={woSel}
+          onWo={setWoSel}
+          right={<span className="text-xs text-muted-foreground tabular-nums">{navJobs.length} job{navJobs.length === 1 ? '' : 's'}</span>}
+        />
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 -mt-1">
+          {navJobs.map((j) => {
+            const active = j.id === jobOrderId;
+            const dot = j.status === 'EXECUTING' ? 'bg-green-400' : j.status === 'PAUSED' ? 'bg-amber-400' : j.status === 'COMPLETE' ? 'bg-emerald-400' : 'bg-blue-400';
+            return (
+              <button
+                key={j.id}
+                onClick={() => !active && router.push(`/shop-floor/live/${j.id}`)}
+                className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors ${
+                  active
+                    ? 'border-brand-400 bg-brand-500/15 text-brand-400 font-semibold'
+                    : 'border-border/60 bg-muted/30 text-muted-foreground hover:border-brand-400/40 hover:text-foreground'
+                }`}
+                title={`${j.workOrder?.orderNumber ?? ''} · ${j.operationName} (${j.status})`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${dot} ${j.status === 'EXECUTING' ? 'animate-pulse' : ''}`} />
+                <span className="font-mono">#{j.sequenceOrder}</span>
+                <span className="truncate max-w-[120px]">{j.operationName}</span>
+                {j.machine?.code && <span className="text-[10px] opacity-60 font-mono">{j.machine.code}</span>}
+              </button>
+            );
+          })}
+          {navJobs.length === 0 && <span className="text-xs text-muted-foreground py-1.5">No job orders match the filters.</span>}
+        </div>
+
+        {/* ── Current shift summary (below the filters) ── */}
+        <ShiftSummaryBand shift={shiftData} />
+
         {/* ── Open downtime banner ── */}
         {dt.open && (
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 flex items-center gap-3">
@@ -693,39 +1023,74 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
               <Wrench className="w-3.5 h-3.5 mr-1.5" />Maintenance
               {d.maintenance.open > 0 && <span className="ml-1.5 px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-bold">{d.maintenance.open}</span>}
             </TabsTrigger>
-            <TabsTrigger value="standards"><BookOpen className="w-3.5 h-3.5 mr-1.5" />Standards</TabsTrigger>
+            <TabsTrigger value="shift"><Clock className="w-3.5 h-3.5 mr-1.5" />Shift Analysis</TabsTrigger>
+            <TabsTrigger value="standards"><Sparkles className="w-3.5 h-3.5 mr-1.5" />AI Analysis & Benchmarks</TabsTrigger>
           </TabsList>
 
           {/* ═══════════ OVERVIEW ═══════════ */}
           <TabsContent value="overview" className="space-y-4 mt-4">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {/* OEE gauges */}
-              <SectionCard title="OEE" icon={<GaugeIcon className="w-4 h-4 text-brand-400" />}
-                right={<BenchBadge cls={oee.oeeClass} />}>
-                <div className="flex items-center justify-around flex-wrap gap-2">
-                  <Gauge value={oee.joOEE} label="OEE" cls={oee.oeeClass} size={130} />
-                  <Gauge value={oee.joAvailability} label="Availability" cls={oee.availabilityClass} size={84} />
-                  <Gauge value={oee.joPerformance} label="Performance" cls={oee.performanceClass} size={84} />
-                  <Gauge value={oee.joQuality} label="Quality" cls={oee.qualityClass} size={84} />
+            {/* OEE & dual-availability — full width */}
+            <SectionCard title="OEE & Availability — two methods" icon={<GaugeIcon className="w-4 h-4 text-brand-400" />}
+              right={
+                <div className="flex items-center gap-1.5">
+                  <BenchBadge cls={oee.oeeClass} />
+                  <span className="text-muted-foreground/40">vs</span>
+                  <BenchBadge cls={oee.oeeTimeBasedClass} />
                 </div>
-                {/* TEEP + utilization (OEE × utilization) */}
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <div className="rounded-lg border border-border/40 bg-background/40 px-3 py-2 flex items-center justify-between">
-                    <div>
-                      <div className="text-[10px] uppercase text-muted-foreground">TEEP</div>
-                      <div className="text-[9px] text-muted-foreground">OEE × utilization</div>
-                    </div>
-                    <span className="text-lg font-bold tabular-nums" style={{ color: oee.teepClass && BENCH[oee.teepClass] ? BENCH[oee.teepClass].color : undefined }}>
-                      {oee.teepPct != null ? `${oee.teepPct}%` : '—'}
-                    </span>
-                  </div>
-                  <div className="rounded-lg border border-border/40 bg-background/40 px-3 py-2 flex items-center justify-between">
-                    <div className="text-[10px] uppercase text-muted-foreground">Utilization</div>
-                    <span className="text-lg font-bold tabular-nums">{oee.utilizationPct != null ? `${oee.utilizationPct}%` : '—'}</span>
-                  </div>
+              }>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                {/* Gauges: dual OEE + Performance + Quality */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-center justify-items-center">
+                  <Gauge value={oee.joOEE} label="OEE · Schedule" cls={oee.oeeClass} size={118} />
+                  <Gauge value={oee.oeeTimeBased} label="OEE · Time-based" cls={oee.oeeTimeBasedClass} size={118} />
+                  <Gauge value={oee.joPerformance} label="Performance" cls={oee.performanceClass} size={92} />
+                  <Gauge value={oee.joQuality} label="Quality" cls={oee.qualityClass} size={92} />
                 </div>
-              </SectionCard>
 
+                {/* Two availability methods side by side */}
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <AvailabilityMethod
+                    title="Schedule-based" subtitle="Operating ÷ Planned time"
+                    value={oee.joAvailability} cls={oee.availabilityClass}
+                    formula="A = Operating Time / Planned Production Time"
+                    oeeValue={oee.joOEE} oeeCls={oee.oeeClass}
+                    rows={[['Window', fmtMins(d.window.minutes)], ['Utilization', oee.utilizationPct != null ? `${oee.utilizationPct}%` : '—']]}
+                  />
+                  <AvailabilityMethod
+                    title="Time-based" subtitle="Uptime ÷ (Uptime + Downtime)"
+                    value={oee.availabilityTimeBased} cls={oee.availabilityTimeBasedClass}
+                    formula="A = Uptime / (Uptime + Downtime)"
+                    oeeValue={oee.oeeTimeBased} oeeCls={oee.oeeTimeBasedClass}
+                    rows={[['Uptime', fmtMins(oee.uptimeMins)], ['Downtime', fmtMins(oee.downtimeMins)]]}
+                    highlight
+                  />
+                </div>
+              </div>
+
+              {/* TEEP (both) + utilization */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-4 pt-3 border-t border-border/40">
+                <div className="rounded-lg border border-border/40 bg-background/40 px-3 py-2 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] uppercase text-muted-foreground">TEEP · Schedule</div>
+                    <div className="text-[9px] text-muted-foreground">OEE × utilization</div>
+                  </div>
+                  <span className="text-lg font-bold tabular-nums">{oee.teepPct != null ? `${oee.teepPct}%` : '—'}</span>
+                </div>
+                <div className="rounded-lg border border-border/40 bg-background/40 px-3 py-2 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] uppercase text-muted-foreground">TEEP · Time-based</div>
+                    <div className="text-[9px] text-muted-foreground">OEE(tb) × utilization</div>
+                  </div>
+                  <span className="text-lg font-bold tabular-nums">{oee.teepTimeBasedPct != null ? `${oee.teepTimeBasedPct}%` : '—'}</span>
+                </div>
+                <div className="rounded-lg border border-border/40 bg-background/40 px-3 py-2 flex items-center justify-between">
+                  <div className="text-[10px] uppercase text-muted-foreground">Utilization</div>
+                  <span className="text-lg font-bold tabular-nums">{oee.utilizationPct != null ? `${oee.utilizationPct}%` : '—'}</span>
+                </div>
+              </div>
+            </SectionCard>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Production summary */}
               <SectionCard title="Production" icon={<Package className="w-4 h-4 text-brand-400" />}>
                 <div className="space-y-3">
@@ -796,10 +1161,10 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
               </SectionCard>
             </div>
 
-            {/* OEE trend lines */}
-            <SectionCard title="OEE Trend — Availability · Performance · Quality · OEE" icon={<TrendingUp className="w-4 h-4 text-brand-400" />}
-              right={<span className="text-[10px] text-muted-foreground">14-day machine history (OEE records)</span>}>
-              <MetricTrend data={oee.trend ?? []} />
+            {/* OEE trend — classic vs time-based, from the InfluxDB historian */}
+            <SectionCard title="OEE Trend — Schedule-based vs Time-based" icon={<TrendingUp className="w-4 h-4 text-brand-400" />}
+              right={<span className="text-[10px] text-muted-foreground">14-day TSDB history (InfluxDB)</span>}>
+              <MetricTrend data={oee.trend ?? []} mode="oee" />
             </SectionCard>
 
             {/* Machine status timeline */}
@@ -1144,14 +1509,29 @@ export function JOLiveDashboard({ jobOrderId }: { jobOrderId: string }) {
             </SectionCard>
           </TabsContent>
 
-          {/* ═══════════ STANDARDS & BENCHMARKS ═══════════ */}
+          {/* ═══════════ SHIFT ANALYSIS ═══════════ */}
+          <TabsContent value="shift" className="space-y-4 mt-4">
+            <ShiftAnalysisPanel shift={shiftData} currentMachineId={d.machine?.id} />
+          </TabsContent>
+
+          {/* ═══════════ AI ANALYSIS & BENCHMARKS ═══════════ */}
           <TabsContent value="standards" className="space-y-4 mt-4">
-            <SectionCard title="The Six Big Losses in Manufacturing" icon={<ShieldAlert className="w-4 h-4 text-brand-400" />}>
-              <SixLossesPanel sl={d.sixLosses} />
+            <SectionCard title="AI Analysis — live insights for this job order" icon={<Sparkles className="w-4 h-4 text-brand-400" />}
+              right={<span className="text-[10px] text-muted-foreground">rule-based · real data</span>}>
+              <AiAnalysisPanel d={d} />
             </SectionCard>
             <SectionCard title="OEE Industry Benchmarks & Standards" icon={<BarChart2 className="w-4 h-4 text-brand-400" />}
-              right={oee.joOEE != null ? <BenchBadge cls={oee.oeeClass} /> : undefined}>
-              <IndustryBenchmarks oeeValue={oee.joOEE} />
+              right={
+                <div className="flex items-center gap-1.5">
+                  <BenchBadge cls={oee.oeeClass} />
+                  <span className="text-muted-foreground/40">vs</span>
+                  <BenchBadge cls={oee.oeeTimeBasedClass} />
+                </div>
+              }>
+              <IndustryBenchmarks oeeValue={oee.joOEE} oeeTimeBasedValue={oee.oeeTimeBased} />
+            </SectionCard>
+            <SectionCard title="The Six Big Losses in Manufacturing" icon={<ShieldAlert className="w-4 h-4 text-brand-400" />}>
+              <SixLossesPanel sl={d.sixLosses} />
             </SectionCard>
             <SectionCard title="Availability Metrics — MTTD · MTTR · MTBF" icon={<Crosshair className="w-4 h-4 text-brand-400" />}>
               <AvailabilityMetricsDiagram dt={dt} />

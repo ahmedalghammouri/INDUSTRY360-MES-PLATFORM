@@ -90,6 +90,12 @@ export class ShiftController {
     return this.service.getCurrentShiftStatus(user.factoryId);
   }
 
+  @Get('analysis')
+  @ApiOperation({ summary: 'Shift data analysis — production, quality, downtime and per-machine breakdown for the current shift window' })
+  analysis(@CurrentUser() user: User) {
+    return this.service.getShiftAnalysis(user.factoryId);
+  }
+
   @Post('instances/:id/start')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Start a shift (sets IN_PROGRESS, assigns operator/supervisor)' })

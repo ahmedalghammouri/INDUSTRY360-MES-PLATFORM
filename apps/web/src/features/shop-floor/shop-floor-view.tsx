@@ -8,21 +8,17 @@ import {
   AlertCircle, ClipboardList, ArrowDownCircle, GitBranch,
   GitMerge, Shuffle, ChevronRight, BarChart2, TrendingUp,
   Clock, Zap, Wrench, BellRing, AlertTriangle, Activity,
-  Filter, ChevronDown,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
-  DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
-import { SelectMenu } from '@/components/ui/select-menu';
 import { api } from '@/services/api.client';
 import {
   MaintenanceRequestDialog, MachineStateDialog, AlarmDialog,
   type JOActionTarget,
 } from './shop-floor-actions';
+import { JobFilterBar } from './job-filter-bar';
+import { ShiftSummaryBand } from './shift-summary-band';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -42,6 +38,7 @@ interface ShopFloorJO {
   outputUnit?: string;
   actualQtyGood: number;
   actualQtyRejected: number;
+  handoverQty?: number;
   scrapReason?: string;
   operatorId?: string;
   operator?: Operator;
@@ -60,6 +57,8 @@ interface ShopFloorJO {
   joPerformance?: number;
   joAvailability?: number;
   joOEE?: number;
+  joAvailabilityTimeBased?: number;
+  joOEETimeBased?: number;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -187,31 +186,27 @@ function useElapsed(jo: ShopFloorJO) {
 
 function ShopFloorCard({
   jo, users, pending,
-  onTransition, onCount, onAssignOperator,
+  onTransition, onRecord, onAssignOperator,
   onOpenLive, onAction,
 }: {
   jo: ShopFloorJO;
   users: Operator[];
   pending: boolean;
   onTransition: (id: string, status: JOStatus, qty?: number) => void;
-  onCount: (id: string, good: number, scrap: number, reason: string, category?: string) => void;
+  onRecord: (id: string, rec: { goodDelta: number; scrapDelta: number; reason: string; category?: string; handoverQty?: number }) => void;
   onAssignOperator: (id: string, operatorId: string | null) => void;
   onOpenLive: (jo: ShopFloorJO) => void;
   onAction: (kind: 'maintenance' | 'state' | 'alarm', jo: ShopFloorJO) => void;
 }) {
-  const [goodQty,      setGoodQty]      = useState(String(jo.actualQtyGood || ''));
-  const [scrapQty,     setScrapQty]     = useState(String(jo.actualQtyRejected || ''));
-  const [scrapReason,  setScrapReason]  = useState(jo.scrapReason || '');
-  const [scrapCategory, setScrapCategory] = useState('OTHER');
+  // Incremental entry — each save ADDS to the running totals (never replaces)
+  const [addGood,      setAddGood]      = useState('');
+  const [addScrap,     setAddScrap]     = useState('');
+  const [scrapReason,  setScrapReason]  = useState('');
+  const [scrapCategory, setScrapCategory] = useState('QUALITY');
+  const [handoverInput, setHandoverInput] = useState('');
+  const [showHandover, setShowHandover] = useState(false);
   const [showAssign, setShowAssign]  = useState(false);
   const elapsed = useElapsed(jo);
-
-  // sync inputs when jo updates (e.g. after save)
-  useEffect(() => {
-    setGoodQty(String(jo.actualQtyGood || ''));
-    setScrapQty(String(jo.actualQtyRejected || ''));
-    setScrapReason(jo.scrapReason || '');
-  }, [jo.actualQtyGood, jo.actualQtyRejected, jo.scrapReason]);
 
   const progress = (jo.plannedQtyOut ?? 0) > 0
     ? Math.min(100, Math.round((jo.actualQtyGood / (jo.plannedQtyOut ?? 1)) * 100))
@@ -281,8 +276,13 @@ function ShopFloorCard({
             </span>
           )}
           {jo.joAvailability != null && (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border text-yellow-400 bg-yellow-400/10 border-yellow-400/30 tabular-nums">
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border text-yellow-400 bg-yellow-400/10 border-yellow-400/30 tabular-nums" title="Availability — schedule-based (Operating ÷ Planned)">
               A: {jo.joAvailability.toFixed(1)}%
+            </span>
+          )}
+          {jo.joAvailabilityTimeBased != null && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border border-dashed text-yellow-400 bg-yellow-400/10 border-yellow-400/30 tabular-nums" title="Availability — time-based = Uptime ÷ (Uptime + Downtime)">
+              A·T: {jo.joAvailabilityTimeBased.toFixed(1)}%
             </span>
           )}
           {jo.joOEE != null && (
@@ -292,8 +292,19 @@ function ShopFloorCard({
                 : jo.joOEE >= 60
                 ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30'
                 : 'text-red-400 bg-red-400/10 border-red-400/30'
-            }`}>
+            }`} title="OEE — schedule-based availability">
               OEE: {jo.joOEE.toFixed(1)}%
+            </span>
+          )}
+          {jo.joOEETimeBased != null && (
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border border-dashed tabular-nums ${
+              jo.joOEETimeBased >= 85
+                ? 'text-green-400 bg-green-400/10 border-green-400/30'
+                : jo.joOEETimeBased >= 60
+                ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30'
+                : 'text-red-400 bg-red-400/10 border-red-400/30'
+            }`} title="OEE — time-based availability = Uptime / (Uptime + Downtime)">
+              OEE·T: {jo.joOEETimeBased.toFixed(1)}%
             </span>
           )}
         </div>
@@ -384,80 +395,135 @@ function ShopFloorCard({
         )}
       </div>
 
-      {/* ── Count inputs (EXECUTING or PAUSED) ── */}
-      {canLog && (
-        <div className="px-5 py-4 border-t border-border/20 space-y-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-            <BarChart2 className="w-3.5 h-3.5" />Production Count
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            {/* Good */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-green-400 flex items-center gap-1">
-                <Check className="w-3.5 h-3.5" />Good
-              </label>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                value={goodQty}
-                onChange={(e) => setGoodQty(e.target.value)}
-                placeholder="0"
-                className="w-full h-14 text-2xl font-bold text-center tabular-nums bg-green-500/5 border border-green-500/20 rounded-xl focus:outline-none focus:border-green-400 text-green-400 placeholder:text-green-400/20"
-              />
+      {/* ── Smart incremental count (EXECUTING or PAUSED) ── */}
+      {canLog && (() => {
+        const gd = parseInt(addGood, 10) || 0;
+        const sd = parseInt(addScrap, 10) || 0;
+        const newGood = jo.actualQtyGood + gd;
+        const newRejected = jo.actualQtyRejected + sd;
+        const newTotal = newGood + newRejected;
+        const newQuality = newTotal > 0 ? (newGood / newTotal) * 100 : 100;
+        const nothing = gd === 0 && sd === 0 && !showHandover;
+        const submit = () => {
+          onRecord(jo.id, {
+            goodDelta: gd,
+            scrapDelta: sd,
+            reason: scrapReason,
+            category: scrapCategory,
+            ...(showHandover && handoverInput !== '' ? { handoverQty: parseInt(handoverInput, 10) || 0 } : {}),
+          });
+          setAddGood(''); setAddScrap(''); setScrapReason('');
+        };
+        return (
+          <div className="px-5 py-4 border-t border-border/20 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <BarChart2 className="w-3.5 h-3.5" />Record Production
+              </p>
+              {/* Running totals (read-only) */}
+              <span className="text-[10px] text-muted-foreground flex items-center gap-2 tabular-nums">
+                <span className="text-green-400">✓{jo.actualQtyGood}</span>
+                <span className="text-red-400">✗{jo.actualQtyRejected}</span>
+                <span className="text-brand-400" title="Handover to next step">→{jo.handoverQty ?? 0}</span>
+              </span>
             </div>
-            {/* Scrap */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-red-400 flex items-center gap-1">
-                <X className="w-3.5 h-3.5" />Scrap
-              </label>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                value={scrapQty}
-                onChange={(e) => setScrapQty(e.target.value)}
-                placeholder="0"
-                className="w-full h-14 text-2xl font-bold text-center tabular-nums bg-red-500/5 border border-red-500/20 rounded-xl focus:outline-none focus:border-red-400 text-red-400 placeholder:text-red-400/20"
-              />
+
+            <div className="grid grid-cols-2 gap-3">
+              {/* Add Good */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-green-400 flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" />Add Good
+                </label>
+                <input
+                  type="number" inputMode="numeric" min={0}
+                  value={addGood}
+                  onChange={(e) => setAddGood(e.target.value)}
+                  placeholder="+0"
+                  className="w-full h-14 text-2xl font-bold text-center tabular-nums bg-green-500/5 border border-green-500/20 rounded-xl focus:outline-none focus:border-green-400 text-green-400 placeholder:text-green-400/20"
+                />
+              </div>
+              {/* Add Bad / Scrap */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-red-400 flex items-center gap-1">
+                  <X className="w-3.5 h-3.5" />Add Bad / Scrap
+                </label>
+                <input
+                  type="number" inputMode="numeric" min={0}
+                  value={addScrap}
+                  onChange={(e) => setAddScrap(e.target.value)}
+                  placeholder="+0"
+                  className="w-full h-14 text-2xl font-bold text-center tabular-nums bg-red-500/5 border border-red-500/20 rounded-xl focus:outline-none focus:border-red-400 text-red-400 placeholder:text-red-400/20"
+                />
+              </div>
             </div>
-          </div>
-          {parseFloat(scrapQty) > 0 && (
-            <div className="space-y-2">
-              <select
-                value={scrapCategory}
-                onChange={(e) => setScrapCategory(e.target.value)}
-                className="w-full h-12 px-3 text-sm bg-red-500/5 border border-red-500/20 rounded-xl focus:outline-none focus:border-red-400 text-red-300"
-              >
-                {['QUALITY','SETUP','DAMAGE','OVERRUN','MATERIAL','MACHINE','OPERATOR','OTHER'].map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-              <input
-                type="text"
-                placeholder="Scrap / rejection reason…"
-                value={scrapReason}
-                onChange={(e) => setScrapReason(e.target.value)}
-                className="w-full px-3 py-2.5 text-sm bg-red-500/5 border border-red-500/20 rounded-xl focus:outline-none focus:border-red-400 placeholder:text-muted-foreground/40"
-              />
-            </div>
-          )}
-          <button
-            disabled={pending}
-            onClick={() => onCount(
-              jo.id,
-              parseFloat(goodQty) || 0,
-              parseFloat(scrapQty) || 0,
-              scrapReason,
-              scrapCategory,
+
+            {/* Live preview of new totals + quality impact */}
+            {(gd > 0 || sd > 0) && (
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5">
+                <span>New totals: <span className="text-green-400 font-semibold tabular-nums">{newGood}</span> good · <span className="text-red-400 font-semibold tabular-nums">{newRejected}</span> bad</span>
+                <span>Quality → <span className={`font-bold tabular-nums ${newQuality >= 95 ? 'text-green-400' : newQuality >= 85 ? 'text-amber-400' : 'text-red-400'}`}>{newQuality.toFixed(1)}%</span></span>
+              </div>
             )}
-            className="w-full h-12 rounded-xl bg-brand-500/20 hover:bg-brand-500/30 border border-brand-400/40 text-brand-400 font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-40 transition-colors"
-          >
-            <TrendingUp className="w-4 h-4" />
-            Save Count
-          </button>
-        </div>
-      )}
+
+            {/* Scrap reason + category (only when adding bad qty) */}
+            {sd > 0 && (
+              <div className="space-y-2">
+                <select
+                  value={scrapCategory}
+                  onChange={(e) => setScrapCategory(e.target.value)}
+                  className="w-full h-11 px-3 text-sm bg-red-500/5 border border-red-500/20 rounded-xl focus:outline-none focus:border-red-400 text-red-300"
+                >
+                  {['QUALITY','SETUP','DAMAGE','OVERRUN','MATERIAL','MACHINE','OPERATOR','OTHER'].map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  placeholder="Reject reason (recorded to scrap log)…"
+                  value={scrapReason}
+                  onChange={(e) => setScrapReason(e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm bg-red-500/5 border border-red-500/20 rounded-xl focus:outline-none focus:border-red-400 placeholder:text-muted-foreground/40"
+                />
+              </div>
+            )}
+
+            {/* Handover qty control */}
+            {showHandover ? (
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold text-brand-400 flex items-center gap-1 shrink-0">
+                  <ArrowDownCircle className="w-3.5 h-3.5" />Handover
+                </label>
+                <input
+                  type="number" inputMode="numeric" min={0}
+                  value={handoverInput}
+                  onChange={(e) => setHandoverInput(e.target.value)}
+                  placeholder={String(jo.handoverQty ?? 0)}
+                  className="flex-1 h-10 px-3 text-sm text-center tabular-nums bg-brand-500/5 border border-brand-400/30 rounded-xl focus:outline-none focus:border-brand-400 text-brand-400"
+                />
+                <button onClick={() => { setShowHandover(false); setHandoverInput(''); }} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setShowHandover(true); setHandoverInput(String(jo.handoverQty ?? '')); }}
+                className="text-[11px] text-brand-400/80 hover:text-brand-400 flex items-center gap-1"
+              >
+                <ArrowDownCircle className="w-3.5 h-3.5" />Set handover qty to next step
+              </button>
+            )}
+
+            <button
+              disabled={pending || nothing}
+              onClick={submit}
+              className="w-full h-12 rounded-xl bg-brand-500/20 hover:bg-brand-500/30 border border-brand-400/40 text-brand-400 font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-40 transition-colors"
+            >
+              <TrendingUp className="w-4 h-4" />
+              Record {gd > 0 && `+${gd} good`}{gd > 0 && sd > 0 && ' · '}{sd > 0 && `+${sd} bad`}
+            </button>
+          </div>
+        );
+      })()}
 
       {/* ── Operator quick actions: live page · maintenance · stop/state · alarm ── */}
       <div className="px-5 py-2 border-t border-border/20 flex items-center gap-1.5 mt-auto">
@@ -518,7 +584,7 @@ function ShopFloorCard({
               disabled={pending}
               onClick={() => onTransition(
                 jo.id, 'COMPLETE',
-                parseFloat(goodQty) || jo.actualQtyGood || jo.plannedQtyOut || 0,
+                jo.actualQtyGood || jo.plannedQtyOut || 0,
               )}
               className="flex-1 h-14 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base flex items-center justify-center gap-2 disabled:opacity-40 transition-colors shadow-lg shadow-emerald-500/20"
             >
@@ -540,7 +606,7 @@ function ShopFloorCard({
               disabled={pending}
               onClick={() => onTransition(
                 jo.id, 'COMPLETE',
-                parseFloat(goodQty) || jo.actualQtyGood || jo.plannedQtyOut || 0,
+                jo.actualQtyGood || jo.plannedQtyOut || 0,
               )}
               className="flex-1 h-14 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base flex items-center justify-center gap-2 disabled:opacity-40 transition-colors shadow-lg shadow-emerald-500/20"
             >
@@ -617,109 +683,6 @@ function KpiBar({ jobs }: { jobs: ShopFloorJO[] }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Shift progress bar — smart current-shift band
-// ─────────────────────────────────────────────────────────────
-
-interface ShiftStatus {
-  active: {
-    name: string; nameAr?: string; window: string; code: string;
-    plannedProductionHours: number; shiftDurationHours: number;
-    breakMinutes: number; cleaningMinutes: number; targetQtyPerShift: number | null;
-  } | null;
-  elapsedMin: number; remainingMin: number; totalMin: number;
-  timeProgressPct: number; isActiveNow: boolean; shiftsPerDay: number;
-}
-
-const fmtHM = (min: number) => {
-  const h = Math.floor(min / 60), m = Math.round(min % 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-};
-
-function ShiftStat({ label, value, sub, color }: { label: string; value: React.ReactNode; sub?: string; color?: string }) {
-  return (
-    <div className="text-center px-3">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-lg font-bold tabular-nums leading-tight" style={color ? { color } : undefined}>{value}</div>
-      {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
-    </div>
-  );
-}
-
-function ShiftProgressBar({ status, jobs }: { status?: ShiftStatus; jobs: ShopFloorJO[] }) {
-  if (!status?.active) return null;
-  const a = status.active;
-
-  const output = jobs.reduce((s, j) => s + j.actualQtyGood, 0);
-  const scrap = jobs.reduce((s, j) => s + j.actualQtyRejected, 0);
-  const target = a.targetQtyPerShift ?? 0;
-  const oees = jobs.map((j) => j.joOEE).filter((v): v is number => v != null);
-  const avgOee = oees.length ? Math.round((oees.reduce((s, v) => s + v, 0) / oees.length) * 10) / 10 : null;
-  const executing = jobs.filter((j) => j.status === 'EXECUTING').length;
-
-  const timePct = Math.min(100, status.timeProgressPct ?? 0);
-  const outPct = target > 0 ? Math.min(100, Math.round((output / target) * 100)) : 0;
-  // Smart pace indicator: ahead if output% keeps up with elapsed time%.
-  const onTrack = target > 0 ? outPct >= timePct - 5 : true;
-
-  return (
-    <div className="rounded-2xl border border-border/60 bg-card/80 p-4">
-      <div className="flex items-center gap-4 flex-wrap">
-        {/* Shift identity */}
-        <div className="flex items-center gap-3 min-w-[180px]">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${status.isActiveNow ? 'bg-green-500/20 border border-green-400/30' : 'bg-muted border border-border'}`}>
-            <Clock className={`w-5 h-5 ${status.isActiveNow ? 'text-green-400' : 'text-muted-foreground'}`} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-sm">{a.name}</span>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${status.isActiveNow ? 'text-green-400 bg-green-400/10 border-green-400/30' : 'text-muted-foreground bg-muted border-border'}`}>
-                {status.isActiveNow ? 'Active' : 'Idle'}
-              </span>
-            </div>
-            <div className="text-[11px] text-muted-foreground font-mono">{a.window} · {status.shiftsPerDay} shifts/day</div>
-          </div>
-        </div>
-
-        {/* Time + output progress */}
-        <div className="flex-1 min-w-[260px] space-y-2">
-          {/* Time progress */}
-          <div>
-            <div className="flex items-center justify-between text-[11px] mb-0.5">
-              <span className="text-muted-foreground">Shift time · elapsed {fmtHM(status.elapsedMin)}</span>
-              <span className="text-muted-foreground">{fmtHM(status.remainingMin)} left</span>
-            </div>
-            <div className="h-2 rounded-full bg-muted overflow-hidden relative">
-              <div className="h-full rounded-full bg-brand-500/70 transition-all" style={{ width: `${timePct}%` }} />
-            </div>
-          </div>
-          {/* Output vs target */}
-          {target > 0 && (
-            <div>
-              <div className="flex items-center justify-between text-[11px] mb-0.5">
-                <span className="text-muted-foreground">Output {output.toLocaleString()} / {target.toLocaleString()}</span>
-                <span className={onTrack ? 'text-green-400' : 'text-amber-400'}>{onTrack ? 'On track' : 'Behind pace'} · {outPct}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                <div className={`h-full rounded-full transition-all ${onTrack ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${outPct}%` }} />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Stats */}
-        <div className="flex items-center divide-x divide-border/50">
-          <ShiftStat label="Active" value={executing} color="#22c55e" sub="ops" />
-          <ShiftStat label="Good" value={output.toLocaleString()} color="#22c55e" />
-          {scrap > 0 && <ShiftStat label="Scrap" value={scrap.toLocaleString()} color="#ef4444" />}
-          {avgOee != null && <ShiftStat label="OEE" value={`${avgOee}%`} color={avgOee >= 85 ? '#22c55e' : avgOee >= 60 ? '#eab308' : '#ef4444'} />}
-          <ShiftStat label="Planned" value={`${a.plannedProductionHours}h`} sub={`${a.breakMinutes + a.cleaningMinutes}m stop`} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
 // Main view
 // ─────────────────────────────────────────────────────────────
 
@@ -728,6 +691,8 @@ export function ShopFloorView() {
   const qc = useQueryClient();
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState('ACTIVE');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 12;
 
   // ── Smart filters: machines (multi) · production order · work order ──
   const [machineSel, setMachineSel] = useState<string[]>([]);
@@ -752,9 +717,9 @@ export function ShopFloorView() {
     staleTime: 300_000,
   });
 
-  const { data: shiftStatus } = useQuery({
-    queryKey: ['shift-current-status'],
-    queryFn: () => api.get('/shifts/current-status'),
+  const { data: shiftAnalysis } = useQuery({
+    queryKey: ['shift-analysis'],
+    queryFn: () => api.get('/shifts/analysis'),
     refetchInterval: 30_000,
     staleTime: 20_000,
   });
@@ -828,6 +793,15 @@ export function ShopFloorView() {
     });
   }, [filteredJobs]);
 
+  // ── Pagination (keeps the grid manageable when there are many cards) ──
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  useEffect(() => { setPage(1); }, [statusFilter, machineSel, poSel, woSel]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
+  const pagedJobs = useMemo(
+    () => sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [sorted, page],
+  );
+
   const transitionMut = useMutation({
     mutationFn: ({ id, status, qty }: { id: string; status: JOStatus; qty?: number }) =>
       api.patch(`/production/job-orders/${id}/status`, {
@@ -847,22 +821,24 @@ export function ShopFloorView() {
   });
 
   const countMut = useMutation({
-    mutationFn: ({ id, good, scrap, reason, category }: { id: string; good: number; scrap: number; reason: string; category?: string }) =>
-      api.patch(`/production/job-orders/${id}/output`, {
-        actualQtyGood: good,
-        actualQtyRejected: scrap,
-        scrapReason: reason,
-        scrapCategory: category ?? 'OTHER',
+    mutationFn: ({ id, rec }: { id: string; rec: { goodDelta: number; scrapDelta: number; reason: string; category?: string; handoverQty?: number } }) =>
+      api.patch(`/production/job-orders/${id}/add-count`, {
+        goodDelta: rec.goodDelta,
+        scrapDelta: rec.scrapDelta,
+        scrapReason: rec.reason,
+        scrapCategory: rec.category ?? 'OTHER',
+        ...(rec.handoverQty !== undefined && { handoverQty: rec.handoverQty }),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['shop-floor-jobs'] });
       qc.invalidateQueries({ queryKey: ['job-orders'] });
       qc.invalidateQueries({ queryKey: ['work-orders'] });
-      toast({ title: 'Count saved' });
+      qc.invalidateQueries({ queryKey: ['jo-live'] });
+      toast({ title: 'Recorded' });
     },
     onError: (e: any) => toast({
       variant: 'destructive',
-      title: 'Failed to save count',
+      title: 'Failed to record',
       description: e?.response?.data?.message,
     }),
   });
@@ -939,123 +915,30 @@ export function ShopFloorView() {
 
         {/* ── Smart filters: machines (multi) · PO · WO ── */}
         <div className="max-w-screen-2xl mx-auto mt-2.5">
-          <div className="flex items-center gap-2 flex-wrap rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground pr-1">
-              <Filter className="w-3.5 h-3.5 text-brand-400" />Filters
-            </span>
-            <span className="h-5 w-px bg-border/60" />
-
-            {/* Machine multi-select */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">Machines</span>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className={`h-8 text-xs ${machineSel.length ? 'border-brand-400/60 text-brand-400 bg-brand-500/5' : ''}`}>
-                    <Cpu className="w-3.5 h-3.5 mr-1.5" />
-                    {machineSel.length === 0
-                      ? 'All'
-                      : machineSel.length === 1
-                      ? machineOptions.find((m) => m.id === machineSel[0])?.code ?? '1'
-                      : `${machineSel.length} selected`}
-                    <ChevronDown className="w-3 h-3 ml-1.5 opacity-60" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-72">
-                  <div className="flex items-center justify-between px-2 py-1.5">
-                    <DropdownMenuLabel className="text-xs p-0">
-                      Filter by machine
-                      <span className="ml-1.5 text-muted-foreground/60 font-normal">({machineOptions.length})</span>
-                    </DropdownMenuLabel>
-                    <div className="flex items-center gap-2 text-[11px]">
-                      <button
-                        className="text-brand-400 hover:underline disabled:opacity-40"
-                        disabled={machineSel.length === machineOptions.length}
-                        onClick={(e) => { e.preventDefault(); setMachineSel(machineOptions.map((m) => m.id)); }}
-                      >
-                        All
-                      </button>
-                      <button
-                        className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-                        disabled={machineSel.length === 0}
-                        onClick={(e) => { e.preventDefault(); setMachineSel([]); }}
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-                  <DropdownMenuSeparator />
-                  {machineOptions.length === 0 && (
-                    <div className="px-2 py-3 text-xs text-muted-foreground text-center">No machines in current jobs</div>
-                  )}
-                  <div className="max-h-72 overflow-y-auto">
-                    {machineOptions.map((m) => {
-                      const count = allJobs.filter((j) => j.machine?.id === m.id).length;
-                      return (
-                        <DropdownMenuCheckboxItem
-                          key={m.id}
-                          checked={machineSel.includes(m.id)}
-                          onCheckedChange={(checked) =>
-                            setMachineSel((prev) => (checked ? [...prev, m.id] : prev.filter((id) => id !== m.id)))
-                          }
-                          onSelect={(e) => e.preventDefault()}
-                          className="gap-2"
-                        >
-                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">{m.code}</span>
-                          <span className="flex-1 truncate">{m.name}</span>
-                          <span className="text-[10px] text-muted-foreground/60 tabular-nums">{count}</span>
-                        </DropdownMenuCheckboxItem>
-                      );
-                    })}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-
-            {/* Production order */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">PO</span>
-              <SelectMenu
-                value={poSel}
-                onValueChange={(v) => { setPoSel(v); setWoSel(''); }}
-                options={[{ value: '', label: 'All POs' }, ...poOptions]}
-                placeholder="All POs"
-                size="sm"
-              />
-            </div>
-
-            {/* Work order */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">WO</span>
-              <SelectMenu
-                value={woSel}
-                onValueChange={setWoSel}
-                options={[{ value: '', label: 'All WOs' }, ...woOptions]}
-                placeholder="All WOs"
-                size="sm"
-              />
-            </div>
-
-            {hasFilters && (
-              <button
-                onClick={() => { setMachineSel([]); setPoSel(''); setWoSel(''); }}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-red-400 hover:bg-red-500/10 border border-red-400/30"
-              >
-                <X className="w-3 h-3" />Clear all
-              </button>
-            )}
-
-            <span className="text-xs text-muted-foreground ml-auto flex items-center gap-1.5">
-              <span className="font-semibold text-foreground tabular-nums">{filteredJobs.length}</span>
-              <span className="text-muted-foreground/60">/ {allJobs.length} jobs</span>
-            </span>
-          </div>
+          <JobFilterBar
+            machines={machineOptions.map((m) => ({ ...m, count: allJobs.filter((j) => j.machine?.id === m.id).length }))}
+            pos={poOptions}
+            wos={woOptions}
+            machineSel={machineSel}
+            onMachineSel={setMachineSel}
+            po={poSel}
+            onPo={setPoSel}
+            wo={woSel}
+            onWo={setWoSel}
+            right={
+              <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <span className="font-semibold text-foreground tabular-nums">{filteredJobs.length}</span>
+                <span className="text-muted-foreground/60">/ {allJobs.length} jobs</span>
+              </span>
+            }
+          />
         </div>
       </div>
 
       {/* ── Main grid ── */}
       <div className="flex-1 p-4 max-w-screen-2xl mx-auto w-full space-y-4">
-        {/* Smart current-shift band */}
-        <ShiftProgressBar status={shiftStatus as ShiftStatus | undefined} jobs={allJobs} />
+        {/* Smart current-shift summary band */}
+        <ShiftSummaryBand shift={shiftAnalysis} />
 
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -1074,21 +957,37 @@ export function ShopFloorView() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {sorted.map((jo) => (
-              <ShopFloorCard
-                key={jo.id}
-                jo={jo}
-                users={users}
-                pending={isPending}
-                onTransition={(id, status, qty) => transitionMut.mutate({ id, status, qty })}
-                onCount={(id, good, scrap, reason, category) => countMut.mutate({ id, good, scrap, reason, category })}
-                onAssignOperator={(id, operatorId) => operatorMut.mutate({ id, operatorId })}
-                onOpenLive={openLive}
-                onAction={openAction}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {pagedJobs.map((jo) => (
+                <ShopFloorCard
+                  key={jo.id}
+                  jo={jo}
+                  users={users}
+                  pending={isPending}
+                  onTransition={(id, status, qty) => transitionMut.mutate({ id, status, qty })}
+                  onRecord={(id, rec) => countMut.mutate({ id, rec })}
+                  onAssignOperator={(id, operatorId) => operatorMut.mutate({ id, operatorId })}
+                  onOpenLive={openLive}
+                  onAction={openAction}
+                />
+              ))}
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(1)}>« First</Button>
+                <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹ Prev</Button>
+                <span className="text-xs text-muted-foreground px-2 tabular-nums">
+                  Page <span className="font-semibold text-foreground">{page}</span> / {totalPages}
+                  <span className="text-muted-foreground/60 ml-2">({sorted.length} cards)</span>
+                </span>
+                <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next ›</Button>
+                <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(totalPages)}>Last »</Button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

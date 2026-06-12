@@ -30,6 +30,7 @@ import { PlmModule } from './modules/plm/plm.module';
 import { WebSocketGatewayModule } from './gateways/websocket.module';
 import { HealthModule } from './modules/health/health.module';
 import { AlarmsModule } from './modules/alarms/alarms.module';
+import { HistorianModule } from './modules/historian/historian.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RbacGuard } from './common/guards/rbac.guard';
 import { TenantGuard } from './common/guards/tenant.guard';
@@ -108,6 +109,7 @@ import { configuration } from './config/configuration';
     ApsModule,
     PlmModule,
     AlarmsModule,
+    HistorianModule,
     WebSocketGatewayModule,
     HealthModule,
   ],

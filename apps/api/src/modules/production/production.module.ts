@@ -11,9 +11,10 @@ import { RecipeService } from './recipe.service';
 import { TraceabilityService } from './traceability.service';
 import { TraceabilityController } from './traceability.controller';
 import { WorkOrderSchedulerService } from './work-order-scheduler.service';
+import { HistorianModule } from '../historian/historian.module';
 
 @Module({
-  imports: [ApsModule],
+  imports: [ApsModule, HistorianModule],
   controllers: [ProductionController, DowntimeController, RecipeController, TraceabilityController],
   providers: [ProductionService, OEEService, KpiService, DowntimeService, RecipeService, TraceabilityService, WorkOrderSchedulerService],
   exports: [ProductionService, OEEService, KpiService, DowntimeService, RecipeService, TraceabilityService],

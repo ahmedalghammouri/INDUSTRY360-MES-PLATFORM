@@ -2,9 +2,19 @@ import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse 
 
 import { useAuthStore } from '@/store/auth-store';
 
-// Empty string = same-origin (nginx proxies /api/ to the backend in production);
-// unset (local dev outside docker) falls back to the direct API port.
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+// Resolve the API base so it works from ANY device on the LAN (desktop + phone).
+// The app is served behind nginx (which proxies /api/ to the backend), so in the
+// browser we always call SAME-ORIGIN — requests go to whatever host:port served
+// the page (e.g. http://10.94.130.16:8080), never a hard-coded localhost that
+// would resolve to the visitor's own device. An explicit non-localhost
+// NEXT_PUBLIC_API_URL (a real domain) still wins; SSR falls back to the env/port.
+function resolveApiBase(): string {
+  const env = process.env.NEXT_PUBLIC_API_URL;
+  if (env && !/localhost|127\.0\.0\.1/i.test(env)) return env; // real external domain
+  if (typeof window !== 'undefined') return '';                // browser → same-origin
+  return env || 'http://localhost:3001';                       // SSR / build fallback
+}
+const API_URL = resolveApiBase();
 const API_VERSION = '/api/v1';
 
 export const apiClient: AxiosInstance = axios.create({

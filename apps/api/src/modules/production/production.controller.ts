@@ -648,6 +648,18 @@ export class ProductionController {
     return this.productionService.reportJobOrderOutput(user.factoryId, id, body);
   }
 
+  @Patch('job-orders/:id/add-count')
+  @RequirePermissions('production:execute')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Smart incremental count — ADDS good / scrap(bad) qty to the running totals (each scrap → ScrapLog), and controls handover qty' })
+  async addJobOrderCount(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { goodDelta?: number; scrapDelta?: number; scrapReason?: string; scrapCategory?: string; handoverQty?: number },
+  ) {
+    return this.productionService.addJobOrderCount(user.factoryId, id, body);
+  }
+
   @Get('scrap-logs')
   @ApiOperation({ summary: 'List scrap log entries with optional filters' })
   @ApiQuery({ name: 'workOrderId', required: false })

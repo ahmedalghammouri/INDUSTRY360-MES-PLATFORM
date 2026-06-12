@@ -413,6 +413,132 @@ export class ShiftService {
     };
   }
 
+  /**
+   * Shift data analysis — aggregates the CURRENT shift window across the factory:
+   * production (good/scrap from recorded COUNT_UPDATE events), quality, downtime,
+   * and a per-machine breakdown (output, scrap, downtime, live state, OEE). All
+   * from real operational data, scoped to the shift's start→now window.
+   */
+  async getShiftAnalysis(factoryId: string | null) {
+    const fid = this.requireFactory(factoryId);
+    const status = await this.getCurrentShiftStatus(factoryId);
+    if (!status.active) {
+      return { status, totals: null, machines: [], downtime: { totalMins: 0, occurrences: 0, byReason: [] } };
+    }
+
+    const from = new Date(status.shiftStart);
+    const to = new Date(status.now);
+
+    const [events, downtimeEvents, machines, oeeRecords] = await Promise.all([
+      this.prisma.productionEvent.findMany({
+        where: { factoryId: fid, eventType: 'COUNT_UPDATE', timestamp: { gte: from, lte: to } },
+        select: { machineId: true, metadata: true },
+      }),
+      this.prisma.downtimeEvent.findMany({
+        where: { factoryId: fid, startTime: { lte: to }, OR: [{ endTime: null }, { endTime: { gte: from } }] },
+        select: {
+          machineId: true, startTime: true, endTime: true, isPlanned: true,
+          reasonCode: true, reason: true, cause: { select: { name: true } },
+        },
+      }),
+      this.prisma.machine.findMany({
+        where: { factoryId: fid, isActive: true },
+        select: {
+          id: true, name: true, code: true,
+          currentStatus: { select: { state: true, oee: true, availability: true, performance: true, quality: true } },
+        },
+        orderBy: { sortOrder: 'asc' },
+      }),
+      this.prisma.oEERecord.findMany({
+        where: { factoryId: fid, recordDate: { gte: new Date(from.getFullYear(), from.getMonth(), from.getDate()) } },
+        select: { machineId: true, oee: true, availability: true, performance: true, quality: true },
+      }),
+    ]);
+
+    // Per-machine production from recorded count deltas
+    const prodByMachine = new Map<string, { good: number; scrap: number }>();
+    for (const ev of events) {
+      const meta = (ev.metadata ?? {}) as any;
+      if (!ev.machineId) continue;
+      const cur = prodByMachine.get(ev.machineId) ?? { good: 0, scrap: 0 };
+      cur.good += meta.goodDelta ?? 0;
+      cur.scrap += meta.scrapDelta ?? 0;
+      prodByMachine.set(ev.machineId, cur);
+    }
+
+    // Per-machine downtime (clamped to the shift window) + reason tally
+    const clamp = (s: Date, e: Date | null) => {
+      const a = Math.max(s.getTime(), from.getTime());
+      const b = Math.min((e ?? to).getTime(), to.getTime());
+      return Math.max(0, (b - a) / 60_000);
+    };
+    const downByMachine = new Map<string, number>();
+    const reasonTally = new Map<string, { label: string; mins: number; count: number }>();
+    let totalDownMins = 0; let plannedDownMins = 0;
+    for (const ev of downtimeEvents) {
+      const mins = clamp(ev.startTime, ev.endTime);
+      if (mins <= 0) continue;
+      totalDownMins += mins;
+      if (ev.isPlanned) plannedDownMins += mins;
+      if (ev.machineId) downByMachine.set(ev.machineId, (downByMachine.get(ev.machineId) ?? 0) + mins);
+      const key = ev.cause?.name ?? ev.reason ?? ev.reasonCode ?? 'Unspecified';
+      const r = reasonTally.get(key) ?? { label: key, mins: 0, count: 0 };
+      r.mins += mins; r.count += 1; reasonTally.set(key, r);
+    }
+
+    const oeeByMachine = new Map<string, number>();
+    for (const o of oeeRecords) {
+      // latest wins (records are per day) — keep max recordDate implicitly via last
+      oeeByMachine.set(o.machineId, o.oee);
+    }
+
+    const machineRows = machines.map((m) => {
+      const p = prodByMachine.get(m.id) ?? { good: 0, scrap: 0 };
+      const total = p.good + p.scrap;
+      return {
+        id: m.id, name: m.name, code: m.code,
+        state: m.currentStatus?.state ?? 'OFFLINE',
+        good: Math.round(p.good), scrap: Math.round(p.scrap),
+        quality: total > 0 ? Math.round((p.good / total) * 1000) / 10 : null,
+        downtimeMins: Math.round((downByMachine.get(m.id) ?? 0) * 10) / 10,
+        oee: m.currentStatus?.oee ?? oeeByMachine.get(m.id) ?? null,
+      };
+    }).sort((a, b) => b.good - a.good);
+
+    const totalGood = machineRows.reduce((s, m) => s + m.good, 0);
+    const totalScrap = machineRows.reduce((s, m) => s + m.scrap, 0);
+    const grand = totalGood + totalScrap;
+    const target = status.active.targetQtyPerShift ?? null;
+    const runningMachines = machineRows.filter((m) => m.state === 'RUNNING').length;
+
+    return {
+      status,
+      totals: {
+        good: totalGood,
+        scrap: totalScrap,
+        total: grand,
+        quality: grand > 0 ? Math.round((totalGood / grand) * 1000) / 10 : null,
+        target,
+        targetProgressPct: target ? Math.round((totalGood / target) * 1000) / 10 : null,
+        runningMachines,
+        totalMachines: machineRows.length,
+        downtimeMins: Math.round(totalDownMins * 10) / 10,
+        plannedDownMins: Math.round(plannedDownMins * 10) / 10,
+        unplannedDownMins: Math.round((totalDownMins - plannedDownMins) * 10) / 10,
+        // pace vs the time elapsed in the shift
+        paceGoodPerHr: status.elapsedMin > 0 ? Math.round((totalGood / status.elapsedMin) * 60) : null,
+        projectedGood: status.elapsedMin > 0 ? Math.round((totalGood / status.elapsedMin) * status.totalMin) : null,
+      },
+      machines: machineRows,
+      downtime: {
+        totalMins: Math.round(totalDownMins * 10) / 10,
+        occurrences: downtimeEvents.length,
+        byReason: [...reasonTally.values()].sort((a, b) => b.mins - a.mins).slice(0, 8)
+          .map((r) => ({ ...r, mins: Math.round(r.mins * 10) / 10 })),
+      },
+    };
+  }
+
   /** Factory shift configuration summary — segments dashboards/reports by the real shift model. */
   async getConfigSummary(factoryId: string | null) {
     const fid = this.requireFactory(factoryId);

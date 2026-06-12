@@ -9,6 +9,7 @@ import { scheduleOps, makeWorkCalendar, type SchedOp } from '../scheduling/op-sc
 import { OEEService } from './oee.service';
 import { KpiService } from './kpi.service';
 import { ApsService } from '../aps/aps.service';
+import { HistorianService } from '../historian/historian.service';
 import type { WorkOrderStatus, Prisma } from '@prisma/client';
 import type {
   CreateWorkOrderDto, UpdateWorkOrderDto, CompleteWorkOrderDto,
@@ -36,6 +37,7 @@ export class ProductionService {
     private readonly kpiService: KpiService,
     private readonly eventEmitter: EventEmitter2,
     private readonly apsService: ApsService,
+    private readonly historian: HistorianService,
   ) {}
 
   // ────────────────────────────────────────────────────────────
@@ -2526,7 +2528,58 @@ export class ProductionService {
     });
 
     const withDep = await this.attachDepTypes(jos);
-    return withDep.map((jo) => ({ ...jo, ...this.calcJobOrderOEE(jo) }));
+    const withOee = withDep.map((jo) => ({ ...jo, ...this.calcJobOrderOEE(jo) }));
+    return this.attachTimeBasedOEE(withOee);
+  }
+
+  /**
+   * Bulk-attach the SECOND availability method (time-based = Uptime ÷ (Uptime +
+   * Downtime)) and its OEE to a list of job orders, using one batched downtime
+   * query. The classic schedule-based values from calcJobOrderOEE are untouched.
+   */
+  private async attachTimeBasedOEE(jos: any[]): Promise<any[]> {
+    const active = jos.filter((j) => j.machineId && j.actualStart);
+    if (!active.length) {
+      return jos.map((j) => ({ ...j, joAvailabilityTimeBased: null, joOEETimeBased: null }));
+    }
+    const machineIds = [...new Set(active.map((j) => j.machineId))];
+    const earliest = active.reduce((m, j) => Math.min(m, new Date(j.actualStart).getTime()), Date.now());
+    const events = await this.prisma.downtimeEvent.findMany({
+      where: {
+        machineId: { in: machineIds },
+        isPlanned: false,
+        startTime: { lte: new Date() },
+        OR: [{ endTime: null }, { endTime: { gte: new Date(earliest) } }],
+      },
+      select: { machineId: true, startTime: true, endTime: true },
+    });
+    const now = Date.now();
+
+    return jos.map((jo) => {
+      if (!jo.machineId || !jo.actualStart) {
+        return { ...jo, joAvailabilityTimeBased: null, joOEETimeBased: null };
+      }
+      const start = new Date(jo.actualStart).getTime();
+      const end = jo.actualEnd ? new Date(jo.actualEnd).getTime() : now;
+      const operatingMin = Math.max(0, (end - start) / 60_000);
+      let downMin = 0;
+      for (const ev of events) {
+        if (ev.machineId !== jo.machineId) continue;
+        const from = Math.max(ev.startTime.getTime(), start);
+        const to = Math.min((ev.endTime ?? new Date(now)).getTime(), end);
+        if (to > from) downMin += (to - from) / 60_000;
+      }
+      const runMin = Math.max(0, operatingMin - downMin);
+      const availTb = (runMin + downMin) > 0 ? (runMin / (runMin + downMin)) * 100 : null;
+      const joAvailabilityTimeBased = availTb != null ? parseFloat(availTb.toFixed(1)) : null;
+      const joOEETimeBased =
+        availTb != null && jo.joPerformance != null && jo.joQuality != null
+          ? parseFloat(((availTb / 100) * (jo.joPerformance / 100) * (jo.joQuality / 100) * 100).toFixed(1))
+          : availTb != null && jo.joQuality != null
+          ? parseFloat(((availTb / 100) * (jo.joQuality / 100) * 100).toFixed(1))
+          : null;
+      return { ...jo, joAvailabilityTimeBased, joOEETimeBased };
+    });
   }
 
   /** Bulk-attach depType to a list of job orders without N+1 queries */
@@ -3076,6 +3129,95 @@ export class ProductionService {
 
     // Roll up live OEE from the new counts + propagate
     await this.kpiService.propagateFromJobOrder(jobOrderId);
+
+    return updated;
+  }
+
+  /**
+   * Smart incremental count entry from the shop-floor card. Each call ADDS to the
+   * running totals (never replaces): goodDelta increments good output, scrapDelta
+   * increments rejected (bad) qty AND creates a ScrapLog entry (so quality drops
+   * accordingly). handoverQty is the operator-controlled quantity passed to the
+   * next step. Every entry is journalled as a COUNT_UPDATE production event.
+   */
+  async addJobOrderCount(
+    factoryId: string | null,
+    jobOrderId: string,
+    dto: {
+      goodDelta?: number;
+      scrapDelta?: number;
+      scrapReason?: string;
+      scrapCategory?: string;
+      handoverQty?: number;
+    },
+  ) {
+    const factoryFilter = factoryId ? { factoryId } : {};
+    const jo = await this.prisma.jobOrder.findFirst({ where: { id: jobOrderId, ...factoryFilter } });
+    if (!jo) throw new NotFoundException('Job order not found');
+    if (!['EXECUTING', 'PAUSED', 'COMPLETE'].includes(jo.status)) {
+      throw new BadRequestException(
+        `Can only record counts for EXECUTING, PAUSED or COMPLETE job orders (current: ${jo.status})`,
+      );
+    }
+
+    const goodDelta = Math.max(0, dto.goodDelta ?? 0);
+    const scrapDelta = Math.max(0, dto.scrapDelta ?? 0);
+    if (goodDelta === 0 && scrapDelta === 0 && dto.handoverQty === undefined) {
+      throw new BadRequestException('Nothing to record — provide a good, scrap or handover quantity.');
+    }
+
+    const newGood = jo.actualQtyGood + goodDelta;
+    const newRejected = jo.actualQtyRejected + scrapDelta;
+    // Handover defaults to "all good so far" but is operator-overridable; never exceeds good output.
+    let handoverQty = jo.handoverQty;
+    if (dto.handoverQty !== undefined) {
+      handoverQty = Math.max(0, Math.min(dto.handoverQty, newGood));
+    }
+
+    const updated = await this.prisma.jobOrder.update({
+      where: { id: jobOrderId },
+      data: {
+        actualQtyGood: newGood,
+        actualQtyRejected: newRejected,
+        ...(dto.handoverQty !== undefined && { handoverQty }),
+        ...(dto.scrapReason !== undefined && scrapDelta > 0 && { scrapReason: dto.scrapReason }),
+      },
+    });
+
+    // Each scrap increment is a real ScrapLog row (drives Quality & Scrap analysis)
+    if (scrapDelta > 0) {
+      const validCategories = ['QUALITY', 'SETUP', 'DAMAGE', 'OVERRUN', 'MATERIAL', 'MACHINE', 'OPERATOR', 'OTHER'];
+      const category = (validCategories.includes(dto.scrapCategory ?? '') ? dto.scrapCategory : 'OTHER') as any;
+      await this.prisma.scrapLog.create({
+        data: {
+          factoryId: jo.factoryId,
+          workOrderId: jo.workOrderId,
+          jobOrderId: jo.id,
+          operatorId: jo.operatorId ?? null,
+          qty: scrapDelta,
+          reason: dto.scrapReason || 'Not specified',
+          category,
+        },
+      });
+    }
+
+    // Journal the increment for the live time-series (production-over-time / rejects)
+    if (goodDelta > 0 || scrapDelta > 0) {
+      await this.prisma.productionEvent.create({
+        data: {
+          factoryId: jo.factoryId,
+          workOrderId: jo.workOrderId,
+          machineId: jo.machineId,
+          eventType: 'COUNT_UPDATE',
+          value: goodDelta,
+          metadata: { jobOrderId: jo.id, good: newGood, rejected: newRejected, goodDelta, scrapDelta },
+        },
+      }).catch(() => undefined);
+    }
+
+    // Roll up live OEE (good/scrap changed → quality changes) + propagate + historian
+    await this.kpiService.propagateFromJobOrder(jobOrderId);
+    await this.historian.sampleActiveJobOrders().catch(() => undefined);
 
     return updated;
   }
@@ -3655,15 +3797,53 @@ export class ProductionService {
       ? (oee.joOEE * utilizationPct) / 100
       : null;
 
-    // ── OEE trend (real OEERecord history, last 14 days) ──────
-    const oeeTrend = oeeTrendRecords.map((o) => ({
-      date: o.recordDate,
-      shiftCode: o.shiftCode,
-      availability: r1(o.availability),
-      performance: r1(o.performance),
-      quality: r1(o.quality),
-      oee: r1(o.oee),
-    }));
+    // ── Time-Based Availability = Uptime ÷ (Uptime + Downtime) ──
+    // A SECOND availability method shown alongside the classic schedule-based one.
+    // Uptime = running time (net production); Downtime = unplanned stops.
+    const uptimeMins = netProductionMins;
+    const availabilityTimeBased = (uptimeMins + unplannedStopMins) > 0
+      ? (uptimeMins / (uptimeMins + unplannedStopMins)) * 100
+      : null;
+    // Time-based OEE reuses the same Performance & Quality, only Availability differs.
+    const oeeTimeBased = availabilityTimeBased != null && oee.joPerformance != null && oee.joQuality != null
+      ? (availabilityTimeBased / 100) * (oee.joPerformance / 100) * (oee.joQuality / 100) * 100
+      : null;
+    const teepTimeBasedPct = oeeTimeBased != null && utilizationPct != null
+      ? (oeeTimeBased * utilizationPct) / 100
+      : null;
+
+    // ── OEE trend — prefer the InfluxDB historian (real TSDB time-series, both
+    // availability methods); fall back to OEERecord rows if Influx is unavailable.
+    let oeeTrend: any[] = [];
+    if (machineId) {
+      const hist = await this.historian.getOeeTrend(
+        machineId,
+        new Date(now.getTime() - 14 * 86_400_000).toISOString(),
+        now.toISOString(),
+        1440, // daily resolution → clean 14-day trend
+      );
+      oeeTrend = hist.map((h) => ({
+        date: h.time,
+        availability: h.availability,
+        availabilityTb: h.availabilityTb,
+        performance: h.performance,
+        quality: h.quality,
+        oee: h.oee,
+        oeeTb: h.oeeTb,
+      }));
+    }
+    if (!oeeTrend.length) {
+      // Fallback: relational OEERecord history (classic availability only)
+      oeeTrend = oeeTrendRecords.map((o) => ({
+        date: o.recordDate,
+        availability: r1(o.availability),
+        availabilityTb: null,
+        performance: r1(o.performance),
+        quality: r1(o.quality),
+        oee: r1(o.oee),
+        oeeTb: null,
+      }));
+    }
 
     return {
       generatedAt: now,
@@ -3678,6 +3858,14 @@ export class ProductionService {
         utilizationPct: r1(utilizationPct),
         teepPct: r1(teepPct),
         teepClass: benchmark(teepPct),
+        // Second availability method (time-based) + its OEE, shown side by side
+        availabilityTimeBased: r1(availabilityTimeBased),
+        availabilityTimeBasedClass: benchmark(availabilityTimeBased),
+        oeeTimeBased: r1(oeeTimeBased),
+        oeeTimeBasedClass: benchmark(oeeTimeBased),
+        teepTimeBasedPct: r1(teepTimeBasedPct),
+        uptimeMins: r1(uptimeMins),
+        downtimeMins: r1(unplannedStopMins),
         trend: oeeTrend,
       },
       production: {

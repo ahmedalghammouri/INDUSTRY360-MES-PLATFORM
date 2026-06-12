@@ -6,9 +6,16 @@ import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '@/store/auth-store';
 import { useNotificationStore } from '@/store/notification-store';
 
-// Empty string = same-origin (nginx proxies /socket.io/ in production);
-// unset (local dev outside docker) falls back to the direct API port.
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001';
+// Same-origin in the browser so the socket reaches the host that served the page
+// (nginx proxies /socket.io/) — works from any LAN device, not just localhost.
+// An explicit non-localhost NEXT_PUBLIC_WS_URL still wins.
+function resolveWsBase(): string {
+  const env = process.env.NEXT_PUBLIC_WS_URL;
+  if (env && !/localhost|127\.0\.0\.1/i.test(env)) return env;
+  if (typeof window !== 'undefined') return ''; // → window.location.origin below
+  return env || 'ws://localhost:3001';
+}
+const WS_URL = resolveWsBase();
 
 let globalSocket: Socket | null = null;
 
