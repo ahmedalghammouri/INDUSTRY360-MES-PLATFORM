@@ -2,7 +2,8 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { findProcessForSku } from '../../common/process-scope.util';
-import type { Prisma, DowntimeCategory } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
+import { DowntimeCategory } from '@prisma/client';
 import type {
   CreateDowntimeEventDto, UpdateDowntimeEventDto, EndDowntimeEventDto,
 } from './dto/downtime.dto';
@@ -65,9 +66,21 @@ export class DowntimeService {
       ? (endTime.getTime() - startTime.getTime()) / 60_000
       : undefined;
 
-    const reasonCode = (dto as any).reasonCode ?? 'UNPLANNED_BREAKDOWN';
+    // When the operator picks a specific NCC reason, inherit its category +
+    // planned flag so the stop is classified (and counted against OEE) correctly.
+    let cause: { category: DowntimeCategory; isPlanned: boolean; name: string } | null = null;
+    if (dto.causeId) {
+      cause = await this.prisma.downtimeCause.findUnique({
+        where: { id: dto.causeId },
+        select: { category: true, isPlanned: true, name: true },
+      });
+    }
+
+    const category = (dto.category as DowntimeCategory) ?? cause?.category ?? DowntimeCategory.OTHER;
+    const reasonCode = (dto as any).reasonCode
+      ?? (cause?.isPlanned ? 'PLANNED_MAINTENANCE' : 'UNPLANNED_BREAKDOWN');
     const affectsOEE = !OEE_EXCLUDED_REASON_CODES.has(reasonCode);
-    const isPlanned = dto.isPlanned ?? PLANNED_STOP_CODES.has(reasonCode);
+    const isPlanned = dto.isPlanned ?? cause?.isPlanned ?? PLANNED_STOP_CODES.has(reasonCode);
 
     const event = await this.prisma.downtimeEvent.create({
       data: {
@@ -77,8 +90,8 @@ export class DowntimeService {
         workOrderId: dto.workOrderId,
         causeId: dto.causeId,
         operatorId: (dto as any).operatorId ?? null,
-        reason: (dto as any).description ?? (dto as any).reason,
-        category: dto.category as DowntimeCategory,
+        reason: (dto as any).description ?? (dto as any).reason ?? cause?.name,
+        category,
         reasonCode: reasonCode as any,
         startTime,
         endTime,
@@ -472,13 +485,19 @@ export class DowntimeService {
   // ── Causes ────────────────────────────────────────────────────
 
   async findDowntimeCauses(factoryId: string | null, machineId?: string) {
-    const factoryFilter = factoryId ? { factoryId } : {};
+    const fId = factoryId ?? await this.getDefaultFactoryId();
+    // Make sure the NCC reasons are organised into the tree before listing.
+    await this.ensureReasonHierarchy(fId).catch(() => undefined);
+    // Operators pick LEAF reasons (specific causes) — never the category/machine
+    // grouping nodes. A leaf is any active cause with no children.
     return this.prisma.downtimeCause.findMany({
       where: {
-        ...factoryFilter,
+        factoryId: fId,
         isActive: true,
+        children: { none: {} },
         OR: [{ machineId: machineId ?? null }, { machineId: null }],
       },
+      include: { parent: { select: { name: true, parent: { select: { name: true } } } } },
       orderBy: [{ isPlanned: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
     });
   }
@@ -602,8 +621,98 @@ export class DowntimeService {
 
   // ── Reason Tree (3-Level) ─────────────────────────────────────
 
+  /**
+   * Self-healing 3-level reason hierarchy (NCC standard). The seed loads reasons
+   * as flat level-3 leaves, so the tree would be empty. This idempotently builds
+   * the grouping parents and re-parents the leaves:
+   *   • PLANNED categories (cleaning / break / changeover / planned maintenance)
+   *     → ONE "Planned Downtime" L1  →  the category as L2  →  the reason (L3)
+   *   • everything else (mechanical / electrical / material / …)
+   *     → the category as L1  →  the machine as L2  →  the reason (L3)
+   * Synthetic grouping nodes use `L1-`/`L2-` codes; leaves keep their NCC codes.
+   */
+  private async ensureReasonHierarchy(factoryId: string) {
+    const PLANNED = new Set(['PLANNED_CLEANING', 'PLANNED_BREAK', 'CHANGEOVER', 'PLANNED_MAINTENANCE']);
+    // Old per-category planned L1s created by the previous version — migrate away.
+    const OLD_PLANNED_L1 = [...PLANNED].map((c) => `L1-${c}`);
+
+    const needsWork = await this.prisma.downtimeCause.count({
+      where: {
+        factoryId,
+        OR: [
+          { level: 3, parentId: null },          // fresh, unparented leaves
+          { code: { in: OLD_PLANNED_L1 } },      // old structure → restructure
+        ],
+      },
+    });
+    if (!needsWork) return;
+
+    const machines = await this.prisma.machine.findMany({
+      where: { factoryId }, select: { id: true, code: true, name: true },
+    });
+    const machineMap = new Map(machines.map((m) => [m.id, m]));
+    const title = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const cache = new Map<string, string>();
+    let sort = 0;
+    const node = async (
+      code: string, name: string, level: number, category: string,
+      parentId: string | null, machineId: string | null, isPlanned: boolean,
+    ): Promise<string> => {
+      if (cache.has(code)) return cache.get(code)!;
+      const existing = await this.prisma.downtimeCause.findFirst({ where: { factoryId, code } });
+      const id = existing
+        ? (await this.prisma.downtimeCause.update({ where: { id: existing.id }, data: { name, level, parentId, isActive: true } })).id
+        : (await this.prisma.downtimeCause.create({
+            data: { factoryId, code, name, category: category as DowntimeCategory, level, parentId, machineId, isPlanned, sortOrder: sort++, isActive: true },
+          })).id;
+      cache.set(code, id);
+      return id;
+    };
+
+    // Real reason leaves = causes that are not synthetic grouping nodes.
+    const reasons = await this.prisma.downtimeCause.findMany({
+      where: { factoryId, NOT: { OR: [{ code: { startsWith: 'L1-' } }, { code: { startsWith: 'L2-' } }] } },
+    });
+
+    for (const r of reasons) {
+      const cat = r.category as string;
+      let parentId: string;
+      if (PLANNED.has(cat)) {
+        const l1 = await node('L1-PLANNED', 'Planned Downtime', 1, 'PLANNED_MAINTENANCE', null, null, true);
+        parentId = await node(`L2-PLANNED-${cat}`, title(cat), 2, cat, l1, null, true);
+      } else {
+        const l1 = await node(`L1-${cat}`, title(cat), 1, cat, null, null, false);
+        const m = r.machineId ? machineMap.get(r.machineId) : null;
+        const mCode = m?.code ?? 'GEN';
+        const mName = m ? `${m.name} (${m.code})` : 'General';
+        parentId = await node(`L2-${cat}-${mCode}`, mName, 2, cat, l1, r.machineId ?? null, false);
+      }
+      if (r.parentId !== parentId || r.level !== 3) {
+        await this.prisma.downtimeCause.update({ where: { id: r.id }, data: { parentId, level: 3 } });
+      }
+    }
+
+    // Drop synthetic grouping nodes that no longer have children (e.g. the old
+    // per-category planned L1s and their General L2s). Two passes: L2s, then L1s.
+    for (let pass = 0; pass < 2; pass++) {
+      const childless = await this.prisma.downtimeCause.findMany({
+        where: {
+          factoryId,
+          OR: [{ code: { startsWith: 'L1-' } }, { code: { startsWith: 'L2-' } }],
+          children: { none: {} },
+        },
+        select: { id: true },
+      });
+      if (!childless.length) break;
+      await this.prisma.downtimeCause.deleteMany({ where: { id: { in: childless.map((c) => c.id) } } });
+    }
+    this.logger.log(`Reconciled downtime reason hierarchy for factory ${factoryId} (${reasons.length} reasons).`);
+  }
+
   async getReasonTree(factoryId: string | null) {
     const fId = factoryId ?? await this.getDefaultFactoryId();
+    await this.ensureReasonHierarchy(fId);
     const roots = await this.prisma.downtimeCause.findMany({
       where: { factoryId: fId, level: 1, parentId: null },
       orderBy: { sortOrder: 'asc' },
