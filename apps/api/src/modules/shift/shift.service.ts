@@ -355,6 +355,64 @@ export class ShiftService {
     });
   }
 
+  /**
+   * Live status of the shift in progress NOW, computed from the templates' clock
+   * windows (works even when no ShiftInstance has been generated). Drives the
+   * shop-floor shift progress bar: window, elapsed/remaining, time progress.
+   */
+  async getCurrentShiftStatus(factoryId: string | null) {
+    const fid = this.requireFactory(factoryId);
+    const templates = await this.prisma.shiftTemplate.findMany({
+      where: { factoryId: fid, isActive: true },
+      orderBy: { startTime: 'asc' },
+    });
+    if (templates.length === 0) return { active: null, shiftsPerDay: 0 };
+
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const parse = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + (m || 0); };
+    const inWindow = (t: (typeof templates)[number]) => {
+      const s = parse(t.startTime), e = parse(t.endTime);
+      return t.crossesMidnight ? nowMin >= s || nowMin < e : nowMin >= s && nowMin < e;
+    };
+
+    const active = templates.find(inWindow) ?? templates[0];
+    const s = parse(active.startTime), e = parse(active.endTime);
+
+    // Concrete start datetime for the running shift (handles overnight shifts).
+    const startDt = new Date(now);
+    startDt.setHours(Math.floor(s / 60), s % 60, 0, 0);
+    if (active.crossesMidnight && nowMin < e) startDt.setDate(startDt.getDate() - 1);
+    else if (nowMin < s) startDt.setDate(startDt.getDate() - 1); // shift hasn't started today yet → previous occurrence
+
+    const totalMin = active.shiftDurationHours * 60;
+    const endDt = new Date(startDt.getTime() + totalMin * 60_000);
+    const elapsedMin = Math.max(0, Math.min(totalMin, (now.getTime() - startDt.getTime()) / 60_000));
+    const remainingMin = Math.max(0, totalMin - elapsedMin);
+
+    return {
+      active: {
+        id: active.id, code: active.code, name: active.name, nameAr: active.nameAr,
+        startTime: active.startTime, endTime: active.endTime,
+        window: `${active.startTime}–${active.endTime}`,
+        crossesMidnight: active.crossesMidnight,
+        plannedProductionHours: active.plannedProductionHours,
+        shiftDurationHours: active.shiftDurationHours,
+        breakMinutes: active.breakMinutes, cleaningMinutes: active.cleaningMinutes,
+        targetQtyPerShift: active.targetQtyPerShift,
+      },
+      shiftStart: startDt.toISOString(),
+      shiftEnd: endDt.toISOString(),
+      now: now.toISOString(),
+      elapsedMin: Math.round(elapsedMin),
+      remainingMin: Math.round(remainingMin),
+      totalMin,
+      timeProgressPct: totalMin > 0 ? Math.round((elapsedMin / totalMin) * 1000) / 10 : 0,
+      isActiveNow: inWindow(active),
+      shiftsPerDay: templates.length,
+    };
+  }
+
   /** Factory shift configuration summary — segments dashboards/reports by the real shift model. */
   async getConfigSummary(factoryId: string | null) {
     const fid = this.requireFactory(factoryId);

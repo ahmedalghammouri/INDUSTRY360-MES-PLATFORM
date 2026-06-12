@@ -1,6 +1,6 @@
 import {
   IsString, IsInt, IsPositive, IsDateString, IsEnum, IsOptional,
-  IsUUID, MinLength, MaxLength, Min, Max, IsNumber, IsBoolean,
+  IsUUID, MinLength, MaxLength, Min, Max, IsNumber, IsBoolean, IsArray,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -387,6 +387,11 @@ export class AutoGenerateWOsDto {
   @IsOptional()
   @IsBoolean()
   autoStart?: boolean;
+
+  @ApiPropertyOptional({ description: 'Per-routing-step operator pre-assignment: [{ stepId, operatorId }]' })
+  @IsOptional()
+  @IsArray()
+  assignments?: Array<{ stepId: string; operatorId: string }>;
 }
 
 export class CreateRescheduleRequestDto {

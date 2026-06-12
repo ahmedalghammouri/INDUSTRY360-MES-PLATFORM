@@ -56,6 +56,16 @@ export function AutoGenerateWODialog({ po, open, onClose, onDone }: Props) {
   const [plannedStart, setStart] = useState(toLocalInput(po.plannedStart));
   const [plannedEnd, setEnd] = useState(toLocalInput(po.plannedEnd ?? new Date(Date.now() + 86_400_000).toISOString()));
   const [autoStart, setAutoStart] = useState(false);
+  // Per-step operator pre-assignment: routingStepId → operatorId
+  const [assignments, setAssignments] = useState<Record<string, string>>({});
+
+  const { data: usersData } = useQuery({
+    queryKey: ['users-list'],
+    queryFn: () => api.get('/users', { params: { limit: 200 } }),
+    enabled: open,
+    staleTime: 300_000,
+  });
+  const operators: Array<{ id: string; name: string }> = ((usersData as any)?.data ?? []).map((u: any) => ({ id: u.id, name: u.name }));
 
   const fromIso = plannedStart ? new Date(plannedStart).toISOString() : undefined;
 
@@ -121,6 +131,9 @@ export function AutoGenerateWODialog({ po, open, onClose, onDone }: Props) {
       plannedStart: new Date(plannedStart).toISOString(),
       plannedEnd: new Date(plannedEnd).toISOString(),
       autoStart,
+      assignments: Object.entries(assignments)
+        .filter(([, operatorId]) => operatorId)
+        .map(([stepId, operatorId]) => ({ stepId, operatorId })),
       ...(approvedReschedule ? { rescheduleRequestId: approvedReschedule.id } : {}),
     }),
     onSuccess: (res: any) => {
@@ -302,7 +315,7 @@ export function AutoGenerateWODialog({ po, open, onClose, onDone }: Props) {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border/50">
-                        {['#', 'Operation', 'Machine / Cell', 'Qty Flow', 'Est. Duration'].map(h => (
+                        {['#', 'Operation', 'Machine / Cell', 'Assign to', 'Qty Flow', 'Est. Duration'].map(h => (
                           <th key={h} className="text-left p-3 text-xs text-muted-foreground font-medium">{h}</th>
                         ))}
                       </tr>
@@ -323,6 +336,18 @@ export function AutoGenerateWODialog({ po, open, onClose, onDone }: Props) {
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground"><Layers className="w-2.5 h-2.5" />{step.workCenter.name}</div>
                               )}
                             </div>
+                          </td>
+                          <td className="p-3">
+                            {step.stepId ? (
+                              <select
+                                value={assignments[step.stepId] ?? ''}
+                                onChange={e => setAssignments(a => ({ ...a, [step.stepId]: e.target.value }))}
+                                className="text-xs bg-background/80 border border-border rounded-md px-2 py-1.5 max-w-[140px] focus:outline-none focus:border-brand-400"
+                              >
+                                <option value="">— Operator —</option>
+                                {operators.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                              </select>
+                            ) : <span className="text-xs text-muted-foreground">—</span>}
                           </td>
                           <td className="p-3 text-xs tabular-nums">
                             {step.plannedQtyIn != null && step.inputUnit

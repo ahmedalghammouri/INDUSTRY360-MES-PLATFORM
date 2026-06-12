@@ -6,6 +6,7 @@ import {
   Cpu, Layers, Package, Box, Boxes, User, Check, X,
   AlertCircle, ClipboardList, ArrowDownCircle, GitBranch,
   GitMerge, Shuffle, ChevronRight, BarChart2, TrendingUp,
+  Clock, Zap,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -305,6 +306,20 @@ function ShopFloorCard({
               style={{ width: `${progress}%` }}
             />
           </div>
+          {/* Smart pace / ETA while running */}
+          {jo.status === 'EXECUTING' && elapsed > 5 && jo.actualQtyGood > 0 && (() => {
+            const pacePerHr = Math.round(jo.actualQtyGood / (elapsed / 3600));
+            const remaining = Math.max(0, (jo.plannedQtyOut ?? 0) - jo.actualQtyGood);
+            const etaH = pacePerHr > 0 ? remaining / pacePerHr : null;
+            return (
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
+                <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-brand-400" /> Pace {pacePerHr.toLocaleString()}/hr</span>
+                {etaH != null && remaining > 0 && (
+                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> ETA {etaH < 1 ? `${Math.round(etaH * 60)}m` : `${etaH.toFixed(1)}h`}</span>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -549,6 +564,109 @@ function KpiBar({ jobs }: { jobs: ShopFloorJO[] }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Shift progress bar — smart current-shift band
+// ─────────────────────────────────────────────────────────────
+
+interface ShiftStatus {
+  active: {
+    name: string; nameAr?: string; window: string; code: string;
+    plannedProductionHours: number; shiftDurationHours: number;
+    breakMinutes: number; cleaningMinutes: number; targetQtyPerShift: number | null;
+  } | null;
+  elapsedMin: number; remainingMin: number; totalMin: number;
+  timeProgressPct: number; isActiveNow: boolean; shiftsPerDay: number;
+}
+
+const fmtHM = (min: number) => {
+  const h = Math.floor(min / 60), m = Math.round(min % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+};
+
+function ShiftStat({ label, value, sub, color }: { label: string; value: React.ReactNode; sub?: string; color?: string }) {
+  return (
+    <div className="text-center px-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-lg font-bold tabular-nums leading-tight" style={color ? { color } : undefined}>{value}</div>
+      {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}
+
+function ShiftProgressBar({ status, jobs }: { status?: ShiftStatus; jobs: ShopFloorJO[] }) {
+  if (!status?.active) return null;
+  const a = status.active;
+
+  const output = jobs.reduce((s, j) => s + j.actualQtyGood, 0);
+  const scrap = jobs.reduce((s, j) => s + j.actualQtyRejected, 0);
+  const target = a.targetQtyPerShift ?? 0;
+  const oees = jobs.map((j) => j.joOEE).filter((v): v is number => v != null);
+  const avgOee = oees.length ? Math.round((oees.reduce((s, v) => s + v, 0) / oees.length) * 10) / 10 : null;
+  const executing = jobs.filter((j) => j.status === 'EXECUTING').length;
+
+  const timePct = Math.min(100, status.timeProgressPct ?? 0);
+  const outPct = target > 0 ? Math.min(100, Math.round((output / target) * 100)) : 0;
+  // Smart pace indicator: ahead if output% keeps up with elapsed time%.
+  const onTrack = target > 0 ? outPct >= timePct - 5 : true;
+
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card/80 p-4">
+      <div className="flex items-center gap-4 flex-wrap">
+        {/* Shift identity */}
+        <div className="flex items-center gap-3 min-w-[180px]">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${status.isActiveNow ? 'bg-green-500/20 border border-green-400/30' : 'bg-muted border border-border'}`}>
+            <Clock className={`w-5 h-5 ${status.isActiveNow ? 'text-green-400' : 'text-muted-foreground'}`} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sm">{a.name}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${status.isActiveNow ? 'text-green-400 bg-green-400/10 border-green-400/30' : 'text-muted-foreground bg-muted border-border'}`}>
+                {status.isActiveNow ? 'Active' : 'Idle'}
+              </span>
+            </div>
+            <div className="text-[11px] text-muted-foreground font-mono">{a.window} · {status.shiftsPerDay} shifts/day</div>
+          </div>
+        </div>
+
+        {/* Time + output progress */}
+        <div className="flex-1 min-w-[260px] space-y-2">
+          {/* Time progress */}
+          <div>
+            <div className="flex items-center justify-between text-[11px] mb-0.5">
+              <span className="text-muted-foreground">Shift time · elapsed {fmtHM(status.elapsedMin)}</span>
+              <span className="text-muted-foreground">{fmtHM(status.remainingMin)} left</span>
+            </div>
+            <div className="h-2 rounded-full bg-muted overflow-hidden relative">
+              <div className="h-full rounded-full bg-brand-500/70 transition-all" style={{ width: `${timePct}%` }} />
+            </div>
+          </div>
+          {/* Output vs target */}
+          {target > 0 && (
+            <div>
+              <div className="flex items-center justify-between text-[11px] mb-0.5">
+                <span className="text-muted-foreground">Output {output.toLocaleString()} / {target.toLocaleString()}</span>
+                <span className={onTrack ? 'text-green-400' : 'text-amber-400'}>{onTrack ? 'On track' : 'Behind pace'} · {outPct}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${onTrack ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${outPct}%` }} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Stats */}
+        <div className="flex items-center divide-x divide-border/50">
+          <ShiftStat label="Active" value={executing} color="#22c55e" sub="ops" />
+          <ShiftStat label="Good" value={output.toLocaleString()} color="#22c55e" />
+          {scrap > 0 && <ShiftStat label="Scrap" value={scrap.toLocaleString()} color="#ef4444" />}
+          {avgOee != null && <ShiftStat label="OEE" value={`${avgOee}%`} color={avgOee >= 85 ? '#22c55e' : avgOee >= 60 ? '#eab308' : '#ef4444'} />}
+          <ShiftStat label="Planned" value={`${a.plannedProductionHours}h`} sub={`${a.breakMinutes + a.cleaningMinutes}m stop`} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main view
 // ─────────────────────────────────────────────────────────────
 
@@ -569,6 +687,13 @@ export function ShopFloorView() {
     queryKey: ['users-list'],
     queryFn: () => api.get('/users', { params: { limit: 200 } }),
     staleTime: 300_000,
+  });
+
+  const { data: shiftStatus } = useQuery({
+    queryKey: ['shift-current-status'],
+    queryFn: () => api.get('/shifts/current-status'),
+    refetchInterval: 30_000,
+    staleTime: 20_000,
   });
 
   const allJobs: ShopFloorJO[] = (rawData as any) ?? [];
@@ -704,7 +829,10 @@ export function ShopFloorView() {
       </div>
 
       {/* ── Main grid ── */}
-      <div className="flex-1 p-4 max-w-screen-2xl mx-auto w-full">
+      <div className="flex-1 p-4 max-w-screen-2xl mx-auto w-full space-y-4">
+        {/* Smart current-shift band */}
+        <ShiftProgressBar status={shiftStatus as ShiftStatus | undefined} jobs={allJobs} />
+
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (

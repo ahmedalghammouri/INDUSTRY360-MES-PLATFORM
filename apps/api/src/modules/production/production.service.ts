@@ -1105,7 +1105,7 @@ export class ProductionService {
 
   async autoGenerateWorkOrders(
     factoryId: string | null, userId: string, poId: string,
-    dto: { plannedStart: string; plannedEnd: string; rescheduleRequestId?: string; autoStart?: boolean },
+    dto: { plannedStart: string; plannedEnd: string; rescheduleRequestId?: string; autoStart?: boolean; assignments?: Array<{ stepId: string; operatorId: string }> },
   ): Promise<any> {
     if (!factoryId) throw new BadRequestException('Factory context required');
 
@@ -1188,6 +1188,7 @@ export class ProductionService {
       plannedStart: start.toISOString(),
       plannedEnd: end.toISOString(),
       clearExisting: false,
+      assignments: dto.assignments,
     });
 
     // Advance PO to IN_PROGRESS
@@ -2571,9 +2572,11 @@ export class ProductionService {
   async generateJobOrders(
     factoryId: string | null,
     workOrderId: string,
-    dto: { plannedStart?: string; plannedEnd?: string; clearExisting?: boolean },
+    dto: { plannedStart?: string; plannedEnd?: string; clearExisting?: boolean; assignments?: Array<{ stepId: string; operatorId: string }> },
   ) {
     const factoryFilter = factoryId ? { factoryId } : {};
+    // Per-routing-step operator pre-assignment (chosen in the auto-generate form)
+    const operatorByStep = new Map((dto.assignments ?? []).filter((a) => a.operatorId).map((a) => [a.stepId, a.operatorId]));
 
     const wo = await this.prisma.workOrder.findFirst({
       where: { id: workOrderId, ...factoryFilter, deletedAt: null },
@@ -2720,6 +2723,7 @@ export class ProductionService {
           outputUnit,
           idealCycleTimeSec,
           assignmentReason: pick.reason,
+          operatorId: operatorByStep.get(step.id) ?? null,
         },
         include: {
           machine: { select: { name: true, code: true } },

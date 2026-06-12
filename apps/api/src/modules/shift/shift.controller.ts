@@ -84,6 +84,12 @@ export class ShiftController {
     return this.service.getCurrent(user.factoryId);
   }
 
+  @Get('current-status')
+  @ApiOperation({ summary: 'Live status of the shift in progress now (window, elapsed/remaining, progress)' })
+  currentStatus(@CurrentUser() user: User) {
+    return this.service.getCurrentShiftStatus(user.factoryId);
+  }
+
   @Post('instances/:id/start')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Start a shift (sets IN_PROGRESS, assigns operator/supervisor)' })
