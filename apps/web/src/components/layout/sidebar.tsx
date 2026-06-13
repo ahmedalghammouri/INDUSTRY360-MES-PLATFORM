@@ -15,6 +15,7 @@ import {
   GitBranch,
   Bell,
   AlarmClock,
+  Router,
   Settings,
   Users,
   ChevronDown,
@@ -217,6 +218,7 @@ const navItems: NavItem[] = [
     label: 'IIoT & Connectivity',
     icon: Radio,
     children: [
+      { label: 'Edge Gateways', href: '/iot/gateways', icon: Router   },
       { label: 'Devices',      href: '/iot/devices',  icon: Cpu      },
       { label: 'Tag Browser',  href: '/iot/tags',     icon: Network  },
       { label: 'Drivers',      href: '/iot/drivers',  icon: Radio    },

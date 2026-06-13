@@ -187,6 +187,42 @@ export class IotController {
   }
 
   // ────────────────────────────────────────────────────────────
+  // EDGE GATEWAYS
+  // ────────────────────────────────────────────────────────────
+
+  @Get('gateways')
+  @ApiOperation({ summary: 'List edge gateways with online status' })
+  async getGateways(@CurrentUser() user: RequestUser) {
+    return this.iotService.getGateways(user.factoryId);
+  }
+
+  @Get('gateways/kpis')
+  @ApiOperation({ summary: 'Edge gateway KPIs (total / online / offline)' })
+  async getGatewayKPIs(@CurrentUser() user: RequestUser) {
+    return this.iotService.getGatewayKPIs(user.factoryId);
+  }
+
+  @Patch('gateways/:id')
+  @ApiOperation({ summary: 'Update gateway name / config' })
+  async updateGateway(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { name?: string; config?: unknown; isActive?: boolean },
+  ) {
+    return this.iotService.updateGateway(user.factoryId, id, dto);
+  }
+
+  @Delete('gateways/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Deactivate an edge gateway' })
+  async deleteGateway(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.iotService.deleteGateway(user.factoryId, id);
+  }
+
+  // ────────────────────────────────────────────────────────────
   // ENERGY READINGS
   // ────────────────────────────────────────────────────────────
 

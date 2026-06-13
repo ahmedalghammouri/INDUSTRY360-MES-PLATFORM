@@ -27,7 +27,8 @@
       "@star-mes/shared": ["packages/shared/src/index.ts"],
       "@star-mes/types": ["packages/types/src/index.ts"],
       "@star-mes/auth-utils": ["packages/auth-utils/src/index.ts"],
-      "@star-mes/api-sdk": ["packages/api-sdk/src/index.ts"]
+      "@star-mes/api-sdk": ["packages/api-sdk/src/index.ts"],
+      "@star-mes/industrial-drivers": ["packages/industrial-drivers/src/index.ts"]
     }
   }
 }

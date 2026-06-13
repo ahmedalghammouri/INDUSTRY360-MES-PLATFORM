@@ -242,6 +242,7 @@ export class IotService {
   async createDevice(factoryId: string | null, dto: {
     name: string; deviceCode: string; type: string; protocol: string;
     ipAddress?: string; port?: number; machineId?: string; firmware?: string;
+    gatewayId?: string; unitId?: number; pollIntervalMs?: number;
   }) {
     const resolvedFactoryId = factoryId ?? await this.getDefaultFactoryId();
     return this.prisma.device.create({
@@ -254,6 +255,9 @@ export class IotService {
         ipAddress: dto.ipAddress,
         port: dto.port,
         machineId: dto.machineId || null,
+        gatewayId: dto.gatewayId || null,
+        unitId: dto.unitId ?? null,
+        pollIntervalMs: dto.pollIntervalMs ?? null,
         firmware: dto.firmware,
         status: 'DISCONNECTED',
         isActive: true,
@@ -264,6 +268,7 @@ export class IotService {
   async updateDevice(factoryId: string | null, id: string, dto: {
     name?: string; type?: string; protocol?: string; ipAddress?: string;
     port?: number; firmware?: string; isActive?: boolean;
+    machineId?: string | null; gatewayId?: string | null; unitId?: number; pollIntervalMs?: number;
   }) {
     const factoryFilter = factoryId ? { factoryId } : {};
     const device = await this.prisma.device.findFirst({ where: { id, ...factoryFilter } });
@@ -278,6 +283,10 @@ export class IotService {
         ...(dto.port !== undefined && { port: dto.port }),
         ...(dto.firmware !== undefined && { firmware: dto.firmware }),
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+        ...(dto.machineId !== undefined && { machineId: dto.machineId }),
+        ...(dto.gatewayId !== undefined && { gatewayId: dto.gatewayId }),
+        ...(dto.unitId !== undefined && { unitId: dto.unitId }),
+        ...(dto.pollIntervalMs !== undefined && { pollIntervalMs: dto.pollIntervalMs }),
       },
     });
   }
@@ -297,6 +306,9 @@ export class IotService {
     code: string; name: string; dataType: string; tagType?: string; unit?: string;
     deviceId?: string; machineId?: string; description?: string;
     minValue?: number; maxValue?: number;
+    scaleFactor?: number; offset?: number;
+    address?: string; registerType?: string; wordCount?: number; wordOrder?: string;
+    counterRole?: string; edgeType?: string; pollIntervalMs?: number;
   }) {
     const resolvedFactoryId = factoryId ?? await this.getDefaultFactoryId();
     return this.prisma.tagDefinition.create({
@@ -312,6 +324,15 @@ export class IotService {
         description: dto.description,
         minValue: dto.minValue,
         maxValue: dto.maxValue,
+        scaleFactor: dto.scaleFactor,
+        offset: dto.offset,
+        address: dto.address || null,
+        registerType: dto.registerType || null,
+        wordCount: dto.wordCount ?? 1,
+        wordOrder: dto.wordOrder || 'BIG',
+        counterRole: (dto.counterRole as any) || null,
+        edgeType: dto.edgeType || 'RISING',
+        pollIntervalMs: dto.pollIntervalMs ?? null,
         isActive: true,
       },
     });
@@ -320,6 +341,10 @@ export class IotService {
   async updateTag(factoryId: string | null, id: string, dto: {
     name?: string; unit?: string; description?: string;
     minValue?: number; maxValue?: number; isActive?: boolean;
+    dataType?: string; tagType?: string; deviceId?: string | null; machineId?: string | null;
+    scaleFactor?: number; offset?: number;
+    address?: string; registerType?: string; wordCount?: number; wordOrder?: string;
+    counterRole?: string; edgeType?: string; pollIntervalMs?: number;
   }) {
     const factoryFilter = factoryId ? { factoryId } : {};
     const tag = await this.prisma.tagDefinition.findFirst({ where: { id, ...factoryFilter } });
@@ -333,8 +358,68 @@ export class IotService {
         ...(dto.minValue !== undefined && { minValue: dto.minValue }),
         ...(dto.maxValue !== undefined && { maxValue: dto.maxValue }),
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+        ...(dto.dataType !== undefined && { dataType: dto.dataType as any }),
+        ...(dto.tagType !== undefined && { tagType: dto.tagType as any }),
+        ...(dto.deviceId !== undefined && { deviceId: dto.deviceId }),
+        ...(dto.machineId !== undefined && { machineId: dto.machineId }),
+        ...(dto.scaleFactor !== undefined && { scaleFactor: dto.scaleFactor }),
+        ...(dto.offset !== undefined && { offset: dto.offset }),
+        ...(dto.address !== undefined && { address: dto.address }),
+        ...(dto.registerType !== undefined && { registerType: dto.registerType }),
+        ...(dto.wordCount !== undefined && { wordCount: dto.wordCount }),
+        ...(dto.wordOrder !== undefined && { wordOrder: dto.wordOrder }),
+        ...(dto.counterRole !== undefined && { counterRole: dto.counterRole as any }),
+        ...(dto.edgeType !== undefined && { edgeType: dto.edgeType }),
+        ...(dto.pollIntervalMs !== undefined && { pollIntervalMs: dto.pollIntervalMs }),
       },
     });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // GATEWAYS
+  // ────────────────────────────────────────────────────────────
+
+  /** List gateways with derived ONLINE/OFFLINE (heartbeat within 60s) + device counts. */
+  async getGateways(factoryId: string | null) {
+    const gateways = await this.prisma.gateway.findMany({
+      where: { ...(factoryId ? { factoryId } : {}), isActive: true },
+      include: { _count: { select: { devices: true } } },
+      orderBy: { name: 'asc' },
+    });
+    const now = Date.now();
+    return gateways.map((g) => ({
+      ...g,
+      online: !!g.lastHeartbeatAt && now - g.lastHeartbeatAt.getTime() < 60_000,
+      deviceCount: g._count.devices,
+    }));
+  }
+
+  async getGatewayKPIs(factoryId: string | null) {
+    const gateways = await this.getGateways(factoryId);
+    return {
+      total: gateways.length,
+      online: gateways.filter((g) => g.online).length,
+      offline: gateways.filter((g) => !g.online).length,
+    };
+  }
+
+  async updateGateway(factoryId: string | null, id: string, dto: { name?: string; config?: unknown; isActive?: boolean }) {
+    const gw = await this.prisma.gateway.findFirst({ where: { id, ...(factoryId ? { factoryId } : {}) } });
+    if (!gw) throw new NotFoundException('Gateway not found');
+    return this.prisma.gateway.update({
+      where: { id },
+      data: {
+        ...(dto.name && { name: dto.name }),
+        ...(dto.config !== undefined && { config: dto.config as any }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      },
+    });
+  }
+
+  async deleteGateway(factoryId: string | null, id: string) {
+    const gw = await this.prisma.gateway.findFirst({ where: { id, ...(factoryId ? { factoryId } : {}) } });
+    if (!gw) throw new NotFoundException('Gateway not found');
+    await this.prisma.gateway.update({ where: { id }, data: { isActive: false } });
   }
 
   async deleteTag(factoryId: string | null, id: string) {

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>STAR-MES Edge Gateway</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131722; --panel2: #1a1f2e; --border: #232a3b;
+    --text: #e6e9f0; --muted: #8a93a6; --brand: #818cf8; --brand2: #a78bfa;
+    --good: #34d399; --bad: #f87171; --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px; }
+  a { color: var(--brand); }
+  .hidden { display: none !important; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  /* Login */
+  #login { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .login-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+    padding: 32px; width: 360px; }
+  .brand { font-weight: 800; font-size: 20px; background: linear-gradient(90deg,#818cf8,#a78bfa);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  input, select { width: 100%; background: var(--panel2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 9px 11px; margin-top: 6px; font-size: 14px; }
+  label { font-size: 12px; color: var(--muted); display: block; margin-top: 12px; }
+  button { background: var(--brand); color: #0b0e14; border: 0; border-radius: 8px;
+    padding: 9px 14px; font-weight: 600; cursor: pointer; font-size: 13px; }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  button:hover { opacity: .9; }
+  .err { color: var(--bad); font-size: 12px; margin-top: 10px; min-height: 16px; }
+  /* App */
+  header { display: flex; align-items: center; gap: 14px; padding: 14px 20px;
+    border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  header .sub { color: var(--muted); font-size: 11px; }
+  .pill { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border);
+    display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--good); } .dot.off { background: var(--bad); }
+  main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .05em; padding: 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: 0; }
+  .tag { font-size: 10px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--border); }
+  .tag.GOOD { color: var(--good); border-color: #134e3a; background: #0d2a20; }
+  .tag.TOTAL { color: var(--brand); border-color: #2a2f63; background: #161a33; }
+  .tag.BAD { color: var(--bad); border-color: #4e1f1f; background: #2a1414; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 12px; }
+  .kpi { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .kpi .v { font-size: 24px; font-weight: 700; }
+  .kpi .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .mono { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+  <!-- Login -->
+  <div id="login">
+    <div class="login-card">
+      <div class="brand">STAR<span style="color:#8a93a6">-MES</span> Edge Gateway</div>
+      <div class="sub" style="color:var(--muted);font-size:12px;margin-top:4px">Local monitoring &amp; configuration</div>
+      <label>Email</label>
+      <input id="email" type="email" placeholder="admin@star-mes.sa" />
+      <label>Password</label>
+      <input id="password" type="password" placeholder="••••••••" />
+      <div class="err" id="loginErr"></div>
+      <button style="width:100%;margin-top:16px" onclick="doLogin()">Sign in</button>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="hidden">
+    <header>
+      <div class="brand">STAR<span style="color:#8a93a6">-MES</span> Edge</div>
+      <div class="grow"></div>
+      <span class="pill"><span class="dot" id="dotDb"></span> DB</span>
+      <span class="pill"><span class="dot" id="dotMqtt"></span> MQTT</span>
+      <span class="pill"><span class="dot" id="dotInflux"></span> Influx</span>
+      <span class="pill" id="bufPill">buffer 0</span>
+      <button class="ghost" onclick="logout()">Sign out</button>
+    </header>
+    <main>
+      <div class="card">
+        <h3>Devices</h3>
+        <table><thead><tr><th>Name</th><th>Status</th><th>Tags</th><th>Poll</th></tr></thead>
+          <tbody id="devices"></tbody></table>
+      </div>
+
+      <div class="card">
+        <h3>Executing Job Orders — live counts</h3>
+        <table><thead><tr><th>Work Order</th><th>Operation</th><th>Machine</th>
+          <th class="mono">Good</th><th class="mono">Bad</th><th class="mono">Total</th></tr></thead>
+          <tbody id="jobs"></tbody></table>
+      </div>
+
+      <div class="card">
+        <h3>Live tag values</h3>
+        <table><thead><tr><th>Tag</th><th>Machine</th><th>Role</th><th class="mono">Value</th><th>Unit</th><th>Updated</th></tr></thead>
+          <tbody id="tags"></tbody></table>
+      </div>
+    </main>
+  </div>
+
+<script>
+  const T = { get: () => localStorage.getItem('eg_token'), set: (t) => localStorage.setItem('eg_token', t), clear: () => localStorage.removeItem('eg_token') };
+  let timer = null;
+
+  async function api(path, opts = {}) {
+    const res = await fetch('/api' + path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...(T.get() ? { Authorization: 'Bearer ' + T.get() } : {}), ...(opts.headers || {}) },
+    });
+    if (res.status === 401) { logout(); throw new Error('unauthorized'); }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.status === 204 ? null : res.json();
+  }
+
+  async function doLogin() {
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const err = document.getElementById('loginErr');
+    err.textContent = '';
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) { err.textContent = 'Invalid credentials'; return; }
+      const data = await res.json();
+      T.set(data.accessToken);
+      showApp();
+    } catch { err.textContent = 'Connection error'; }
+  }
+
+  function logout() { T.clear(); clearInterval(timer); document.getElementById('app').classList.add('hidden'); document.getElementById('login').classList.remove('hidden'); }
+
+  function showApp() {
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    refresh();
+    timer = setInterval(refresh, 2000);
+  }
+
+  function dot(el, on) { el.className = 'dot ' + (on ? 'on' : 'off'); }
+  function timeAgo(ts) { const s = Math.round((Date.now() - new Date(ts).getTime()) / 1000); return s < 60 ? s + 's' : Math.round(s / 60) + 'm'; }
+
+  async function refresh() {
+    try {
+      const [status, jobs, live] = await Promise.all([api('/status'), api('/job-orders'), api('/live')]);
+      dot(document.getElementById('dotDb'), status.sinks.db);
+      dot(document.getElementById('dotMqtt'), status.sinks.mqtt);
+      dot(document.getElementById('dotInflux'), status.sinks.influx);
+      const buf = status.buffers.pgTagValue + status.buffers.influx + status.buffers.mqtt;
+      document.getElementById('bufPill').textContent = 'buffer ' + buf;
+
+      document.getElementById('devices').innerHTML = (status.devices || []).map(d =>
+        `<tr><td>${esc(d.name)}</td><td><span class="pill"><span class="dot ${d.connected ? 'on' : 'off'}"></span>${d.connected ? 'Connected' : 'Down'}</span></td>
+         <td class="mono">${d.tagCount}</td><td class="mono">${d.intervalMs}ms</td></tr>`).join('') || emptyRow(4);
+
+      document.getElementById('jobs').innerHTML = (jobs || []).map(j => {
+        const good = j.actualQtyGood || 0, bad = j.actualQtyRejected || 0;
+        return `<tr><td>${esc(j.workOrder?.orderNumber || '—')}</td><td>${esc(j.operationName || '')}</td>
+          <td>${esc(j.machine?.name || '—')}</td><td class="mono" style="color:var(--good)">${good}</td>
+          <td class="mono" style="color:var(--bad)">${bad}</td><td class="mono">${good + bad}</td></tr>`;
+      }).join('') || emptyRow(6);
+
+      document.getElementById('tags').innerHTML = (live || []).map(v => {
+        const role = v.tag?.counterRole;
+        return `<tr><td>${esc(v.tag?.name || v.tag?.code || '')}</td><td>—</td>
+          <td>${role ? `<span class="tag ${role}">${role}</span>` : ''}</td>
+          <td class="mono">${esc(v.value)}</td><td>${esc(v.tag?.unit || '')}</td><td>${timeAgo(v.timestamp)} ago</td></tr>`;
+      }).join('') || emptyRow(6);
+    } catch (e) { /* transient */ }
+  }
+
+  function emptyRow(cols) { return `<tr><td colspan="${cols}" style="color:var(--muted);text-align:center;padding:18px">No data</td></tr>`; }
+  function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  // Boot
+  if (T.get()) showApp();
+</script>
+</body>
+</html>

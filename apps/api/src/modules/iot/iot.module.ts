@@ -6,6 +6,7 @@ import { OpcuaDriverService } from './drivers/opcua-driver.service';
 import { ModbusDriverService } from './drivers/modbus-driver.service';
 import { IndustrialDriverFactory } from './drivers/driver-factory';
 import { EnergyContextService } from './energy-context.service';
+import { GatewayIngestService } from './gateway-ingest.service';
 
 @Module({
   controllers: [IotController],
@@ -16,6 +17,7 @@ import { EnergyContextService } from './energy-context.service';
     ModbusDriverService,
     IndustrialDriverFactory,
     EnergyContextService,
+    GatewayIngestService,
   ],
   exports: [IotService, IndustrialDriverFactory, EnergyContextService],
 })
