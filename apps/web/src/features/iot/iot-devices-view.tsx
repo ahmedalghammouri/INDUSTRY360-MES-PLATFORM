@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { MachinePicker } from '@/components/ui/machine-picker';
 import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { KPICard } from '@/components/widgets/kpi-card';
@@ -28,9 +29,19 @@ export function IotDevicesView() {
   const [formOpen, setFormOpen] = useState(false)
   const [editDevice, setEditDevice] = useState<any | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; name: string } | null>(null)
-  const [form, setForm] = useState({
-    deviceId: '', name: '', type: '', protocol: 'MQTT', location: '', ipAddress: '',
+  const emptyForm = {
+    deviceId: '', name: '', type: 'PLC', protocol: 'MODBUS', location: '', ipAddress: '',
+    port: '502', unitId: '1', pollIntervalMs: '', gatewayId: '', machineId: '',
+  };
+  const [form, setForm] = useState({ ...emptyForm })
+
+  // Edge gateways for the assignment dropdown.
+  const { data: gatewaysResp } = useQuery({
+    queryKey: ['iot', 'gateways', 'all'],
+    queryFn: () => api.get('/iot/gateways'),
+    staleTime: 30_000,
   })
+  const gatewayOptions = Array.isArray(gatewaysResp) ? gatewaysResp : ((gatewaysResp as any)?.data ?? []);
 
   const { data: devices, isLoading } = useQuery({
     queryKey: ['iot', 'devices', { search, page }],
@@ -79,19 +90,24 @@ export function IotDevicesView() {
 
   const handleOpenCreate = () => {
     setEditDevice(null)
-    setForm({ deviceId: '', name: '', type: '', protocol: 'MQTT', location: '', ipAddress: '' })
+    setForm({ ...emptyForm })
     setFormOpen(true)
   };
 
   const handleOpenEdit = (device: any) => {
     setEditDevice(device)
     setForm({
-      deviceId: device.deviceId,
-      name: device.name,
-      type: device.type,
-      protocol: device.protocol,
+      deviceId: device.deviceCode || device.deviceId || '',
+      name: device.name || '',
+      type: device.type || 'PLC',
+      protocol: device.protocol || 'MODBUS',
       location: device.location || '',
       ipAddress: device.ipAddress || '',
+      port: device.port != null ? String(device.port) : '502',
+      unitId: device.unitId != null ? String(device.unitId) : '1',
+      pollIntervalMs: device.pollIntervalMs != null ? String(device.pollIntervalMs) : '',
+      gatewayId: device.gatewayId || '',
+      machineId: device.machineId || '',
     })
     setFormOpen(true)
   };
@@ -102,11 +118,21 @@ export function IotDevicesView() {
   };
 
   const handleSubmit = () => {
-    if (editDevice) {
-      updateMutation.mutate({ id: editDevice.id, dto: form })
-    } else {
-      createMutation.mutate(form)
-    }
+    const num = (s: string) => (s === '' ? undefined : Number(s));
+    const dto: any = {
+      deviceCode: form.deviceId.trim(),
+      name: form.name.trim(),
+      type: form.type,
+      protocol: form.protocol,
+      ipAddress: form.ipAddress || null,
+      port: num(form.port),
+      unitId: num(form.unitId),
+      pollIntervalMs: num(form.pollIntervalMs),
+      gatewayId: form.gatewayId || null,
+      machineId: form.machineId || null,
+    };
+    if (editDevice) updateMutation.mutate({ id: editDevice.id, dto })
+    else createMutation.mutate(dto)
   };
 
   const isValid = !!(form.deviceId && form.name && form.type && form.protocol)
@@ -245,8 +271,8 @@ export function IotDevicesView() {
       >
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label>Device ID *</Label>
-            <Input value={form.deviceId} onChange={e => setForm(v => ({ ...v, deviceId: e.target.value }))} className="mt-1" />
+            <Label>Device Code *</Label>
+            <Input value={form.deviceId} onChange={e => setForm(v => ({ ...v, deviceId: e.target.value }))} className="mt-1" placeholder="e.g. PLC-LINE1" />
           </div>
           <div>
             <Label>Name *</Label>
@@ -254,27 +280,68 @@ export function IotDevicesView() {
           </div>
           <div>
             <Label>Type *</Label>
-            <Input value={form.type} onChange={e => setForm(v => ({ ...v, type: e.target.value }))} className="mt-1" placeholder="e.g. PLC, Sensor, Gateway" />
+            <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v }))}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PLC">PLC</SelectItem>
+                <SelectItem value="HMI">HMI</SelectItem>
+                <SelectItem value="GATEWAY">Gateway</SelectItem>
+                <SelectItem value="SENSOR">Sensor</SelectItem>
+                <SelectItem value="METER">Meter</SelectItem>
+                <SelectItem value="DRIVE">Drive</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label>Protocol *</Label>
             <Select value={form.protocol} onValueChange={v => setForm(f => ({ ...f, protocol: v }))}>
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="MODBUS">Modbus TCP</SelectItem>
                 <SelectItem value="MQTT">MQTT</SelectItem>
-                <SelectItem value="MODBUS_TCP">Modbus TCP</SelectItem>
                 <SelectItem value="OPCUA">OPC UA</SelectItem>
                 <SelectItem value="HTTP">HTTP/REST</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label>Location</Label>
-            <Input value={form.location} onChange={e => setForm(v => ({ ...v, location: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
             <Label>IP Address</Label>
             <Input value={form.ipAddress} onChange={e => setForm(v => ({ ...v, ipAddress: e.target.value }))} className="mt-1" placeholder="e.g. 192.168.1.100" />
+          </div>
+          <div>
+            <Label>Port</Label>
+            <Input value={form.port} onChange={e => setForm(v => ({ ...v, port: e.target.value }))} className="mt-1" placeholder="502" />
+          </div>
+
+          {/* ── Edge gateway acquisition ── */}
+          <div className="col-span-2 pt-2 mt-1 border-t border-border/40 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Edge gateway acquisition
+          </div>
+          <div>
+            <Label>Assigned Gateway</Label>
+            <Select value={form.gatewayId || 'none'} onValueChange={v => setForm(f => ({ ...f, gatewayId: v === 'none' ? '' : v }))}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select gateway" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— none —</SelectItem>
+                {gatewayOptions.map((g: any) => (
+                  <SelectItem key={g.id} value={g.id}>{g.name}{g.online ? ' • online' : ''}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Bound Machine</Label>
+            <div className="mt-1">
+              <MachinePicker value={form.machineId || null} onChange={(id) => setForm(f => ({ ...f, machineId: id || '' }))} placeholder="Select machine…" />
+            </div>
+          </div>
+          <div>
+            <Label>Modbus Unit ID</Label>
+            <Input value={form.unitId} onChange={e => setForm(v => ({ ...v, unitId: e.target.value }))} className="mt-1" placeholder="1" />
+          </div>
+          <div>
+            <Label>Poll Interval (ms)</Label>
+            <Input value={form.pollIntervalMs} onChange={e => setForm(v => ({ ...v, pollIntervalMs: e.target.value }))} className="mt-1" placeholder="1000 (default)" />
           </div>
         </div>
       </FormDialog>

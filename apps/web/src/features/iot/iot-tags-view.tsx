@@ -27,15 +27,27 @@ export function IotTagsView() {
   const [formOpen, setFormOpen] = useState(false)
   const [editTag, setEditTag] = useState<any | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; name: string } | null>(null)
-  const [form, setForm] = useState({
-    name: '', deviceId: '', dataType: 'FLOAT', unit: '', description: '',
-  })
+  const emptyForm = {
+    code: '', name: '', deviceId: '', machineId: '', dataType: 'INT', tagType: 'MEASUREMENT',
+    unit: '', description: '',
+    address: '', registerType: 'HOLDING', wordCount: '1', wordOrder: 'BIG',
+    scaleFactor: '', offset: '', counterRole: 'NONE', edgeType: 'RISING', pollIntervalMs: '',
+  };
+  const [form, setForm] = useState({ ...emptyForm })
 
   const { data: tags, isLoading } = useQuery({
     queryKey: ['iot', 'tags', { search, page }],
     queryFn: () => api.get('/iot/tags', { params: { search, limit: 20, page } }),
     staleTime: 10_000,
   })
+
+  // Devices for the source dropdown (gateway-pollable Modbus devices + others).
+  const { data: devicesResp } = useQuery({
+    queryKey: ['iot', 'devices', 'all'],
+    queryFn: () => api.get('/iot/devices', { params: { limit: 200 } }),
+    staleTime: 30_000,
+  })
+  const deviceOptions = (devicesResp as any)?.data ?? (Array.isArray(devicesResp) ? devicesResp : []);
 
   const tagList = (tags as any)?.data ?? [];
   const total: number = (tags as any)?.total ?? 0;
@@ -72,18 +84,30 @@ export function IotTagsView() {
 
   const handleOpenCreate = () => {
     setEditTag(null)
-    setForm({ name: '', deviceId: '', dataType: 'FLOAT', unit: '', description: '' })
+    setForm({ ...emptyForm })
     setFormOpen(true)
   };
 
   const handleOpenEdit = (tag: any) => {
     setEditTag(tag)
     setForm({
-      name: tag.name,
+      code: tag.code || '',
+      name: tag.name || '',
       deviceId: tag.deviceId || '',
-      dataType: tag.dataType,
+      machineId: tag.machineId || '',
+      dataType: tag.dataType || 'INT',
+      tagType: tag.tagType || 'MEASUREMENT',
       unit: tag.unit || '',
       description: tag.description || '',
+      address: tag.address || '',
+      registerType: tag.registerType || 'HOLDING',
+      wordCount: String(tag.wordCount ?? 1),
+      wordOrder: tag.wordOrder || 'BIG',
+      scaleFactor: tag.scaleFactor != null ? String(tag.scaleFactor) : '',
+      offset: tag.offset != null ? String(tag.offset) : '',
+      counterRole: tag.counterRole || 'NONE',
+      edgeType: tag.edgeType || 'RISING',
+      pollIntervalMs: tag.pollIntervalMs != null ? String(tag.pollIntervalMs) : '',
     })
     setFormOpen(true)
   };
@@ -94,14 +118,33 @@ export function IotTagsView() {
   };
 
   const handleSubmit = () => {
-    if (editTag) {
-      updateMutation.mutate({ id: editTag.id, dto: form })
-    } else {
-      createMutation.mutate(form)
-    }
+    // Coerce numeric strings; drop empties so they don't overwrite with NaN/null.
+    const num = (s: string) => (s === '' ? undefined : Number(s));
+    const dto: any = {
+      code: form.code.trim(),
+      name: form.name.trim(),
+      deviceId: form.deviceId || null,
+      machineId: form.machineId || null,
+      dataType: form.dataType,
+      tagType: form.tagType,
+      unit: form.unit || null,
+      description: form.description || null,
+      address: form.address || null,
+      registerType: form.registerType,
+      wordCount: num(form.wordCount),
+      wordOrder: form.wordOrder,
+      scaleFactor: num(form.scaleFactor),
+      offset: num(form.offset),
+      counterRole: form.tagType === 'COUNTER' ? form.counterRole : 'NONE',
+      edgeType: form.edgeType,
+      pollIntervalMs: num(form.pollIntervalMs),
+    };
+    if (editTag) updateMutation.mutate({ id: editTag.id, dto })
+    else createMutation.mutate(dto)
   };
 
-  const isValid = !!(form.name && form.dataType)
+  const isValid = !!(form.code && form.name && form.dataType)
+  const isCounter = form.tagType === 'COUNTER'
 
   return (
     <div className="flex flex-col h-full">
@@ -235,30 +278,140 @@ export function IotTagsView() {
         isValid={isValid}
       >
         <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
-            <Label>Tag Name *</Label>
-            <Input value={form.name} onChange={e => setForm(v => ({ ...v, name: e.target.value }))} className="mt-1" placeholder="e.g. TEMP_01" />
+          <div>
+            <Label>Tag Code *</Label>
+            <Input value={form.code} onChange={e => setForm(v => ({ ...v, code: e.target.value }))} className="mt-1" placeholder="e.g. CNT_GOOD_01" />
           </div>
           <div>
-            <Label>Device ID</Label>
-            <Input value={form.deviceId} onChange={e => setForm(v => ({ ...v, deviceId: e.target.value }))} className="mt-1" />
+            <Label>Tag Name *</Label>
+            <Input value={form.name} onChange={e => setForm(v => ({ ...v, name: e.target.value }))} className="mt-1" placeholder="e.g. Good count" />
+          </div>
+          <div>
+            <Label>Tag Type</Label>
+            <Select value={form.tagType} onValueChange={v => setForm(f => ({ ...f, tagType: v }))}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="MEASUREMENT">Measurement</SelectItem>
+                <SelectItem value="COUNTER">Counter</SelectItem>
+                <SelectItem value="STATUS">Status</SelectItem>
+                <SelectItem value="SETPOINT">Setpoint</SelectItem>
+                <SelectItem value="ALARM">Alarm</SelectItem>
+                <SelectItem value="EVENT">Event</SelectItem>
+                <SelectItem value="ENERGY">Energy</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label>Data Type *</Label>
             <Select value={form.dataType} onValueChange={v => setForm(f => ({ ...f, dataType: v }))}>
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="INT">Integer</SelectItem>
                 <SelectItem value="FLOAT">Float</SelectItem>
-                <SelectItem value="INTEGER">Integer</SelectItem>
-                <SelectItem value="BOOLEAN">Boolean</SelectItem>
+                <SelectItem value="BOOL">Boolean</SelectItem>
                 <SelectItem value="STRING">String</SelectItem>
+                <SelectItem value="TIMESTAMP">Timestamp</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Source Device</Label>
+            <Select value={form.deviceId || 'none'} onValueChange={v => setForm(f => ({ ...f, deviceId: v === 'none' ? '' : v }))}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select device" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— none —</SelectItem>
+                {deviceOptions.map((d: any) => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <div>
             <Label>Unit</Label>
-            <Input value={form.unit} onChange={e => setForm(v => ({ ...v, unit: e.target.value }))} className="mt-1" placeholder="e.g. °C, bar, RPM" />
+            <Input value={form.unit} onChange={e => setForm(v => ({ ...v, unit: e.target.value }))} className="mt-1" placeholder="e.g. °C, pcs, RPM" />
           </div>
+
+          {/* ── Modbus register binding ── */}
+          <div className="col-span-2 pt-2 mt-1 border-t border-border/40 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Modbus binding
+          </div>
+          <div>
+            <Label>Register Address</Label>
+            <Input value={form.address} onChange={e => setForm(v => ({ ...v, address: e.target.value }))} className="mt-1" placeholder="e.g. 100" />
+          </div>
+          <div>
+            <Label>Register Type</Label>
+            <Select value={form.registerType} onValueChange={v => setForm(f => ({ ...f, registerType: v }))}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="HOLDING">Holding Register</SelectItem>
+                <SelectItem value="INPUT">Input Register</SelectItem>
+                <SelectItem value="COIL">Coil</SelectItem>
+                <SelectItem value="DISCRETE">Discrete Input</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Word Count</Label>
+            <Select value={form.wordCount} onValueChange={v => setForm(f => ({ ...f, wordCount: v }))}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">1 (16-bit)</SelectItem>
+                <SelectItem value="2">2 (32-bit)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Word Order (32-bit)</Label>
+            <Select value={form.wordOrder} onValueChange={v => setForm(f => ({ ...f, wordOrder: v }))}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="BIG">Big-endian</SelectItem>
+                <SelectItem value="LITTLE">Little-endian</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Scale Factor</Label>
+            <Input value={form.scaleFactor} onChange={e => setForm(v => ({ ...v, scaleFactor: e.target.value }))} className="mt-1" placeholder="e.g. 0.1" />
+          </div>
+          <div>
+            <Label>Offset</Label>
+            <Input value={form.offset} onChange={e => setForm(v => ({ ...v, offset: e.target.value }))} className="mt-1" placeholder="e.g. 0" />
+          </div>
+
+          {/* ── Counter mapping (only for COUNTER tags) ── */}
+          {isCounter && (
+            <>
+              <div className="col-span-2 pt-2 mt-1 border-t border-border/40 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Counter mapping — +1 per edge, applied to the machine&apos;s running Job Order
+              </div>
+              <div>
+                <Label>Counter Role</Label>
+                <Select value={form.counterRole} onValueChange={v => setForm(f => ({ ...f, counterRole: v }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NONE">None</SelectItem>
+                    <SelectItem value="TOTAL">Total (Bad = Total − Good)</SelectItem>
+                    <SelectItem value="GOOD">Good</SelectItem>
+                    <SelectItem value="BAD">Bad</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Edge Trigger</Label>
+                <Select value={form.edgeType} onValueChange={v => setForm(f => ({ ...f, edgeType: v }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="RISING">Rising (0→1)</SelectItem>
+                    <SelectItem value="FALLING">Falling (1→0)</SelectItem>
+                    <SelectItem value="CHANGE">Any change</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+
           <div className="col-span-2">
             <Label>Description</Label>
             <Input value={form.description} onChange={e => setForm(v => ({ ...v, description: e.target.value }))} className="mt-1" />
