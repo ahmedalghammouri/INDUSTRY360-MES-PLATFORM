@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityPicker } from '@/components/ui/entity-picker';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { api } from '@/services/api.client';
@@ -257,6 +257,8 @@ export function RawMaterialsView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
+        <InlineFormSlot />
+
         {/* KPI Cards */}
         <div className="grid grid-cols-3 gap-3">
           <div className="glass-card p-4">
@@ -435,20 +437,29 @@ export function RawMaterialsView() {
         </div>
       </div>
 
-      {/* ── Create / Edit Dialog ─────────────────────────────── */}
-      <Dialog open={formOpen} onOpenChange={o => !o && handleCloseForm()}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
-          <DialogHeader className="px-6 pt-5 pb-4 border-b border-border/50 shrink-0">
-            <DialogTitle className="text-sm flex items-center gap-2">
-              <Layers3 size={14} className="text-brand-400" />
-              {editMaterial ? `Edit — ${editMaterial.name}` : 'Add Raw Material'}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              {editMaterial ? 'Update material details below.' : 'Fill in the details to add a new raw material to inventory.'}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+      {/* ── Create / Edit — inline form ─────────────────────── */}
+      <InlineFormPanel
+        open={formOpen}
+        onClose={handleCloseForm}
+        icon={Layers3}
+        title={editMaterial ? `Edit — ${editMaterial.name}` : 'Add Raw Material'}
+        description={editMaterial ? 'Update material details below.' : 'Fill in the details to add a new raw material to inventory.'}
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={handleCloseForm}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!isValid || isBusy}
+              onClick={handleSubmit}
+            >
+              {isBusy
+                ? (editMaterial ? 'Saving…' : 'Creating…')
+                : (editMaterial ? 'Save Changes' : 'Add Material')
+              }
+            </Button>
+          </>
+        )}
+      >
             <div className="grid grid-cols-2 gap-3">
               {/* Code */}
               <div className="space-y-1.5">
@@ -589,23 +600,7 @@ export function RawMaterialsView() {
                 />
               </div>
             </div>
-          </div>
-
-          <DialogFooter className="px-6 py-4 border-t border-border/50 shrink-0 gap-2">
-            <Button variant="outline" size="sm" onClick={handleCloseForm}>Cancel</Button>
-            <Button
-              size="sm"
-              disabled={!isValid || isBusy}
-              onClick={handleSubmit}
-            >
-              {isBusy
-                ? (editMaterial ? 'Saving…' : 'Creating…')
-                : (editMaterial ? 'Save Changes' : 'Add Material')
-              }
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
 
       {/* ── Delete Confirmation ──────────────────────────────── */}
       <DeleteDialog

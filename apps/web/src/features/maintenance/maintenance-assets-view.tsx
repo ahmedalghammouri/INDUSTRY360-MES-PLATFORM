@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityPicker } from '@/components/ui/entity-picker';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { TableRowActions } from '@/components/ui/table-row-actions';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
@@ -190,6 +190,8 @@ export function MaintenanceAssetsView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
+        <InlineFormSlot />
+
         <div className="flex items-center gap-3">
           <div className="relative">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -307,20 +309,30 @@ export function MaintenanceAssetsView() {
         </div>
       </div>
 
-      {/* Create / Edit Dialog */}
-      <Dialog open={formOpen} onOpenChange={o => !o && handleClose()}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-sm flex items-center gap-2">
-              <Cpu size={14} className="text-brand-400" />
-              {editAsset ? `Edit Asset — ${editAsset.code}` : 'Register New Asset'}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Assets are machines registered in the system. Link them to the plant hierarchy (Area/Line) to enable location-aware maintenance.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-5 py-1 max-h-[70vh] overflow-y-auto pr-1">
+      {/* Create / Edit — inline form */}
+      <InlineFormPanel
+        open={formOpen}
+        onClose={handleClose}
+        icon={Cpu}
+        title={editAsset ? `Edit Asset — ${editAsset.code}` : 'Register New Asset'}
+        description="Assets are machines registered in the system. Link them to the plant hierarchy (Area/Line) to enable location-aware maintenance."
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={handleClose}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!isValid || createMutation.isPending || updateMutation.isPending}
+              onClick={handleSubmit}
+            >
+              {createMutation.isPending || updateMutation.isPending
+                ? (editAsset ? 'Saving…' : 'Creating…')
+                : (editAsset ? 'Save Changes' : 'Register Asset')
+              }
+            </Button>
+          </>
+        )}
+      >
+          <div className="space-y-5">
             {/* Identity */}
             <div>
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Identity</p>
@@ -461,22 +473,7 @@ export function MaintenanceAssetsView() {
               </div>
             </div>
           </div>
-
-          <DialogFooter className="gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={handleClose}>Cancel</Button>
-            <Button
-              size="sm"
-              disabled={!isValid || createMutation.isPending || updateMutation.isPending}
-              onClick={handleSubmit}
-            >
-              {createMutation.isPending || updateMutation.isPending
-                ? (editAsset ? 'Saving…' : 'Creating…')
-                : (editAsset ? 'Save Changes' : 'Register Asset')
-              }
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
 
       <DeleteDialog
         open={!!deleteDialog}

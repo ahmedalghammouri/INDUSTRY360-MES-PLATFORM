@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
@@ -165,6 +165,8 @@ export function SparePartsRequestsView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
+        <InlineFormSlot />
+
         {/* KPI Cards */}
         <div className="grid grid-cols-3 gap-3">
           <div className="glass-card p-4">
@@ -370,21 +372,31 @@ export function SparePartsRequestsView() {
         </div>
       </div>
 
-      {/* ── Issue Parts Dialog ───────────────────────────────── */}
+      {/* ── Issue Parts — inline form ────────────────────────── */}
       {issueDialog && (
-        <Dialog open onOpenChange={o => !o && handleCloseIssueDialog()}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="text-sm flex items-center gap-2">
-                <PackageCheck size={14} className="text-green-400" />
-                Issue Parts to Work Order
-              </DialogTitle>
-              <DialogDescription className="text-xs">
-                Issuing <span className="font-medium text-foreground">{issueDialog.partName}</span> for work order{' '}
-                <span className="font-mono font-medium text-foreground">{issueDialog.woNumber}</span>.
-              </DialogDescription>
-            </DialogHeader>
-
+        <InlineFormPanel
+          open={!!issueDialog}
+          onClose={handleCloseIssueDialog}
+          icon={PackageCheck}
+          iconClassName="text-green-400"
+          iconWrapClassName="bg-green-500/15"
+          title="Issue Parts to Work Order"
+          description={`Issuing ${issueDialog.partName} for work order ${issueDialog.woNumber}`}
+          footer={(
+            <>
+              <Button variant="outline" size="sm" onClick={handleCloseIssueDialog}>Cancel</Button>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                disabled={!issueValid}
+                onClick={handleConfirmIssue}
+              >
+                <PackageCheck size={12} />
+                {issueMutation.isPending ? 'Issuing…' : 'Confirm Issue'}
+              </Button>
+            </>
+          )}
+        >
             <div className="space-y-4 py-1">
               {/* Part & WO summary */}
               <div className="glass-card rounded-lg p-3 space-y-1.5">
@@ -443,21 +455,7 @@ export function SparePartsRequestsView() {
                 />
               </div>
             </div>
-
-            <DialogFooter className="gap-2">
-              <Button variant="outline" size="sm" onClick={handleCloseIssueDialog}>Cancel</Button>
-              <Button
-                size="sm"
-                className="gap-1.5"
-                disabled={!issueValid}
-                onClick={handleConfirmIssue}
-              >
-                <PackageCheck size={12} />
-                {issueMutation.isPending ? 'Issuing…' : 'Confirm Issue'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        </InlineFormPanel>
       )}
     </div>
   );

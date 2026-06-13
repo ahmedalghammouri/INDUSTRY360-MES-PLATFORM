@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { cn } from '@/lib/utils';
 
 /* ------------------------------------------------------------------ */
@@ -180,6 +181,8 @@ export function StorageLocationsView() {
         })}
       </div>
 
+      <InlineFormSlot />
+
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-48 max-w-xs">
@@ -248,21 +251,26 @@ export function StorageLocationsView() {
         onEdit={(loc) => { openEdit(loc); setSelectedId(null); }}
       />
 
-      {/* Create / Edit dialog */}
-      <AnimatePresence>
-        {formOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-background border rounded-xl shadow-2xl w-full max-w-md"
+      {/* Create / Edit — inline form */}
+      <InlineFormPanel
+        open={formOpen}
+        onClose={() => { setFormOpen(false); setEditLocation(null); }}
+        icon={MapPin}
+        title={editLocation ? 'Edit Storage Location' : 'New Storage Location'}
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => { setFormOpen(false); setEditLocation(null); }}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!form.code || !form.name || !form.zone || createMutation.isPending || updateMutation.isPending}
+              onClick={handleSave}
             >
-              <div className="p-5 border-b flex items-center justify-between">
-                <h2 className="font-semibold text-sm">{editLocation ? 'Edit Storage Location' : 'New Storage Location'}</h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setFormOpen(false); setEditLocation(null); }}>
-                  <X size={14} />
-                </Button>
-              </div>
-              <div className="p-5 flex flex-col gap-4">
+              {createMutation.isPending || updateMutation.isPending ? 'Saving...' : editLocation ? 'Save Changes' : 'Create Location'}
+            </Button>
+          </>
+        )}
+      >
+              <div className="flex flex-col gap-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
                     <Label>Location Code *</Label>
@@ -298,20 +306,7 @@ export function StorageLocationsView() {
                   <Input type="number" min="0" value={form.capacity} onChange={e => setForm(p => ({ ...p, capacity: e.target.value }))} placeholder="Max units / pallets" className="h-8 text-sm" />
                 </div>
               </div>
-              <div className="p-5 border-t flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => { setFormOpen(false); setEditLocation(null); }}>Cancel</Button>
-                <Button
-                  size="sm"
-                  disabled={!form.code || !form.name || !form.zone || createMutation.isPending || updateMutation.isPending}
-                  onClick={handleSave}
-                >
-                  {createMutation.isPending || updateMutation.isPending ? 'Saving...' : editLocation ? 'Save Changes' : 'Create Location'}
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      </InlineFormPanel>
 
       {/* Deactivate confirm */}
       <AnimatePresence>

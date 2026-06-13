@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
@@ -243,6 +244,8 @@ export function ShiftConfigView() {
           </Button>
         </div>
       </div>
+
+      <InlineFormSlot />
 
       {/* Config summary */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

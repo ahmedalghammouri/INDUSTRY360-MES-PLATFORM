@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { useToast } from '@/components/ui/use-toast';
@@ -124,6 +125,8 @@ export function IotTagsView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
+        <InlineFormSlot className="mb-6 empty:mb-0" />
+
         <div className="industrial-card p-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold">All Tags</h3>

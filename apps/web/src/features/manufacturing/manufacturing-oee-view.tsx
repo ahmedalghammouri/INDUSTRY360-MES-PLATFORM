@@ -216,7 +216,8 @@ export default function ManufacturingOeeView() {
     // Endpoint is paginated → unwrap the `data` array (guard non-array shapes)
     queryFn: async () => {
       const res = await api.get<{ data: OeeRecord[] } | OeeRecord[]>('/production/oee-records', { params: { limit: 50, ...scopeFilter, dateFrom, dateTo } });
-      return Array.isArray(res) ? res : (res?.data ?? []);
+      if (Array.isArray(res)) return res;
+      return Array.isArray(res?.data) ? res.data : [];
     },
     refetchInterval: 30_000,
   });
@@ -258,7 +259,7 @@ export default function ManufacturingOeeView() {
 
   // History chart data
   const historyData = useMemo(() => {
-    if (!oeeRecords) return [];
+    if (!Array.isArray(oeeRecords)) return [];
     return [...oeeRecords]
       .sort((a, b) => new Date(a.recordDate).getTime() - new Date(b.recordDate).getTime())
       .map((r) => ({

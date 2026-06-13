@@ -21,6 +21,7 @@ import { useScope } from '@/hooks/use-scope';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { FormDialog } from '@/components/ui/form-dialog';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
@@ -206,16 +207,22 @@ function WorkOrderQualityPanel({ workOrderId, machineId }: { workOrderId: string
         </div>
       )}
 
-      {/* ── Add Inspection Dialog ── */}
-      <Dialog open={addOpen} onOpenChange={o => !o && setAddOpen(false)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm flex items-center gap-2">
-              <ClipboardCheck size={14} className="text-primary" />
-              Add Quality Inspection
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-1">
+      {/* ── Add Inspection — inline form ── */}
+      <InlineFormPanel
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        icon={ClipboardCheck}
+        title="Add Quality Inspection"
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button size="sm" disabled={!isAddValid || createInspMutation.isPending} onClick={handleAddInsp}>
+              {createInspMutation.isPending ? 'Saving…' : 'Record Inspection'}
+            </Button>
+          </>
+        )}
+      >
+          <div className="space-y-3">
             <div>
               <Label className="text-xs">Inspection Type *</Label>
               <Select value={addForm.type} onValueChange={v => setAddForm(f => ({ ...f, type: v }))}>
@@ -281,14 +288,7 @@ function WorkOrderQualityPanel({ workOrderId, machineId }: { workOrderId: string
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button size="sm" disabled={!isAddValid || createInspMutation.isPending} onClick={handleAddInsp}>
-              {createInspMutation.isPending ? 'Saving…' : 'Record Inspection'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
     </div>
   );
 }
@@ -463,6 +463,8 @@ export function ProductionWorkOrdersView() {
 
       {/* ── Table ── */}
       <div className="flex-1 overflow-auto p-6">
+        <InlineFormSlot className="mb-6 empty:mb-0" />
+
         <div className="industrial-card p-4">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <h3 className="text-sm font-semibold">All Work Orders</h3>
@@ -979,11 +981,23 @@ export function ProductionWorkOrdersView() {
         </div>
       </FormDialog>
 
-      {/* ══ Edit Dialog ══ */}
-      <Dialog open={!!editWO} onOpenChange={o => !o && setEditWO(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle className="text-sm">Edit — {editWO?.orderNumber}</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
+      {/* ══ Edit — inline form ══ */}
+      <InlineFormPanel
+        open={!!editWO}
+        onClose={() => setEditWO(null)}
+        icon={Pencil}
+        title={`Edit — ${editWO?.orderNumber ?? ''}`}
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => setEditWO(null)}>Cancel</Button>
+            <Button size="sm" disabled={!editForm.plannedQty || updateMutation.isPending}
+              onClick={() => editWO && updateMutation.mutate({ id: editWO.id, dto: { plannedQty: parseInt(editForm.plannedQty, 10), priority: editForm.priority, notes: editForm.notes || undefined } })}>
+              {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </>
+        )}
+      >
+          <div className="space-y-4">
             <div>
               <Label>Planned Quantity</Label>
               <Input type="number" min={1} value={editForm.plannedQty} onChange={e => setEditForm(f => ({ ...f, plannedQty: e.target.value }))} className="mt-1" />
@@ -1000,15 +1014,7 @@ export function ProductionWorkOrdersView() {
               <Input value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} placeholder="Update notes…" className="mt-1" />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setEditWO(null)}>Cancel</Button>
-            <Button size="sm" disabled={!editForm.plannedQty || updateMutation.isPending}
-              onClick={() => editWO && updateMutation.mutate({ id: editWO.id, dto: { plannedQty: parseInt(editForm.plannedQty, 10), priority: editForm.priority, notes: editForm.notes || undefined } })}>
-              {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
 
       {/* ══ Complete Dialog ══ */}
       <Dialog open={!!completeDialog} onOpenChange={o => !o && setCompleteDialog(null)}>

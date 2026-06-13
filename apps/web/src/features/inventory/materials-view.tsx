@@ -11,6 +11,7 @@ import { EntityPicker } from '@/components/ui/entity-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -176,6 +177,8 @@ export function MaterialsView() {
           ]}
         />
       </div>
+
+      <InlineFormSlot />
 
       <div className="glass-card rounded-xl overflow-hidden">
         <div className="overflow-auto">

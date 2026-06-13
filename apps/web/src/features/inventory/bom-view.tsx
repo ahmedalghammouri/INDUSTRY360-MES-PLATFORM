@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { EntityPicker } from '@/components/ui/entity-picker';
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 
 interface BOMItem {
   id: string;
@@ -273,6 +274,8 @@ export function BOMView() {
         </span>
       </div>
 
+      <InlineFormSlot />
+
       {/* Search */}
       <div className="relative w-72">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -316,23 +319,21 @@ export function BOMView() {
 
       <TablePagination page={page} total={total} limit={20} onPageChange={setPage} />
 
-      {/* Create BOM Dialog */}
-      <AnimatePresence>
-        {createOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-background border rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
-            >
-              <div className="p-5 border-b flex items-center justify-between">
-                <h2 className="font-semibold text-base">Create Bill of Materials</h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCreateOpen(false)}>
-                  <X size={14} />
-                </Button>
-              </div>
-              <div className="p-5 flex flex-col gap-5">
+      {/* Create BOM — inline form */}
+      <InlineFormPanel
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        icon={Layers}
+        title="Create Bill of Materials"
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={handleCreate} disabled={createMutation.isPending || !newBOM.skuId}>
+              {createMutation.isPending ? 'Creating...' : 'Create BOM'}
+            </Button>
+          </>
+        )}
+      >
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
                     <Label>Product (SKU) *</Label>
@@ -497,38 +498,30 @@ export function BOMView() {
                     className="h-8 text-sm"
                   />
                 </div>
-              </div>
-              <div className="p-5 border-t flex items-center justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
-                <Button size="sm" onClick={handleCreate} disabled={createMutation.isPending || !newBOM.skuId}>
-                  {createMutation.isPending ? 'Creating...' : 'Create BOM'}
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      </InlineFormPanel>
 
-      {/* Edit BOM Dialog */}
-      <AnimatePresence>
-        {editBOM && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-background border rounded-xl shadow-2xl w-full max-w-md"
-            >
-              <div className="p-5 border-b flex items-center justify-between">
-                <div>
-                  <h2 className="font-semibold text-sm">Edit BOM</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">{editBOM.sku.name}</p>
-                </div>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditBOM(null)}>
-                  <X size={14} />
-                </Button>
-              </div>
-              <div className="p-5 flex flex-col gap-4">
+      {/* Edit BOM — inline form */}
+      {editBOM && (
+        <InlineFormPanel
+          open={!!editBOM}
+          onClose={() => setEditBOM(null)}
+          icon={Edit2}
+          title="Edit BOM"
+          description={editBOM.sku.name}
+          footer={(
+            <>
+              <Button variant="outline" size="sm" onClick={() => setEditBOM(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                disabled={updateMutation.isPending || !editForm.version}
+                onClick={() => updateMutation.mutate({ id: editBOM.id, dto: { version: editForm.version, notes: editForm.notes || undefined } })}
+              >
+                {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </>
+          )}
+        >
+              <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
                   <Label>Version</Label>
                   <Input
@@ -554,20 +547,8 @@ export function BOMView() {
                   </p>
                 )}
               </div>
-              <div className="p-5 border-t flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setEditBOM(null)}>Cancel</Button>
-                <Button
-                  size="sm"
-                  disabled={updateMutation.isPending || !editForm.version}
-                  onClick={() => updateMutation.mutate({ id: editBOM.id, dto: { version: editForm.version, notes: editForm.notes || undefined } })}
-                >
-                  {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+        </InlineFormPanel>
+      )}
 
       {/* Delete BOM Confirmation */}
       <AnimatePresence>
@@ -609,23 +590,34 @@ export function BOMView() {
         )}
       </AnimatePresence>
 
-      {/* Add Item Dialog */}
-      <AnimatePresence>
-        {addItemBOM && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-background border rounded-xl shadow-2xl w-full max-w-md"
-            >
-              <div className="p-5 border-b flex items-center justify-between">
-                <h2 className="font-semibold text-sm">Add Material to BOM</h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setAddItemBOM(null)}>
-                  <X size={14} />
-                </Button>
-              </div>
-              <div className="p-5 flex flex-col gap-4">
+      {/* Add Material — inline form */}
+      {addItemBOM && (
+        <InlineFormPanel
+          open={!!addItemBOM}
+          onClose={() => setAddItemBOM(null)}
+          icon={Plus}
+          title="Add Material to BOM"
+          footer={(
+            <>
+              <Button variant="outline" size="sm" onClick={() => setAddItemBOM(null)}>Cancel</Button>
+              <Button size="sm"
+                disabled={addItemMutation.isPending || !addItem.rawMaterialId || !addItem.quantityPer}
+                onClick={() => addItemMutation.mutate({
+                  bomId: addItemBOM.id,
+                  dto: {
+                    rawMaterialId: addItem.rawMaterialId,
+                    quantityPer: parseFloat(addItem.quantityPer),
+                    unit: addItem.unit,
+                    scrapFactor: parseFloat(addItem.scrapFactor) || 0,
+                  },
+                })}
+              >
+                {addItemMutation.isPending ? 'Adding...' : 'Add Material'}
+              </Button>
+            </>
+          )}
+        >
+              <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
                   <Label>Raw Material *</Label>
                   <EntityPicker
@@ -675,27 +667,8 @@ export function BOMView() {
                     className="h-8 text-sm" placeholder="0.00" />
                 </div>
               </div>
-              <div className="p-5 border-t flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setAddItemBOM(null)}>Cancel</Button>
-                <Button size="sm"
-                  disabled={addItemMutation.isPending || !addItem.rawMaterialId || !addItem.quantityPer}
-                  onClick={() => addItemMutation.mutate({
-                    bomId: addItemBOM.id,
-                    dto: {
-                      rawMaterialId: addItem.rawMaterialId,
-                      quantityPer: parseFloat(addItem.quantityPer),
-                      unit: addItem.unit,
-                      scrapFactor: parseFloat(addItem.scrapFactor) || 0,
-                    },
-                  })}
-                >
-                  {addItemMutation.isPending ? 'Adding...' : 'Add Material'}
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+        </InlineFormPanel>
+      )}
     </div>
   );
 }

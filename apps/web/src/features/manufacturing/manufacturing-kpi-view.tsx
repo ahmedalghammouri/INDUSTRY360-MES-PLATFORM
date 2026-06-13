@@ -193,15 +193,18 @@ export default function ManufacturingKpiView() {
     // Endpoint is paginated → unwrap the `data` array (guard non-array shapes)
     queryFn: async () => {
       const res = await api.get<{ data: OeeRecord[] } | OeeRecord[]>('/production/oee-records', { params: { limit: 30, ...filter } });
-      return Array.isArray(res) ? res : (res?.data ?? []);
+      if (Array.isArray(res)) return res;
+      return Array.isArray(res?.data) ? res.data : [];
     },
     refetchInterval: 60_000,
   });
 
+  // Always work with a guaranteed array — never trust the query result shape.
+  const records: OeeRecord[] = Array.isArray(oeeRecords) ? oeeRecords : [];
+
   // ── Chart data: sort records by date ────────────────────────────────────────
   const chartData = useMemo(() => {
-    if (!oeeRecords) return [];
-    return [...oeeRecords]
+    return [...records]
       .sort((a, b) => new Date(a.recordDate).getTime() - new Date(b.recordDate).getTime())
       .map((r) => ({
         date: formatDate(r.recordDate),
@@ -209,18 +212,16 @@ export default function ManufacturingKpiView() {
         availability: parseFloat(r.availability.toFixed(1)),
         quality: parseFloat(r.quality.toFixed(1)),
       }));
-  }, [oeeRecords]);
+  }, [records]);
 
   // ── Machine leaderboard: group & average by machineId ───────────────────────
   const leaderboard = useMemo(() => {
-    if (!oeeRecords) return [];
-
     const map = new Map<
       string,
       { name: string; oeeSum: number; availSum: number; perfSum: number; qualSum: number; count: number }
     >();
 
-    for (const r of oeeRecords) {
+    for (const r of records) {
       const existing = map.get(r.machineId);
       if (existing) {
         existing.oeeSum += r.oee;
@@ -249,7 +250,7 @@ export default function ManufacturingKpiView() {
         quality: m.qualSum / m.count,
       }))
       .sort((a, b) => b.oee - a.oee);
-  }, [oeeRecords]);
+  }, [records]);
 
   // ── Classification counts ────────────────────────────────────────────────────
   const classifications = useMemo(() => {

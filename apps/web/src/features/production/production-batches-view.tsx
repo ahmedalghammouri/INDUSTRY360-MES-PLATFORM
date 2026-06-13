@@ -14,6 +14,7 @@ import { EntityPicker } from '@/components/ui/entity-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'; // still used for status filter
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { TableRowActions } from '@/components/ui/table-row-actions';
 import { api } from '@/services/api.client';
@@ -190,6 +191,8 @@ export function ProductionBatchesView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-5">
+        <InlineFormSlot />
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {SUMMARY.map((s, i) => {
             const Icon = s.icon;
@@ -307,20 +310,27 @@ export function ProductionBatchesView() {
         </div>
       </div>
 
-      {/* Create Batch Dialog */}
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <FlaskConical className="w-4 h-4 text-brand-400" />
-              Create Production Batch
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Start a new production batch. Link it to a SKU and work order for full traceability.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
+      {/* Create Batch — inline form */}
+      <InlineFormPanel
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        icon={FlaskConical}
+        title="Create Production Batch"
+        description="Start a new production batch. Link it to a SKU and work order for full traceability."
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => setFormOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!formData.batchNumber || !formData.plannedQty || createMutation.isPending}
+              onClick={handleCreate}
+            >
+              {createMutation.isPending ? 'Creating...' : 'Create Batch'}
+            </Button>
+          </>
+        )}
+      >
+          <div className="space-y-4">
             {/* Batch Number */}
             <div className="space-y-1.5">
               <Label className="text-xs font-medium flex items-center gap-1.5">
@@ -387,29 +397,26 @@ export function ProductionBatchesView() {
               />
             </div>
           </div>
+      </InlineFormPanel>
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => setFormOpen(false)}>Cancel</Button>
-            <Button
-              size="sm"
-              disabled={!formData.batchNumber || !formData.plannedQty || createMutation.isPending}
-              onClick={handleCreate}
-            >
-              {createMutation.isPending ? 'Creating...' : 'Create Batch'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Batch Dialog */}
+      {/* Edit Batch — inline form */}
       {editBatch && (
-        <Dialog open={true} onOpenChange={() => setEditBatch(null)}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle className="text-sm font-mono">{editBatch.batchNumber}</DialogTitle>
-              <DialogDescription className="text-xs">Update batch quantities, status, and tracking info.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
+        <InlineFormPanel
+          open={!!editBatch}
+          onClose={() => setEditBatch(null)}
+          icon={Edit3}
+          title={editBatch.batchNumber}
+          description="Update batch quantities, status, and tracking info."
+          footer={(
+            <>
+              <Button variant="outline" size="sm" onClick={() => setEditBatch(null)}>Cancel</Button>
+              <Button size="sm" disabled={updateMutation.isPending} onClick={handleUpdate}>
+                {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
+              </Button>
+            </>
+          )}
+        >
+            <div className="space-y-4">
               {/* Quantities */}
               <div>
                 <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Quantities</p>
@@ -500,14 +507,7 @@ export function ProductionBatchesView() {
                 </div>
               )}
             </div>
-            <DialogFooter className="gap-2">
-              <Button variant="outline" size="sm" onClick={() => setEditBatch(null)}>Cancel</Button>
-              <Button size="sm" disabled={updateMutation.isPending} onClick={handleUpdate}>
-                {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        </InlineFormPanel>
       )}
 
       {/* ── Batch Detail Sheet ── */}

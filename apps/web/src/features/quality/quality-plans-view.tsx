@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { cn } from '@/lib/utils';
 
 /* ------------------------------------------------------------------ */
@@ -208,6 +209,8 @@ export function QualityPlansView() {
         })}
       </div>
 
+      <InlineFormSlot />
+
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-48 max-w-xs">
@@ -269,24 +272,27 @@ export function QualityPlansView() {
         onEdit={(plan) => { openEditPlan(plan); }}
       />
 
-      {/* Create / Edit Plan Dialog */}
-      <AnimatePresence>
-        {planFormOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-background border rounded-xl shadow-2xl w-full max-w-lg"
+      {/* Create / Edit Plan — inline form */}
+      <InlineFormPanel
+        open={planFormOpen}
+        onClose={() => { setPlanFormOpen(false); setEditPlan(null); }}
+        icon={ClipboardList}
+        title={editPlan ? 'Edit Quality Plan' : 'New Quality Plan'}
+        description="Quality test specification"
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => { setPlanFormOpen(false); setEditPlan(null); }}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!planForm.code || !planForm.name || !planForm.type || createMutation.isPending || updateMutation.isPending}
+              onClick={handleSavePlan}
             >
-              <div className="p-5 border-b flex items-center justify-between">
-                <div>
-                  <h2 className="font-semibold text-sm">{editPlan ? 'Edit Quality Plan' : 'New Quality Plan'}</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Quality test specification</p>
-                </div>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setPlanFormOpen(false); setEditPlan(null); }}>
-                  <X size={14} />
-                </Button>
-              </div>
-              <div className="p-5 flex flex-col gap-4">
+              {createMutation.isPending || updateMutation.isPending ? 'Saving...' : editPlan ? 'Save Changes' : 'Create Plan'}
+            </Button>
+          </>
+        )}
+      >
+              <div className="flex flex-col gap-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
                     <Label>Plan Code *</Label>
@@ -341,20 +347,7 @@ export function QualityPlansView() {
                   </div>
                 )}
               </div>
-              <div className="p-5 border-t flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => { setPlanFormOpen(false); setEditPlan(null); }}>Cancel</Button>
-                <Button
-                  size="sm"
-                  disabled={!planForm.code || !planForm.name || !planForm.type || createMutation.isPending || updateMutation.isPending}
-                  onClick={handleSavePlan}
-                >
-                  {createMutation.isPending || updateMutation.isPending ? 'Saving...' : editPlan ? 'Save Changes' : 'Create Plan'}
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      </InlineFormPanel>
 
       {/* Delete confirm */}
       <AnimatePresence>

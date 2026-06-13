@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { EntityPicker } from '@/components/ui/entity-picker';
 import { useScope } from '@/hooks/use-scope';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -232,16 +233,22 @@ function POFormDialog({ open, onClose, initial }: POFormDialogProps) {
   const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
 
   return (
-    <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ClipboardList className="w-4 h-4 text-brand-400" />
-            {isEdit ? `Edit ${initial?.orderNumber}` : 'New Production Order'}
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="grid grid-cols-2 gap-4 py-2">
+    <InlineFormPanel
+      open={open}
+      onClose={onClose}
+      icon={ClipboardList}
+      title={isEdit ? `Edit ${initial?.orderNumber}` : 'New Production Order'}
+      description={isEdit ? 'Update production order details.' : 'Create a new production order for shop-floor execution.'}
+      footer={(
+        <>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={mut.isPending}>
+            {mut.isPending ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Production Order'}
+          </Button>
+        </>
+      )}
+    >
+        <div className="grid grid-cols-2 gap-4">
           {!isEdit && (
             <>
               <div className="space-y-1.5">
@@ -319,15 +326,7 @@ function POFormDialog({ open, onClose, initial }: POFormDialogProps) {
             <Textarea placeholder="Optional notes…" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} />
           </div>
         </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={mut.isPending}>
-            {mut.isPending ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Production Order'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </InlineFormPanel>
   );
 }
 
@@ -439,13 +438,20 @@ function CreateWODialog({ po, open, onClose }: CreateWODialogProps) {
   const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
 
   return (
-    <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Manual Work Order — {po.orderNumber}</DialogTitle>
-          <DialogDescription>{po.sku?.name} · Target: {po.targetQty.toLocaleString()} {po.unit}</DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-4 py-2">
+    <InlineFormPanel
+      open={open}
+      onClose={onClose}
+      icon={ClipboardList}
+      title={`Manual Work Order — ${po.orderNumber}`}
+      description={`${po.sku?.name} · Target: ${po.targetQty.toLocaleString()} ${po.unit}`}
+      footer={(
+        <>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={mut.isPending}>{mut.isPending ? 'Creating…' : 'Create Work Order'}</Button>
+        </>
+      )}
+    >
+        <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label>Planned Qty *</Label>
             <Input type="number" min={1} value={form.plannedQty} onChange={e => set('plannedQty', e.target.value)} />
@@ -470,12 +476,7 @@ function CreateWODialog({ po, open, onClose }: CreateWODialogProps) {
             <Input placeholder="Optional…" value={form.notes} onChange={e => set('notes', e.target.value)} />
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={mut.isPending}>{mut.isPending ? 'Creating…' : 'Create Work Order'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </InlineFormPanel>
   );
 }
 
@@ -1180,6 +1181,8 @@ export function ProductionOrdersView() {
           <Button size="sm" onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5 mr-1.5" />New Production Order</Button>
         </div>
       </div>
+
+      <InlineFormSlot />
 
       {/* Flow banner */}
       <div className="glass-card rounded-xl p-4 border border-brand-500/20">

@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { KPICard } from '@/components/widgets/kpi-card';
 import { TablePagination } from '@/components/ui/table-pagination';
@@ -132,6 +133,8 @@ export function IotDevicesView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-5">
+        <InlineFormSlot />
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KPICard title="Total Devices" value={(kpis as any)?.total ?? 0} isLoading={isLoading} />
           <KPICard title="Online" value={(kpis as any)?.online ?? 0} colorMode="default" isLoading={isLoading} />

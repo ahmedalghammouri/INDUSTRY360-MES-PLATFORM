@@ -235,7 +235,7 @@ export default function ProductionKpiView() {
     queryFn: () => api.get<{ data: OeeRecord[]; total: number }>('/production/oee-records', { params: { limit: 365, ...filter, dateFrom, dateTo } }),
     refetchInterval: 60_000,
   });
-  const oeeRecords = oeeRecordsResp?.data ?? [];
+  const oeeRecords = Array.isArray(oeeRecordsResp?.data) ? oeeRecordsResp.data : [];
 
   const { data: workOrdersResp, isLoading: woLoading } = useQuery({
     queryKey: ['production', 'work-orders', 200, key],

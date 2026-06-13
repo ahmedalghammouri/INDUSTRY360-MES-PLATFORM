@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { KPICard } from '@/components/widgets/kpi-card';
 import { TablePagination } from '@/components/ui/table-pagination';
@@ -183,6 +184,8 @@ export function MaintenanceSparePartsView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-5">
+        <InlineFormSlot />
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KPICard title="Total Parts" value={(kpis as any)?.total ?? 0} isLoading={isLoading} />
           <KPICard title="Low Stock" value={(kpis as any)?.lowStock ?? 0} colorMode="alarm" isLoading={isLoading} />

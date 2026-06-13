@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { EntityPicker } from '@/components/ui/entity-picker';
 import { toast } from '@/components/ui/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuTrigger, DropdownMenuSeparator,
@@ -292,6 +293,8 @@ export function HierarchyView() {
         </Button>
       </div>
 
+      <InlineFormSlot />
+
       {/* Tree */}
       <div className="glass-card rounded-xl p-4">
         <div className="flex items-center justify-between mb-4">
@@ -328,22 +331,31 @@ export function HierarchyView() {
         )}
       </div>
 
-      {/* Create / Edit Dialog */}
-      <Dialog open={formOpen} onOpenChange={open => { if (!open) { setFormOpen(false); setEditNode(null); } }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Settings className="w-4 h-4 text-brand-400" />
-              {editNode ? `Edit ${nodeTypeLabel(editNode.type as NodeType)}` : 'Add Hierarchy Node'}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              {editNode
-                ? `Update the details for "${editNode.name}".`
-                : 'Add an Area, Production Line, or Machine to your plant hierarchy.'}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-1">
+      {/* Create / Edit — inline form */}
+      <InlineFormPanel
+        open={formOpen}
+        onClose={() => { setFormOpen(false); setEditNode(null); }}
+        icon={Settings}
+        title={editNode ? `Edit ${nodeTypeLabel(editNode.type as NodeType)}` : 'Add Hierarchy Node'}
+        description={editNode
+          ? `Update the details for "${editNode.name}".`
+          : 'Add an Area, Production Line, or Machine to your plant hierarchy.'}
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => { setFormOpen(false); setEditNode(null); }}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!isValid || createMutation.isPending || updateMutation.isPending}
+              onClick={handleSubmit}
+            >
+              {createMutation.isPending || updateMutation.isPending
+                ? (editNode ? 'Saving...' : 'Creating...')
+                : (editNode ? 'Save Changes' : 'Create Node')}
+            </Button>
+          </>
+        )}
+      >
+          <div className="space-y-4">
             {/* Node Type — only when creating */}
             {!editNode && (
               <div className="space-y-1.5">
@@ -506,20 +518,7 @@ export function HierarchyView() {
             )}
           </div>
 
-          <DialogFooter className="gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => { setFormOpen(false); setEditNode(null); }}>Cancel</Button>
-            <Button
-              size="sm"
-              disabled={!isValid || createMutation.isPending || updateMutation.isPending}
-              onClick={handleSubmit}
-            >
-              {createMutation.isPending || updateMutation.isPending
-                ? (editNode ? 'Saving...' : 'Creating...')
-                : (editNode ? 'Save Changes' : 'Create Node')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
 
       {/* Delete Confirmation */}
       <Dialog open={!!deleteNode} onOpenChange={open => !open && setDeleteNode(null)}>

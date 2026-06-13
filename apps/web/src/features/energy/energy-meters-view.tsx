@@ -15,6 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 
 interface EnergyMeter {
   id: string;
@@ -153,6 +154,8 @@ export function EnergyMetersView() {
         </Button>
       </div>
 
+      <InlineFormSlot />
+
       {isLoading ? (
         <div className="space-y-4">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -264,25 +267,16 @@ export function EnergyMetersView() {
         })
       )}
 
-      {/* Add reading modal */}
+      {/* Add reading — inline form */}
       {showReadingForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="glass-card rounded-xl p-6 w-full max-w-sm space-y-4"
-          >
-            <h3 className="font-semibold">Add Reading — {showReadingForm.name}</h3>
-            <p className="text-xs text-muted-foreground">Enter current meter value in <strong>{showReadingForm.unit}</strong></p>
-            <Input
-              type="number"
-              placeholder={`Value (${showReadingForm.unit})`}
-              value={readingValue}
-              onChange={e => setReadingValue(e.target.value)}
-              className="h-9"
-              autoFocus
-            />
-            <div className="flex gap-2 justify-end">
+        <InlineFormPanel
+          open={!!showReadingForm}
+          onClose={() => setShowReadingForm(null)}
+          icon={Activity}
+          title={`Add Reading — ${showReadingForm.name}`}
+          description={`Enter current meter value in ${showReadingForm.unit}`}
+          footer={(
+            <>
               <Button variant="outline" size="sm" onClick={() => setShowReadingForm(null)}>Cancel</Button>
               <Button
                 size="sm"
@@ -294,16 +288,35 @@ export function EnergyMetersView() {
               >
                 {addReadingMutation.isPending ? 'Saving…' : 'Save'}
               </Button>
-            </div>
-          </motion.div>
-        </div>
+            </>
+          )}
+        >
+            <Input
+              type="number"
+              placeholder={`Value (${showReadingForm.unit})`}
+              value={readingValue}
+              onChange={e => setReadingValue(e.target.value)}
+              className="h-9"
+              autoFocus
+            />
+        </InlineFormPanel>
       )}
 
-      {/* Create/Edit Meter Dialog */}
-      {showMeterForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="glass-card rounded-xl p-6 w-full max-w-md space-y-4">
-            <h3 className="font-semibold text-lg">{editMeter ? 'Edit Meter' : 'Add Energy Meter'}</h3>
+      {/* Create/Edit Meter — inline form */}
+      <InlineFormPanel
+        open={showMeterForm}
+        onClose={() => { setShowMeterForm(false); setEditMeter(null); }}
+        icon={editMeter ? Pencil : Plus}
+        title={editMeter ? 'Edit Meter' : 'Add Energy Meter'}
+        footer={(
+          <>
+            <Button type="button" variant="outline" onClick={() => { setShowMeterForm(false); setEditMeter(null); }}>Cancel</Button>
+            <Button type="button" onClick={handleSubmit(onSubmitMeter)} disabled={createMeterMutation.isPending || updateMeterMutation.isPending}>
+              {createMeterMutation.isPending || updateMeterMutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </>
+        )}
+      >
             <form onSubmit={handleSubmit(onSubmitMeter)} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -343,16 +356,8 @@ export function EnergyMetersView() {
                   <Input {...register('location')} placeholder="Building A" className="mt-1" />
                 </div>
               </div>
-              <div className="flex gap-2 justify-end pt-2">
-                <Button type="button" variant="outline" onClick={() => { setShowMeterForm(false); setEditMeter(null); }}>Cancel</Button>
-                <Button type="submit" disabled={createMeterMutation.isPending || updateMeterMutation.isPending}>
-                  {createMeterMutation.isPending || updateMeterMutation.isPending ? 'Saving...' : 'Save'}
-                </Button>
-              </div>
             </form>
-          </motion.div>
-        </div>
-      )}
+      </InlineFormPanel>
 
       {/* Delete Dialog */}
       {deleteMeter && (

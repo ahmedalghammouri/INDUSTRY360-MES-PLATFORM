@@ -11,9 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { EntityPicker } from '@/components/ui/entity-picker';
 import { Badge } from '@/components/ui/badge';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { cn } from '@/lib/utils';
 import { api } from '@/services/api.client';
 import { useQuery } from '@tanstack/react-query';
@@ -71,11 +69,21 @@ function CtpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><CalendarClock size={18} className="text-primary" /> Capable-to-Promise</DialogTitle>
-        </DialogHeader>
+    <InlineFormPanel
+      open={open}
+      onClose={() => onOpenChange(false)}
+      icon={CalendarClock}
+      title="Capable-to-Promise"
+      description="Check whether a quantity can be delivered by a requested date"
+      footer={(
+        <>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+          <Button onClick={run} disabled={!skuId || loading}>
+            {loading ? <><Loader2 size={15} className="mr-2 animate-spin" /> Checking…</> : 'Check availability'}
+          </Button>
+        </>
+      )}
+    >
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label>Product (SKU)</Label>
@@ -124,14 +132,7 @@ function CtpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
             </div>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-          <Button onClick={run} disabled={!skuId || loading}>
-            {loading ? <><Loader2 size={15} className="mr-2 animate-spin" /> Checking…</> : 'Check availability'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </InlineFormPanel>
   );
 }
 
@@ -345,6 +346,8 @@ export function ApsView() {
           </Button>
         </div>
       </div>
+
+      <InlineFormSlot />
 
       {dirty && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">

@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
@@ -156,6 +157,8 @@ export function UsersView() {
           Add User
         </Button>
       </div>
+
+      <InlineFormSlot />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[

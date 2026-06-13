@@ -14,6 +14,7 @@ import { MachinePicker } from '@/components/ui/machine-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { api } from '@/services/api.client';
 import { cn, formatDate } from '@/lib/utils';
@@ -214,6 +215,8 @@ export function QualityNcrView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
+        <InlineFormSlot />
+
         {/* Summary */}
         <div className="grid grid-cols-4 gap-3">
           <div className="industrial-card p-4">

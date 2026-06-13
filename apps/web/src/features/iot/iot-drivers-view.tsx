@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui/use-toast';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { api } from '@/services/api.client';
 
 export function IotDriversView() {
@@ -99,6 +100,8 @@ export function IotDriversView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
+        <InlineFormSlot className="mb-6 empty:mb-0" />
+
         <div className="industrial-card p-4">
           <h3 className="text-sm font-semibold mb-4">Available Drivers</h3>
 
@@ -175,11 +178,21 @@ export function IotDriversView() {
         </div>
       </div>
 
-      {/* Create/Edit Dialog */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="glass-card rounded-xl p-6 w-full max-w-md space-y-4">
-            <h3 className="font-semibold text-lg">{editDriver ? 'Edit Driver' : 'Add IoT Driver'}</h3>
+      {/* Create/Edit Driver — inline form */}
+      <InlineFormPanel
+        open={showForm}
+        onClose={() => { setShowForm(false); setEditDriver(null); }}
+        icon={editDriver ? Pencil : Plus}
+        title={editDriver ? 'Edit Driver' : 'Add IoT Driver'}
+        footer={(
+          <>
+            <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditDriver(null); }}>Cancel</Button>
+            <Button type="button" onClick={handleSubmit(onSubmit)} disabled={createMutation.isPending || updateMutation.isPending}>
+              {createMutation.isPending || updateMutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </>
+        )}
+      >
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
               <div>
                 <Label>Protocol *</Label>
@@ -193,16 +206,8 @@ export function IotDriversView() {
                 <Label>Description *</Label>
                 <Input {...register('description', { required: true })} placeholder="Modbus TCP/IP driver" className="mt-1" />
               </div>
-              <div className="flex gap-2 justify-end pt-2">
-                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditDriver(null); }}>Cancel</Button>
-                <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
-                  {createMutation.isPending || updateMutation.isPending ? 'Saving...' : 'Save'}
-                </Button>
-              </div>
             </form>
-          </div>
-        </div>
-      )}
+      </InlineFormPanel>
 
       {/* Delete Dialog */}
       {deleteDriver && (

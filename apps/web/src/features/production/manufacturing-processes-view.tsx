@@ -19,6 +19,7 @@ import { EntityPicker } from '@/components/ui/entity-picker';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { useSortedData } from '@/lib/use-sorted-data';
 import { MachinePicker } from '@/components/ui/machine-picker';
 import { useProductMasterData } from '@/components/ui/master-data-select';
@@ -692,21 +693,21 @@ function ProcessForm({
     }));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-background border rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
-      >
-        <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-background z-10">
-          <h2 className="font-semibold text-base">{title}</h2>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onCancel}>
-            <X size={14} />
+    <InlineFormPanel
+      open
+      onClose={onCancel}
+      icon={Workflow}
+      title={title}
+      footer={(
+        <>
+          <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
+          <Button size="sm" onClick={onSubmit} disabled={isPending || !canSubmit}>
+            {isPending ? 'Saving...' : submitLabel}
           </Button>
-        </div>
-
-        <div className="p-5 flex flex-col gap-5">
+        </>
+      )}
+    >
+        <div className="flex flex-col gap-5">
           {/* Scope — which products this routing applies to */}
           <div className="flex flex-col gap-2">
             <Label>Applies To *</Label>
@@ -1159,15 +1160,7 @@ function ProcessForm({
             </div>
           )}
         </div>
-
-        <div className="p-5 border-t flex items-center justify-end gap-2 sticky bottom-0 bg-background">
-          <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
-          <Button size="sm" onClick={onSubmit} disabled={isPending || !canSubmit}>
-            {isPending ? 'Saving...' : submitLabel}
-          </Button>
-        </div>
-      </motion.div>
-    </div>
+    </InlineFormPanel>
   );
 }
 
@@ -1400,6 +1393,8 @@ export function ManufacturingProcessesView() {
           <span className="text-orange-400 font-mono font-bold">SF</span> rare constraint.
         </span>
       </div>
+
+      <InlineFormSlot />
 
       {/* Search */}
       <div className="relative w-72">

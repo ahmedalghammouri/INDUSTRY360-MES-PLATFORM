@@ -19,6 +19,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
 import { cn } from '@/lib/utils';
 import { TablePagination } from '@/components/ui/table-pagination';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { SortableHeader } from '@/components/ui/sortable-header';
 import { useSortedData } from '@/lib/use-sorted-data';
 
@@ -302,6 +303,8 @@ export function ProductionRecipesView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-5">
+        <InlineFormSlot />
+
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {(Object.entries(STATUS) as [RecipeStatus, (typeof STATUS)[RecipeStatus]][]).map(([s, cfg], i) => (
@@ -410,23 +413,26 @@ export function ProductionRecipesView() {
         <TablePagination page={page} total={total} limit={20} onPageChange={setPage} />
       </div>
 
-      {/* Create Recipe Dialog */}
-      <AnimatePresence>
-        {createOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-background border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+      {/* Create Recipe — inline form */}
+      <InlineFormPanel
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        icon={BookOpen}
+        title="Create Recipe"
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              onClick={handleCreate}
+              disabled={createMut.isPending || !form.skuId || !form.code || !form.name}
             >
-              <div className="p-5 border-b flex items-center justify-between">
-                <h2 className="font-semibold text-base">Create Recipe</h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCreateOpen(false)}>
-                  <X size={14} />
-                </Button>
-              </div>
-              <div className="p-5 grid grid-cols-2 gap-4">
+              {createMut.isPending ? 'Creating...' : 'Create Recipe'}
+            </Button>
+          </>
+        )}
+      >
+              <div className="grid grid-cols-2 gap-4">
                 {/* SKU */}
                 <div className="col-span-2 flex flex-col gap-1.5">
                   <Label>Product (SKU) *</Label>
@@ -519,38 +525,29 @@ export function ProductionRecipesView() {
                   <Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Additional notes..." className="h-8 text-sm" />
                 </div>
               </div>
-              <div className="p-5 border-t flex items-center justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
-                <Button
-                  size="sm"
-                  onClick={handleCreate}
-                  disabled={createMut.isPending || !form.skuId || !form.code || !form.name}
-                >
-                  {createMut.isPending ? 'Creating...' : 'Create Recipe'}
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      </InlineFormPanel>
 
-      {/* Add Ingredient Dialog */}
-      <AnimatePresence>
-        {ingTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-background border rounded-xl shadow-2xl w-full max-w-lg"
-            >
-              <div className="p-5 border-b flex items-center justify-between">
-                <h2 className="font-semibold text-base">Add Ingredient</h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setIngTarget(null)}>
-                  <X size={14} />
-                </Button>
-              </div>
-              <div className="p-5 grid grid-cols-2 gap-4">
+      {/* Add Ingredient — inline form */}
+      {ingTarget && (
+        <InlineFormPanel
+          open={!!ingTarget}
+          onClose={() => setIngTarget(null)}
+          icon={Plus}
+          title="Add Ingredient"
+          footer={(
+            <>
+              <Button variant="outline" size="sm" onClick={() => setIngTarget(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={handleAddIngredient}
+                disabled={addIngMut.isPending || !ingForm.rawMaterialId || !ingForm.quantityPer || !ingForm.unit}
+              >
+                {addIngMut.isPending ? 'Adding...' : 'Add Ingredient'}
+              </Button>
+            </>
+          )}
+        >
+              <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2 flex flex-col gap-1.5">
                   <Label>Raw Material *</Label>
                   <EntityPicker
@@ -608,38 +605,30 @@ export function ProductionRecipesView() {
                   </Select>
                 </div>
               </div>
-              <div className="p-5 border-t flex items-center justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setIngTarget(null)}>Cancel</Button>
-                <Button
-                  size="sm"
-                  onClick={handleAddIngredient}
-                  disabled={addIngMut.isPending || !ingForm.rawMaterialId || !ingForm.quantityPer || !ingForm.unit}
-                >
-                  {addIngMut.isPending ? 'Adding...' : 'Add Ingredient'}
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+        </InlineFormPanel>
+      )}
 
-      {/* Clone Dialog */}
-      <AnimatePresence>
-        {cloneTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-background border rounded-xl shadow-xl w-full max-w-sm"
-            >
-              <div className="p-5 border-b flex items-center justify-between">
-                <h2 className="font-semibold text-base">Clone Recipe</h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCloneTarget(null)}>
-                  <X size={14} />
-                </Button>
-              </div>
-              <div className="p-5 flex flex-col gap-4">
+      {/* Clone Recipe — inline form */}
+      {cloneTarget && (
+        <InlineFormPanel
+          open={!!cloneTarget}
+          onClose={() => setCloneTarget(null)}
+          icon={Copy}
+          title="Clone Recipe"
+          footer={(
+            <>
+              <Button variant="outline" size="sm" onClick={() => setCloneTarget(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={() => cloneMut.mutate({ id: cloneTarget.id, version: cloneVersion })}
+                disabled={cloneMut.isPending || !cloneVersion.trim()}
+              >
+                {cloneMut.isPending ? 'Cloning...' : 'Clone'}
+              </Button>
+            </>
+          )}
+        >
+              <div className="flex flex-col gap-4">
                 <p className="text-sm text-muted-foreground">
                   Cloning <strong className="text-foreground">{cloneTarget.name}</strong> will create a new DRAFT recipe with all ingredients copied.
                 </p>
@@ -654,20 +643,8 @@ export function ProductionRecipesView() {
                   />
                 </div>
               </div>
-              <div className="p-5 border-t flex items-center justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setCloneTarget(null)}>Cancel</Button>
-                <Button
-                  size="sm"
-                  onClick={() => cloneMut.mutate({ id: cloneTarget.id, version: cloneVersion })}
-                  disabled={cloneMut.isPending || !cloneVersion.trim()}
-                >
-                  {cloneMut.isPending ? 'Cloning...' : 'Clone'}
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+        </InlineFormPanel>
+      )}
     </div>
   );
 }

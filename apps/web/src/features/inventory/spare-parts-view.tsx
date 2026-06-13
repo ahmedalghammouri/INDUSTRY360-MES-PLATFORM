@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityPicker } from '@/components/ui/entity-picker';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
@@ -179,6 +179,8 @@ export function SparePartsView() {
         </Button>
       </div>
 
+      <InlineFormSlot />
+
       {/* Table */}
       <div className="glass-card rounded-xl overflow-hidden">
         <div className="overflow-auto">
@@ -329,11 +331,41 @@ export function SparePartsView() {
         </div>
       )}
 
-      {/* Edit Spare Part Dialog */}
-      <Dialog open={!!editTarget} onOpenChange={open => { if (!open) setEditTarget(null); }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle className="text-sm">Edit Spare Part</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2 max-h-[400px] overflow-y-auto">
+      {/* Edit Spare Part — inline form */}
+      <InlineFormPanel
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        title="Edit Spare Part"
+        description={editTarget?.name}
+        icon={Edit3}
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => setEditTarget(null)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!createForm.name || !createForm.minStockQty || updateMutation.isPending}
+              onClick={() => editTarget && updateMutation.mutate({
+                id: editTarget.id,
+                dto: {
+                  name: createForm.name,
+                  description: createForm.description || null,
+                  category: createForm.category || null,
+                  manufacturer: createForm.manufacturer || null,
+                  supplier: createForm.supplier || null,
+                  unitCost: createForm.unitCost ? parseFloat(createForm.unitCost) : null,
+                  minStockQty: parseInt(createForm.minStockQty),
+                  maxStockQty: createForm.maxStockQty ? parseInt(createForm.maxStockQty) : null,
+                  storageLocationId: createForm.storageLocationId || null,
+                  binNumber: createForm.binNumber || null,
+                },
+              })}
+            >
+              {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </>
+        )}
+      >
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Part Number</Label>
               <Input value={createForm.partNumber} disabled className="h-9 mt-1 opacity-60" />
@@ -389,38 +421,38 @@ export function SparePartsView() {
               <Input value={createForm.binNumber} onChange={e => setCreateForm(v => ({ ...v, binNumber: e.target.value }))} className="h-9 mt-1" />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setEditTarget(null)}>Cancel</Button>
-            <Button
-              size="sm"
-              disabled={!createForm.name || !createForm.minStockQty || updateMutation.isPending}
-              onClick={() => editTarget && updateMutation.mutate({
-                id: editTarget.id,
-                dto: {
-                  name: createForm.name,
-                  description: createForm.description || null,
-                  category: createForm.category || null,
-                  manufacturer: createForm.manufacturer || null,
-                  supplier: createForm.supplier || null,
-                  unitCost: createForm.unitCost ? parseFloat(createForm.unitCost) : null,
-                  minStockQty: parseInt(createForm.minStockQty),
-                  maxStockQty: createForm.maxStockQty ? parseInt(createForm.maxStockQty) : null,
-                  storageLocationId: createForm.storageLocationId || null,
-                  binNumber: createForm.binNumber || null,
-                },
-              })}
-            >
-              {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
 
-      {/* Create Spare Part Dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle className="text-sm">Create New Spare Part</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2 max-h-[400px] overflow-y-auto">
+      {/* Create Spare Part — inline form */}
+      <InlineFormPanel
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Create New Spare Part"
+        description="Add a new spare part to inventory"
+        icon={Plus}
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button size="sm" disabled={!createForm.partNumber || !createForm.name || !createForm.minStockQty || createMutation.isPending} onClick={() => createMutation.mutate({
+              partNumber: createForm.partNumber,
+              name: createForm.name,
+              description: createForm.description || null,
+              category: createForm.category || null,
+              manufacturer: createForm.manufacturer || null,
+              supplier: createForm.supplier || null,
+              unitCost: createForm.unitCost ? parseFloat(createForm.unitCost) : null,
+              minStockQty: parseInt(createForm.minStockQty),
+              maxStockQty: createForm.maxStockQty ? parseInt(createForm.maxStockQty) : null,
+              storageLocationId: createForm.storageLocationId || null,
+              binNumber: createForm.binNumber || null,
+              stockQty: 0,
+            })}>
+              {createMutation.isPending ? 'Creating...' : 'Create Part'}
+            </Button>
+          </>
+        )}
+      >
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Part Number*</Label>
               <Input value={createForm.partNumber} onChange={e => setCreateForm(v => ({ ...v, partNumber: e.target.value }))} className="h-9 mt-1" />
@@ -476,27 +508,7 @@ export function SparePartsView() {
               <Input value={createForm.binNumber} onChange={e => setCreateForm(v => ({ ...v, binNumber: e.target.value }))} className="h-9 mt-1" />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button size="sm" disabled={!createForm.partNumber || !createForm.name || !createForm.minStockQty || createMutation.isPending} onClick={() => createMutation.mutate({
-              partNumber: createForm.partNumber,
-              name: createForm.name,
-              description: createForm.description || null,
-              category: createForm.category || null,
-              manufacturer: createForm.manufacturer || null,
-              supplier: createForm.supplier || null,
-              unitCost: createForm.unitCost ? parseFloat(createForm.unitCost) : null,
-              minStockQty: parseInt(createForm.minStockQty),
-              maxStockQty: createForm.maxStockQty ? parseInt(createForm.maxStockQty) : null,
-              storageLocationId: createForm.storageLocationId || null,
-              binNumber: createForm.binNumber || null,
-              stockQty: 0,
-            })}>
-              {createMutation.isPending ? 'Creating...' : 'Create Part'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
 
       <DeleteDialog
         open={!!deleteDialog}

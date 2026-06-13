@@ -33,9 +33,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -319,18 +319,36 @@ export default function PlmChangeRequestsView() {
           </div>
         </div>
 
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" />
-              New Change Request
+        <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+          <Plus className="h-4 w-4" />
+          New Change Request
+        </Button>
+      </div>
+
+      <InlineFormSlot />
+
+      {/* Submit New Change Request — inline form */}
+      <InlineFormPanel
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        icon={Plus}
+        title="Submit New Change Request"
+        description="PLM — request a product or process change"
+        footer={(
+          <>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+              Cancel
             </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Submit New Change Request</DialogTitle>
-            </DialogHeader>
-            <div className="mt-2 space-y-4">
+            <Button
+              onClick={handleCreate}
+              disabled={!form.title || !form.targetDate || !form.reason || createMut.isPending}
+            >
+              {createMut.isPending ? 'Submitting…' : 'Submit for Review'}
+            </Button>
+          </>
+        )}
+      >
+            <div className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Title *</label>
                 <input
@@ -405,20 +423,7 @@ export default function PlmChangeRequestsView() {
                 />
               </div>
             </div>
-            <DialogFooter className="mt-4">
-              <Button variant="outline" onClick={() => setCreateOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleCreate}
-                disabled={!form.title || !form.targetDate || !form.reason || createMut.isPending}
-              >
-                {createMut.isPending ? 'Submitting…' : 'Submit for Review'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+      </InlineFormPanel>
 
       {/* ── KPI Row ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

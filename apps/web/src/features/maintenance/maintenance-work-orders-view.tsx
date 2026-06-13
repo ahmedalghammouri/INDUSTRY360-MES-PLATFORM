@@ -17,6 +17,7 @@ import { EntityPicker } from '@/components/ui/entity-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { TableRowActions } from '@/components/ui/table-row-actions';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
@@ -427,6 +428,8 @@ export function MaintenanceWorkOrdersView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
+        <InlineFormSlot />
+
         {/* Summary cards */}
         <div className="grid grid-cols-3 gap-3">
           {SUMMARY_CARDS.map(({ label, key, icon: Icon, color }) => (
@@ -573,20 +576,30 @@ export function MaintenanceWorkOrdersView() {
         </div>
       </div>
 
-      {/* ── Create / Edit Dialog ─────────────────────────────── */}
-      <Dialog open={formOpen} onOpenChange={o => !o && handleCloseForm()}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
-          <DialogHeader className="px-6 pt-5 pb-4 border-b border-border/50 shrink-0">
-            <DialogTitle className="text-sm flex items-center gap-2">
-              <Wrench size={14} className="text-brand-400" />
-              {editWO ? `Edit — ${editWO.woNumber}` : 'Create Maintenance Order'}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              {editWO ? 'Update maintenance order details.' : 'Fill in the details and optionally pre-request spare parts from inventory.'}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+      {/* ── Create / Edit — inline form ──────────────────────── */}
+      <InlineFormPanel
+        open={formOpen}
+        onClose={handleCloseForm}
+        icon={Wrench}
+        title={editWO ? `Edit — ${editWO.woNumber}` : 'Create Maintenance Order'}
+        description={editWO ? 'Update maintenance order details.' : 'Fill in the details and optionally pre-request spare parts from inventory.'}
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={handleCloseForm}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!isValid || createMutation.isPending || updateMutation.isPending}
+              onClick={handleSubmit}
+            >
+              {createMutation.isPending || updateMutation.isPending
+                ? (editWO ? 'Saving…' : 'Creating…')
+                : (editWO ? 'Save Changes' : 'Create Maintenance Order')
+              }
+            </Button>
+          </>
+        )}
+      >
+          <div className="space-y-5">
             {/* Core fields */}
             <div>
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Maintenance Order Details</p>
@@ -797,22 +810,7 @@ export function MaintenanceWorkOrdersView() {
               </div>
             )}
           </div>
-
-          <DialogFooter className="px-6 py-4 border-t border-border/50 shrink-0 gap-2">
-            <Button variant="outline" size="sm" onClick={handleCloseForm}>Cancel</Button>
-            <Button
-              size="sm"
-              disabled={!isValid || createMutation.isPending || updateMutation.isPending}
-              onClick={handleSubmit}
-            >
-              {createMutation.isPending || updateMutation.isPending
-                ? (editWO ? 'Saving…' : 'Creating…')
-                : (editWO ? 'Save Changes' : 'Create Maintenance Order')
-              }
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
 
       {/* ── MO Detail Sheet ──────────────────────────────────── */}
       <Sheet open={!!viewWO} onOpenChange={o => !o && setViewWO(null)}>

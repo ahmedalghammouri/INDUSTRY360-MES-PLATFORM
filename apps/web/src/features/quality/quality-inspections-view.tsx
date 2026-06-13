@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityPicker } from '@/components/ui/entity-picker';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { DeleteDialog } from '@/components/ui/delete-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/services/api.client';
@@ -262,6 +263,8 @@ export function QualityInspectionsView() {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
+        <InlineFormSlot />
+
         {/* Summary cards */}
         <div className="grid grid-cols-4 gap-3">
           <div className="industrial-card p-4">

@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityPicker } from '@/components/ui/entity-picker';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { InlineFormPanel, InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { api } from '@/services/api.client';
@@ -358,6 +358,8 @@ export function ProductsView() {
         <Input placeholder="Brand…" value={brand} onChange={e => setBrand(e.target.value)} className="h-9 w-32" />
       </div>
 
+      <InlineFormSlot />
+
       <div className="glass-card rounded-xl overflow-hidden">
         <div className="overflow-auto">
           <table className="w-full text-sm">
@@ -403,11 +405,23 @@ export function ProductsView() {
         )}
       </div>
 
-      {/* Create Product Dialog */}
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader><DialogTitle className="text-sm">Create New Product</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2 max-h-[70vh] overflow-y-auto pr-1">
+      {/* Create Product — inline form */}
+      <InlineFormPanel
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        title="Create New Product"
+        description="Add a new SKU to the catalog"
+        icon={Plus}
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => setFormOpen(false)}>Cancel</Button>
+            <Button size="sm" disabled={!formData.code || !formData.name || !formData.itemNumber || createMutation.isPending} onClick={handleCreate}>
+              {createMutation.isPending ? 'Creating...' : 'Create Product'}
+            </Button>
+          </>
+        )}
+      >
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Product Code *</Label>
               <Input value={formData.code} onChange={e => setFormData(v => ({ ...v, code: e.target.value }))} className="h-9 mt-1" />
@@ -542,20 +556,51 @@ export function ProductsView() {
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setFormOpen(false)}>Cancel</Button>
-            <Button size="sm" disabled={!formData.code || !formData.name || !formData.itemNumber || createMutation.isPending} onClick={handleCreate}>
-              {createMutation.isPending ? 'Creating...' : 'Create Product'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
 
-      {/* Edit Product Dialog */}
-      <Dialog open={!!editTarget} onOpenChange={open => { if (!open) setEditTarget(null); }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle className="text-sm">Edit Product</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2 max-h-[70vh] overflow-y-auto pr-1">
+      {/* Edit Product — inline form */}
+      <InlineFormPanel
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        title="Edit Product"
+        description={editTarget?.name}
+        icon={Edit3}
+        footer={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => setEditTarget(null)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!editForm.name || updateMutation.isPending}
+              onClick={() => editTarget && updateMutation.mutate({
+                id: editTarget.id,
+                dto: {
+                  name: editForm.name,
+                  nameAr: editForm.nameAr || null,
+                  shortName: editForm.shortName || null,
+                  unitsPerInner: editForm.unitsPerInner ? parseInt(editForm.unitsPerInner) : 1,
+                  innersPerCarton: editForm.innersPerCarton ? parseInt(editForm.innersPerCarton) : 1,
+                  cartonsPerPallet: editForm.cartonsPerPallet ? parseInt(editForm.cartonsPerPallet) : 1,
+                  categoryId: editForm.categoryId || null,
+                  brandId: editForm.brandId || null,
+                  packagingTypeId: editForm.packagingTypeId || null,
+                  baseUnitId: editForm.baseUnitId || null,
+                  baseWeightId: editForm.baseWeightId || null,
+                  storageLocationId: editForm.storageLocationId || null,
+                  weight: editForm.weight ? parseFloat(editForm.weight) : null,
+                  weightUnit: editForm.weightUnit,
+                  length: editForm.length ? parseFloat(editForm.length) : null,
+                  width: editForm.width ? parseFloat(editForm.width) : null,
+                  height: editForm.height ? parseFloat(editForm.height) : null,
+                  dimensionUnit: editForm.dimensionUnit,
+                },
+              })}
+            >
+              {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </>
+        )}
+      >
+          <div className="grid grid-cols-2 gap-3">
             {/* Identity (immutable references) */}
             <div>
               <Label className="text-xs">Product Code</Label>
@@ -690,40 +735,7 @@ export function ProductsView() {
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setEditTarget(null)}>Cancel</Button>
-            <Button
-              size="sm"
-              disabled={!editForm.name || updateMutation.isPending}
-              onClick={() => editTarget && updateMutation.mutate({
-                id: editTarget.id,
-                dto: {
-                  name: editForm.name,
-                  nameAr: editForm.nameAr || null,
-                  shortName: editForm.shortName || null,
-                  unitsPerInner: editForm.unitsPerInner ? parseInt(editForm.unitsPerInner) : 1,
-                  innersPerCarton: editForm.innersPerCarton ? parseInt(editForm.innersPerCarton) : 1,
-                  cartonsPerPallet: editForm.cartonsPerPallet ? parseInt(editForm.cartonsPerPallet) : 1,
-                  categoryId: editForm.categoryId || null,
-                  brandId: editForm.brandId || null,
-                  packagingTypeId: editForm.packagingTypeId || null,
-                  baseUnitId: editForm.baseUnitId || null,
-                  baseWeightId: editForm.baseWeightId || null,
-                  storageLocationId: editForm.storageLocationId || null,
-                  weight: editForm.weight ? parseFloat(editForm.weight) : null,
-                  weightUnit: editForm.weightUnit,
-                  length: editForm.length ? parseFloat(editForm.length) : null,
-                  width: editForm.width ? parseFloat(editForm.width) : null,
-                  height: editForm.height ? parseFloat(editForm.height) : null,
-                  dimensionUnit: editForm.dimensionUnit,
-                },
-              })}
-            >
-              {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </InlineFormPanel>
     </div>
   );
 }

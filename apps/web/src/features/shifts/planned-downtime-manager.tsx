@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { SelectMenu } from '@/components/ui/select-menu';
 import { FormDialog } from '@/components/ui/form-dialog';
+import { InlineFormSlot } from '@/components/ui/inline-form-panel';
 import { TablePagination } from '@/components/ui/table-pagination';
 import {
   usePlannedCauses, usePlannedDowntime, useGeneratePlannedDowntime,
@@ -89,6 +90,8 @@ export function PlannedDowntimeManager() {
 
   return (
     <div className="space-y-4">
+      <InlineFormSlot />
+
       <div className="rounded-xl border border-border/60 bg-card p-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="max-w-xl">
