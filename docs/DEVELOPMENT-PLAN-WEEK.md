@@ -1,5 +1,5 @@
 # STAR-MES — 1-Week Final Sprint (PoC-Aligned)
-**Project:** INDUSTRY360 MES Platform — NCC / SIDCO PoC, Dammam
+**Project:** STAR-MES Platform — NCC / SIDCO PoC, Dammam
 **Sprint:** Mon 2026-06-08 → Mon 2026-06-15 · **Target:** 100% PoC Complete
 **Scope Reference:** PoC Proposal v2 + NCC Prerequisites File
 

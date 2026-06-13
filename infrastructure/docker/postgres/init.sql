@@ -1,4 +1,4 @@
--- INDUSTRY360 MES Platform - PostgreSQL Init Script
+-- STAR-MES Platform - PostgreSQL Init Script
 
 -- Enable useful extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
