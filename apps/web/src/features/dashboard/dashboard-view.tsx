@@ -99,54 +99,66 @@ export function DashboardView() {
           animate="visible"
           className="space-y-5"
         >
-          {/* Quick launch — every workspace, grouped by category with separators */}
+          {/* Quick launch — category cards of every workspace across the platform */}
           <motion.div variants={itemVariants}>
-            <div className="rounded-2xl border border-border/50 bg-card/40 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/50 bg-muted/20">
-                <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-primary/15 flex items-center justify-center">
                   <LayoutGrid size={14} className="text-primary" />
-                  <span className="text-xs font-semibold">Quick Launch</span>
                 </div>
-                <span className="text-[10px] text-muted-foreground hidden sm:block">
-                  Tip: open the dock at the bottom from any page
-                </span>
+                <div>
+                  <h2 className="text-sm font-semibold leading-tight">Quick Launch</h2>
+                  <p className="text-[11px] text-muted-foreground leading-tight">
+                    Every workspace, one click away · or open the dock at the bottom
+                  </p>
+                </div>
               </div>
+              <Badge variant="outline" className="text-[10px] h-5">
+                {QUICK_ACTION_GROUPS.reduce((n, g) => n + g.actions.length, 0)} shortcuts
+              </Badge>
+            </div>
 
-              <div className="divide-y divide-border/40">
-                {QUICK_ACTION_GROUPS.map((group) => {
-                  const GroupIcon = group.icon;
-                  return (
-                    <div key={group.category} className="px-4 py-3">
-                      <div className="flex items-center gap-1.5 mb-2.5">
-                        <GroupIcon size={11} className={group.accent} />
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          {group.category}
-                        </span>
-                        <span className={cn('h-px flex-1 ml-1 bg-gradient-to-r from-border/60 to-transparent')} />
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {QUICK_ACTION_GROUPS.map((group) => {
+                const GroupIcon = group.icon;
+                return (
+                  <div
+                    key={group.category}
+                    className="group/card rounded-2xl border border-border/50 bg-card/40 p-3 hover:border-primary/30 hover:bg-card/60 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <div className={cn('w-6 h-6 rounded-md flex items-center justify-center bg-muted/50')}>
+                        <GroupIcon size={12} className={group.accent} />
                       </div>
-                      <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9 gap-2">
-                        {group.actions.map((a) => {
-                          const Icon = a.icon;
-                          return (
-                            <Link
-                              key={a.href + a.label}
-                              href={a.href}
-                              target={a.newTab ? '_blank' : undefined}
-                              rel={a.newTab ? 'noopener noreferrer' : undefined}
-                              className="flex flex-col items-center justify-center gap-1.5 py-2.5 px-1 rounded-xl border border-border/40 bg-card/60 hover:bg-muted/40 hover:border-primary/40 hover:-translate-y-0.5 transition-all group"
-                            >
-                              <Icon size={17} className={cn('transition-transform group-hover:scale-110', a.tone)} />
-                              <span className="text-[10px] font-medium text-muted-foreground group-hover:text-foreground text-center leading-tight">
-                                {a.label}
-                              </span>
-                            </Link>
-                          );
-                        })}
-                      </div>
+                      <span className="text-xs font-semibold">{group.category}</span>
+                      <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
+                        {group.actions.length}
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {group.actions.map((a) => {
+                        const Icon = a.icon;
+                        return (
+                          <Link
+                            key={a.href + a.label}
+                            href={a.href}
+                            target={a.newTab ? '_blank' : undefined}
+                            rel={a.newTab ? 'noopener noreferrer' : undefined}
+                            className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-lg border border-border/40 bg-background/40 hover:bg-muted/50 hover:border-primary/40 hover:-translate-y-0.5 transition-all group/pill"
+                          >
+                            <span className="w-6 h-6 rounded-md bg-card flex items-center justify-center shrink-0">
+                              <Icon size={13} className={cn('transition-transform group-hover/pill:scale-110', a.tone)} />
+                            </span>
+                            <span className="text-[11px] font-medium text-muted-foreground group-hover/pill:text-foreground whitespace-nowrap">
+                              {a.label}
+                            </span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </motion.div>
 
