@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { ScopePanel } from './scope-panel';
+import { QuickDock } from './quick-dock';
 import { useSidebarStore } from '@/store/ui-store';
 import { NavigationProgress } from '@/components/ui/navigation-progress';
 import { useLiveKpi } from '@/hooks/use-live-kpi';
@@ -52,6 +53,9 @@ export function AppShell({ children }: AppShellProps) {
           </main>
         </div>
       </div>
+
+      {/* Global macOS-style quick-action dock — available on every page */}
+      <QuickDock />
     </div>
   );
 }

@@ -5,27 +5,18 @@ import { motion } from 'framer-motion';
 import {
   RefreshCw,
   LayoutGrid,
-  Filter,
-  Download,
-  Plus,
   Activity,
   AlertTriangle,
   CheckCircle2,
   Zap,
   TrendingUp,
-  TrendingDown,
-  Clock,
-  Settings2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import Link from 'next/link';
-import {
-  SlidersHorizontal, GitCommit, ClipboardList, Layers, Monitor,
-  CalendarRange, CalendarClock, ShieldCheck, Wrench, GitMerge,
-  Workflow, GitBranch, Sparkles, LineChart, Boxes,
-} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { TimeRangeFilter } from '@/components/ui/time-range-filter';
+import { QUICK_ACTION_GROUPS } from '@/lib/quick-actions';
 import { Badge } from '@/components/ui/badge';
 import { KPICard } from '@/components/widgets/kpi-card';
 import { OEEGauge } from '@/components/charts/oee-gauge';
@@ -84,6 +75,9 @@ export function DashboardView() {
             Live
           </div>
 
+          {/* Smart time-range filter — same control used across Performance & KPIs */}
+          <TimeRangeFilter />
+
           <Button variant="ghost" size="sm" className="gap-1.5 h-8 text-xs" onClick={handleRefresh}>
             <RefreshCw size={13} className={cn(isRefreshing && 'animate-spin')} />
             Refresh
@@ -105,40 +99,54 @@ export function DashboardView() {
           animate="visible"
           className="space-y-5"
         >
-          {/* Quick actions — one tap to the most-used screens */}
+          {/* Quick launch — every workspace, grouped by category with separators */}
           <motion.div variants={itemVariants}>
-            <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 xl:grid-cols-12 gap-2">
-              {[
-                { label: 'Control Panel',    href: '/manufacturing/control',          icon: SlidersHorizontal, tone: 'text-primary' },
-                { label: 'New PO',           href: '/production/production-orders',   icon: GitCommit,         tone: 'text-sky-400' },
-                { label: 'Work Orders',      href: '/production/orders',              icon: ClipboardList,     tone: 'text-indigo-400' },
-                { label: 'Dispatch (JO)',    href: '/production/job-orders',          icon: Layers,            tone: 'text-violet-400' },
-                { label: 'Shop Floor',       href: '/shop-floor',                     icon: Monitor,           tone: 'text-emerald-400' },
-                { label: 'Schedule',         href: '/scheduling/production',          icon: CalendarRange,     tone: 'text-cyan-400' },
-                { label: 'Downtime',         href: '/production/downtime',            icon: AlertTriangle,     tone: 'text-red-400' },
-                { label: 'Planned DT',       href: '/scheduling/planned-downtime',    icon: CalendarClock,     tone: 'text-amber-400' },
-                { label: 'Quality',          href: '/quality/inspections',            icon: ShieldCheck,       tone: 'text-green-400' },
-                { label: 'Maintenance',      href: '/maintenance/work-orders',        icon: Wrench,            tone: 'text-orange-400' },
-                { label: 'OEE Analytics',    href: '/production/oee',                 icon: LineChart,         tone: 'text-fuchsia-400' },
-                { label: 'Energy',           href: '/energy',                         icon: Zap,               tone: 'text-yellow-400' },
-                { label: 'Processes',        href: '/production/processes',           icon: Workflow,          tone: 'text-teal-400' },
-                { label: 'BOM',              href: '/inventory/bom',                  icon: GitMerge,          tone: 'text-rose-400' },
-                { label: 'Traceability',     href: '/traceability',                   icon: GitBranch,         tone: 'text-lime-400' },
-                { label: 'Materials',        href: '/inventory/raw-materials',        icon: Boxes,             tone: 'text-blue-400' },
-                { label: 'Reports',          href: '/reports',                        icon: TrendingUp,        tone: 'text-purple-400' },
-                { label: 'AI Insights',      href: '/ai',                             icon: Sparkles,          tone: 'text-pink-400' },
-              ].map(a => (
-                <Link
-                  key={a.href + a.label}
-                  href={a.href}
-                  className="flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border border-border/40 bg-card/60 hover:bg-muted/30 hover:border-primary/40 transition-all group"
-                >
-                  <a.icon size={17} className={cn('transition-transform group-hover:scale-110', a.tone)} />
-                  <span className="text-[10px] font-medium text-muted-foreground group-hover:text-foreground text-center leading-tight px-1">
-                    {a.label}
-                  </span>
-                </Link>
-              ))}
+            <div className="rounded-2xl border border-border/50 bg-card/40 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/50 bg-muted/20">
+                <div className="flex items-center gap-2">
+                  <LayoutGrid size={14} className="text-primary" />
+                  <span className="text-xs font-semibold">Quick Launch</span>
+                </div>
+                <span className="text-[10px] text-muted-foreground hidden sm:block">
+                  Tip: open the dock at the bottom from any page
+                </span>
+              </div>
+
+              <div className="divide-y divide-border/40">
+                {QUICK_ACTION_GROUPS.map((group) => {
+                  const GroupIcon = group.icon;
+                  return (
+                    <div key={group.category} className="px-4 py-3">
+                      <div className="flex items-center gap-1.5 mb-2.5">
+                        <GroupIcon size={11} className={group.accent} />
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {group.category}
+                        </span>
+                        <span className={cn('h-px flex-1 ml-1 bg-gradient-to-r from-border/60 to-transparent')} />
+                      </div>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9 gap-2">
+                        {group.actions.map((a) => {
+                          const Icon = a.icon;
+                          return (
+                            <Link
+                              key={a.href + a.label}
+                              href={a.href}
+                              target={a.newTab ? '_blank' : undefined}
+                              rel={a.newTab ? 'noopener noreferrer' : undefined}
+                              className="flex flex-col items-center justify-center gap-1.5 py-2.5 px-1 rounded-xl border border-border/40 bg-card/60 hover:bg-muted/40 hover:border-primary/40 hover:-translate-y-0.5 transition-all group"
+                            >
+                              <Icon size={17} className={cn('transition-transform group-hover:scale-110', a.tone)} />
+                              <span className="text-[10px] font-medium text-muted-foreground group-hover:text-foreground text-center leading-tight">
+                                {a.label}
+                              </span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </motion.div>
 

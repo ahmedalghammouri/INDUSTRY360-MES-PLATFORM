@@ -27,21 +27,54 @@ export class DashboardService {
     return ms.map((m) => m.id);
   }
 
+  /**
+   * Resolve the requested analysis window. Defaults to "today" (00:00 → now)
+   * when no range is given, and derives an equal-length previous window for trends.
+   */
+  private resolveWindow(range?: { timeframe?: string; dateFrom?: string; dateTo?: string }) {
+    const now = new Date();
+    let from: Date;
+    let to: Date = now;
+
+    if (range?.dateFrom) {
+      from = new Date(`${range.dateFrom}T00:00:00`);
+      if (range.dateTo) {
+        const end = new Date(`${range.dateTo}T23:59:59.999`);
+        to = end < now ? end : now;
+      }
+    } else {
+      from = new Date(now);
+      from.setHours(0, 0, 0, 0); // today / shift
+    }
+    if (isNaN(from.getTime())) {
+      from = new Date(now);
+      from.setHours(0, 0, 0, 0);
+    }
+
+    const spanMs = Math.max(to.getTime() - from.getTime(), 3_600_000);
+    const prevTo = new Date(from.getTime());
+    const prevFrom = new Date(from.getTime() - spanMs);
+    const multiDay = spanMs > 36 * 3_600_000;
+    return { from, to, prevFrom, prevTo, spanMs, multiDay };
+  }
+
   async getOverview(
     factoryId: string | null,
     scope?: { areaId?: string; lineId?: string; machineId?: string },
+    range?: { timeframe?: string; dateFrom?: string; dateTo?: string },
   ) {
     const machineIds = await this.scopeMachineIds(factoryId, scope);
+    const win = this.resolveWindow(range);
     const [kpis, machines, productionStatus, alarms] = await Promise.all([
-      this.getKPIs(factoryId, machineIds),
+      this.getKPIs(factoryId, machineIds, win),
       this.getMachineStatus(factoryId, machineIds),
-      this.getProductionStatus(factoryId, machineIds),
+      this.getProductionStatus(factoryId, machineIds, win),
       this.getActiveAlarms(factoryId),
     ]);
 
     const [productionTrend, downtimePareto, shiftSummary] = await Promise.all([
-      this.getProductionTrend(factoryId),
-      this.getDowntimePareto(factoryId),
+      this.getProductionTrend(factoryId, machineIds, win),
+      this.getDowntimePareto(factoryId, win),
       this.getCurrentShiftSummary(factoryId),
     ]);
 
@@ -56,11 +89,13 @@ export class DashboardService {
     };
   }
 
-  private async getKPIs(factoryId: string | null, machineIds?: string[]) {
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const prevDayStart = new Date(dayStart.getTime() - 86_400_000);
-    const now = new Date();
+  private async getKPIs(
+    factoryId: string | null,
+    machineIds: string[] | undefined,
+    win: ReturnType<DashboardService['resolveWindow']>,
+  ) {
+    const { from, to, prevFrom, prevTo, multiDay } = win;
+    const bucket: 'hour' | 'day' = multiDay ? 'day' : 'hour';
 
     const factoryFilter = factoryId ? { factoryId } : {};
     const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -68,10 +103,10 @@ export class DashboardService {
     // Plant OEE is rolled up from JOB ORDERS (per-machine) via the shared engine —
     // so a routed WO contributes on every machine it ran, and scope works per-machine.
     const [today, prev, activeAlarms, prevAlarms] = await Promise.all([
-      this.kpi.oeeAnalytics(factoryId, dayStart, now, machineIds, 'hour'),
-      this.kpi.oeeAnalytics(factoryId, prevDayStart, dayStart, machineIds, 'hour'),
+      this.kpi.oeeAnalytics(factoryId, from, to, machineIds, bucket),
+      this.kpi.oeeAnalytics(factoryId, prevFrom, prevTo, machineIds, bucket),
       this.prisma.alarmEvent.count({ where: { ...factoryFilter, acknowledgedAt: null, resolvedAt: null } }),
-      this.prisma.alarmEvent.count({ where: { ...factoryFilter, triggeredAt: { gte: prevDayStart, lt: dayStart } } }),
+      this.prisma.alarmEvent.count({ where: { ...factoryFilter, triggeredAt: { gte: prevFrom, lt: prevTo } } }),
     ]);
 
     const hasData = today.totalOutput > 0 && prev.totalOutput > 0;
@@ -129,27 +164,31 @@ export class DashboardService {
     }));
   }
 
-  private async getProductionStatus(factoryId: string | null, machineIds?: string[]) {
+  private async getProductionStatus(
+    factoryId: string | null,
+    machineIds: string[] | undefined,
+    win: ReturnType<DashboardService['resolveWindow']>,
+  ) {
     const factoryFilter = factoryId ? { factoryId } : {};
     const machineScope = machineIds ? { machineId: { in: machineIds } } : {};
     const idScope = machineIds ? { id: { in: machineIds } } : {};
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
+    const { from, to } = win;
 
     const [totalMachines, activeWOs, completedToday, shiftTargets, outputToday] = await Promise.all([
       this.prisma.machine.count({ where: { ...factoryFilter, ...idScope, isActive: true } }),
+      // Running lines/active orders are an instantaneous snapshot (not range-bound)
       this.prisma.workOrder.count({ where: { ...factoryFilter, ...machineScope, status: 'IN_PROGRESS' } }),
       this.prisma.workOrder.count({
-        where: { ...factoryFilter, ...machineScope, status: 'COMPLETED', actualEnd: { gte: dayStart } },
+        where: { ...factoryFilter, ...machineScope, status: 'COMPLETED', actualEnd: { gte: from, lte: to } },
       }),
-      // Planned output = sum of today's shift targets (real shift model)
+      // Planned output = sum of the window's shift targets (real shift model)
       this.prisma.shiftInstance.aggregate({
-        where: { ...factoryFilter, startTime: { gte: dayStart } },
+        where: { ...factoryFilter, startTime: { gte: from, lte: to } },
         _sum: { targetQty: true },
       }),
-      // Actual output = today's recorded OEE output
+      // Actual output = recorded OEE output within the window
       this.prisma.oEERecord.aggregate({
-        where: { ...factoryFilter, ...machineScope, recordDate: { gte: dayStart } },
+        where: { ...factoryFilter, ...machineScope, recordDate: { gte: from, lte: to } },
         _sum: { totalOutput: true },
       }),
     ]);
@@ -214,32 +253,55 @@ export class DashboardService {
     };
   }
 
-  private async getProductionTrend(factoryId: string | null) {
+  private async getProductionTrend(
+    factoryId: string | null,
+    machineIds: string[] | undefined,
+    win: ReturnType<DashboardService['resolveWindow']>,
+  ) {
     const factoryFilter = factoryId ? { factoryId } : {};
-    const hours = Array.from({ length: 12 }, (_, i) => {
-      const d = new Date();
-      d.setHours(d.getHours() - (11 - i), 0, 0, 0);
-      return d;
-    });
+    const machineScope = machineIds ? { machineId: { in: machineIds } } : {};
+    const { from, to, multiDay } = win;
+
+    // Multi-day windows bucket by day; same-day windows bucket by hour.
+    const buckets: { start: Date; label: string }[] = [];
+    if (multiDay) {
+      const d = new Date(from);
+      d.setHours(0, 0, 0, 0);
+      while (d <= to && buckets.length < 60) {
+        buckets.push({ start: new Date(d), label: `${d.getMonth() + 1}/${d.getDate()}` });
+        d.setDate(d.getDate() + 1);
+      }
+    } else {
+      const h = new Date(from);
+      h.setMinutes(0, 0, 0);
+      while (h <= to && buckets.length < 24) {
+        buckets.push({ start: new Date(h), label: `${h.getHours()}:00` });
+        h.setHours(h.getHours() + 1);
+      }
+    }
+
+    const stepMs = multiDay ? 86_400_000 : 3_600_000;
     return Promise.all(
-      hours.map(async (h) => {
-        const next = new Date(h.getTime() + 3_600_000);
+      buckets.map(async (b) => {
+        const next = new Date(b.start.getTime() + stepMs);
         const completed = await this.prisma.workOrder.count({
-          where: { ...factoryFilter, status: 'COMPLETED', actualEnd: { gte: h, lt: next } },
+          where: { ...factoryFilter, ...machineScope, status: 'COMPLETED', actualEnd: { gte: b.start, lt: next } },
         });
-        return { time: `${h.getHours()}:00`, actual: completed, target: 1 };
+        return { time: b.label, actual: completed, target: 1 };
       }),
     );
   }
 
-  private async getDowntimePareto(factoryId: string | null) {
+  private async getDowntimePareto(
+    factoryId: string | null,
+    win: ReturnType<DashboardService['resolveWindow']>,
+  ) {
     const factoryFilter = factoryId ? { factoryId } : {};
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
+    const { from, to } = win;
 
     const events = await this.prisma.downtimeEvent.findMany({
       // Unplanned-loss Pareto only — planned downtime (break/cleaning) is excluded
-      where: { ...factoryFilter, startTime: { gte: dayStart }, durationMinutes: { not: null }, isPlanned: false },
+      where: { ...factoryFilter, startTime: { gte: from, lte: to }, durationMinutes: { not: null }, isPlanned: false },
       select: { category: true, durationMinutes: true },
     });
 

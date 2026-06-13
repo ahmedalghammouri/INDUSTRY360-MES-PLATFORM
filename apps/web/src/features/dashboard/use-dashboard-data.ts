@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/services/api.client';
 import { useRealtimeData } from '@/hooks/use-websocket';
 import { useScope } from '@/hooks/use-scope';
+import { useTimeRange } from '@/hooks/use-time-range';
 
 export interface DashboardKPIs {
   oee: number;
@@ -77,9 +78,11 @@ async function fetchDashboardData(filter: Record<string, string>): Promise<Dashb
 
 export function useDashboardData() {
   const { filter, key } = useScope();
+  const { params: timeParams, key: timeKey } = useTimeRange();
+  const mergedFilter = { ...filter, ...timeParams };
   const query = useQuery({
-    queryKey: ['dashboard', 'overview', key],
-    queryFn: () => fetchDashboardData(filter),
+    queryKey: ['dashboard', 'overview', key, timeKey],
+    queryFn: () => fetchDashboardData(mergedFilter),
     refetchInterval: 30_000,
     staleTime: 15_000,
   });

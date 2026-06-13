@@ -19,13 +19,23 @@ export class DashboardController {
   @ApiQuery({ name: 'areaId', required: false })
   @ApiQuery({ name: 'lineId', required: false })
   @ApiQuery({ name: 'machineId', required: false })
+  @ApiQuery({ name: 'timeframe', required: false, description: 'today | shift | week | month | custom' })
+  @ApiQuery({ name: 'dateFrom', required: false, description: 'ISO date (YYYY-MM-DD)' })
+  @ApiQuery({ name: 'dateTo', required: false, description: 'ISO date (YYYY-MM-DD)' })
   async getOverview(
     @CurrentUser() user: RequestUser,
     @Query('areaId') areaId?: string,
     @Query('lineId') lineId?: string,
     @Query('machineId') machineId?: string,
+    @Query('timeframe') timeframe?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
-    return this.dashboardService.getOverview(user.factoryId, { areaId, lineId, machineId });
+    return this.dashboardService.getOverview(
+      user.factoryId,
+      { areaId, lineId, machineId },
+      { timeframe, dateFrom, dateTo },
+    );
   }
 
   @Get('kpis')
