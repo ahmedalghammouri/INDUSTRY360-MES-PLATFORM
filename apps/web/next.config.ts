@@ -10,6 +10,13 @@ const nextConfig: NextConfig = {
   // .next/standalone and runs `node server.js` (see apps/web/Dockerfile)
   output: 'standalone',
 
+  // Pin the standalone file-tracing root to THIS app so the output is
+  // flat (.next/standalone/server.js). Without this, Next infers the
+  // tracing root from turbopack.root (the monorepo root) and nests the
+  // bundle under .next/standalone/app/server.js, which breaks the
+  // Docker image's `node server.js` entrypoint.
+  outputFileTracingRoot: __dirname,
+
   // Monorepo root so Turbopack resolves cross-package paths
   // (e.g. tailwind content globs to ../../packages/ui) within
   // the filesystem boundary instead of panicking on root escape.

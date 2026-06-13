@@ -33,7 +33,8 @@ RUN pnpm build
 
 # Production
 FROM node:20-alpine AS production
-RUN apk add --no-cache dumb-init
+# dumb-init: PID-1 signal handling | openssl: required by the Prisma query engine
+RUN apk add --no-cache dumb-init openssl
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -45,6 +46,8 @@ COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nestjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nestjs:nodejs /app/package.json ./
+# tsconfig is needed so ts-node can run the master-data seed (prisma/prod-init.js)
+COPY --from=builder --chown=nestjs:nodejs /app/tsconfig*.json ./
 
 RUN mkdir -p logs && chown nestjs:nodejs logs
 
