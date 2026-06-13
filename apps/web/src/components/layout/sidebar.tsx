@@ -14,6 +14,7 @@ import {
   Radio,
   GitBranch,
   Bell,
+  AlarmClock,
   Settings,
   Users,
   ChevronDown,
@@ -210,6 +211,7 @@ const navItems: NavItem[] = [
 
   // ═══════════════ PLANT & CONNECTIVITY ═══════════════
   { section: 'Plant & Connectivity', label: 'Plant & Connectivity' },
+  { label: 'Alarms', href: '/alarms', icon: AlarmClock, dynamicKey: 'activeAlarms', badgeVariant: 'destructive' },
   { label: 'Energy Meters', href: '/energy/meters', icon: Zap },
   {
     label: 'IIoT & Connectivity',
@@ -253,12 +255,13 @@ function useSidebarCounts(): Record<string, number> {
   const { data } = useQuery({
     queryKey: ['sidebar-counts'],
     queryFn: async () => {
-      const [downtime, workOrders, ncr, maintenance, reschedules] = await Promise.all([
+      const [downtime, workOrders, ncr, maintenance, reschedules, alarms] = await Promise.all([
         api.get('/production/downtime/events?isOpen=true&limit=1').catch(() => null),
         api.get('/production/work-orders?status=IN_PROGRESS&limit=1').catch(() => null),
         api.get('/quality/ncr?status=OPEN&limit=1').catch(() => null),
         api.get('/maintenance/work-orders?status=OPEN&limit=1').catch(() => null),
         api.get('/production/reschedule-requests?status=PENDING').catch(() => null),
+        api.get('/alarms/kpis').catch(() => null),
       ]);
       return {
         openDowntime:    (downtime    as any)?.total ?? 0,
@@ -267,12 +270,13 @@ function useSidebarCounts(): Record<string, number> {
         openMaintenance: (maintenance as any)?.total ?? 0,
         // List endpoint returns a plain array → use its length
         pendingReschedules: Array.isArray(reschedules) ? reschedules.length : 0,
+        activeAlarms:    (alarms       as any)?.active ?? 0,
       };
     },
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
-  return data ?? { openDowntime: 0, workOrders: 0, openNcr: 0, openMaintenance: 0, pendingReschedules: 0 };
+  return data ?? { openDowntime: 0, workOrders: 0, openNcr: 0, openMaintenance: 0, pendingReschedules: 0, activeAlarms: 0 };
 }
 
 // ── SidebarItem ─────────────────────────────────────────────────

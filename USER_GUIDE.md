@@ -74,6 +74,7 @@ The `.env` file is already pre-configured for local development — no changes a
 
 **Key variables to review in `.env`:**
 
+
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `DATABASE_URL` | `postgresql://mes_user:mes_password@localhost:5432/star_mes` | Keep as-is for local dev |

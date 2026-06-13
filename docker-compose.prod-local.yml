@@ -204,7 +204,7 @@ services:
       JWT_REFRESH_SECRET: star-mes-refresh-secret-key-change-in-prod-32chars
       JWT_EXPIRES_IN: 8h
       JWT_REFRESH_EXPIRES_IN: 30d
-      CORS_ORIGINS: http://localhost:8080
+      CORS_ORIGINS: http://localhost:8080,http://109.176.199.133:8080
     ports:
       - "3001:3001"
     networks:

@@ -63,8 +63,11 @@ async function bootstrap() {
   // app can be opened by IP from phones/tablets on the factory network. The app
   // is single-origin behind nginx, so reflecting the request origin is safe here.
   const LAN_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+  // Allow the whole star-mes domain family (any subdomain, http/https, any port)
+  // so platform/poc/app.star-mes.com (.sa) work without per-host config churn.
+  const PUBLIC_ORIGIN = /^https?:\/\/([a-z0-9-]+\.)*star-mes\.(com|sa)(:\d+)?$/i;
   const allowOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    if (!origin || LAN_ORIGIN.test(origin) || corsOrigins.includes(origin)) callback(null, true);
+    if (!origin || LAN_ORIGIN.test(origin) || PUBLIC_ORIGIN.test(origin) || corsOrigins.includes(origin)) callback(null, true);
     else callback(new Error(`CORS: origin ${origin} not allowed`));
   };
   void isDev;
