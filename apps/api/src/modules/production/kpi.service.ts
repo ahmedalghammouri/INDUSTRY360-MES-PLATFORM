@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { OEEService, RollupChild } from './oee.service';
+import { toBaseUnits } from '../../common/units.util';
 
 /**
  * KpiService — OEE orchestration & roll-up (Phase 2 of the OEE/KPI engine).
@@ -14,6 +15,7 @@ import { OEEService, RollupChild } from './oee.service';
  * is emitted for real-time clients.
  */
 
+type SkuPkg = { baseUnit?: string | null; unitsPerInner?: number | null; innersPerCarton?: number | null; cartonsPerPallet?: number | null };
 type JoLite = {
   id: string; machineId: string | null; status: string;
   idealCycleTimeSec: number | null;
@@ -21,6 +23,9 @@ type JoLite = {
   plannedStart: Date | null; plannedEnd: Date | null;
   actualStart: Date | null; actualEnd: Date | null;
   sequenceOrder: number;
+  // optional — only the analytics queries enrich these for base-unit-correct output
+  outputUnit?: string | null;
+  workOrder?: { sku?: SkuPkg | null } | null;
 };
 type DtLite = {
   machineId: string; startTime: Date; endTime: Date | null;
@@ -39,6 +44,13 @@ const JO_SELECT = {
 } as const;
 const DT_SELECT = {
   machineId: true, startTime: true, endTime: true, durationMinutes: true, isPlanned: true, affectsOEE: true,
+} as const;
+// Analytics select — adds the step output unit + product packaging so production
+// counts can be normalised to the SKU base unit before aggregating across steps.
+const JO_SELECT_ANALYTICS = {
+  ...JO_SELECT,
+  outputUnit: true,
+  workOrder: { select: { sku: { select: { baseUnit: true, unitsPerInner: true, innersPerCarton: true, cartonsPerPallet: true } } } },
 } as const;
 
 @Injectable()
@@ -225,9 +237,18 @@ export class KpiService {
       : 0;
     const actualSpan = this.spanMin(jo.actualStart, jo.actualEnd);
     const ppt = plannedSpan > 0 ? plannedSpan : actualSpan;
-    const total = (jo.actualQtyGood ?? 0) + (jo.actualQtyRejected ?? 0);
+    const good = jo.actualQtyGood ?? 0;
+    const total = good + (jo.actualQtyRejected ?? 0);
+    // idealRunTime (earned minutes) stays in the step's OWN unit → time is unit-safe,
+    // and the rollup re-derives idealCycleTime = idealRunTime/totalCount so A/P are
+    // unaffected by the unit of totalCount.
     const idealRunTime = (jo.idealCycleTimeSec ? jo.idealCycleTimeSec / 60 : 0) * total;
-    return { ppt: Math.max(0, ppt), runTime: Math.max(0, actualSpan), idealRunTime, totalCount: total, goodCount: jo.actualQtyGood ?? 0 };
+    // Counts are normalised to the product BASE UNIT so summing/quality across steps
+    // (inners + cartons + pallets) is consistent — same principle as the live dashboard.
+    const sku = jo.workOrder?.sku ?? null;
+    const totalCount = sku && jo.outputUnit ? toBaseUnits(total, jo.outputUnit, sku) : total;
+    const goodCount = sku && jo.outputUnit ? toBaseUnits(good, jo.outputUnit, sku) : good;
+    return { ppt: Math.max(0, ppt), runTime: Math.max(0, actualSpan), idealRunTime, totalCount, goodCount };
   }
 
   private nodeFromChildren(id: string, name: string, code: string | null, type: string, children: RollupChild[], childNodes?: unknown[]) {
@@ -278,7 +299,7 @@ export class KpiService {
         ...(machineIds ? { machineId: { in: machineIds } } : {}),
         OR: [{ actualStart: { gte: from, lte: to } }, { actualEnd: { gte: from, lte: to } }],
       },
-      select: { ...JO_SELECT, machine: { select: { id: true, name: true, code: true } } },
+      select: { ...JO_SELECT_ANALYTICS, machine: { select: { id: true, name: true, code: true } } },
     });
 
     const current = this.oee.rollup(jos.map((j) => this.joRollupChild(j as unknown as JoLite)));
@@ -333,7 +354,7 @@ export class KpiService {
         ...(machineIds ? { machineId: { in: machineIds } } : {}),
         OR: [{ actualStart: { gte: from, lte: to } }, { actualEnd: { gte: from, lte: to } }],
       },
-      select: { ...JO_SELECT, machine: { select: { name: true, code: true } } },
+      select: { ...JO_SELECT_ANALYTICS, machine: { select: { name: true, code: true } } },
       orderBy: { actualStart: 'desc' },
       take: limit,
     });
@@ -390,7 +411,7 @@ export class KpiService {
             { actualEnd: { gte: from, lte: to } },
           ],
         },
-        select: JO_SELECT,
+        select: JO_SELECT_ANALYTICS,
       }),
       this.prisma.downtimeEvent.findMany({
         where: { ...factoryFilter, isPlanned: false, affectsOEE: true, startTime: { gte: from, lte: to }, machineId: { in: machineIds } },
