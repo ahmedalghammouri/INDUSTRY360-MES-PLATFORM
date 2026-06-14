@@ -11,6 +11,18 @@ import { AppModule } from './app.module';
 // Load `.env` sitting next to the executable / working dir.
 dotenv.config();
 
+// Edge resilience: a transient sink outage (DB/MQTT/Influx unreachable) must
+// never take the gateway process down — acquisition keeps running and buffers
+// to disk. Log and continue instead of letting Node terminate on an unhandled
+// rejection/exception.
+const resilienceLogger = new Logger('Resilience');
+process.on('unhandledRejection', (reason) => {
+  resilienceLogger.error(`Unhandled rejection (ignored): ${reason instanceof Error ? reason.message : String(reason)}`);
+});
+process.on('uncaughtException', (err) => {
+  resilienceLogger.error(`Uncaught exception (ignored): ${err.message}`);
+});
+
 function resolvePublicDir(): string | null {
   const candidates = [
     join(__dirname, '..', 'public'),

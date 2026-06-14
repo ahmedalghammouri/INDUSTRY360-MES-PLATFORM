@@ -60,8 +60,16 @@ export class IotController {
   async getDevices(
     @CurrentUser() user: RequestUser,
     @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.iotService.getDevices(user.factoryId, { status });
+    return this.iotService.getDevices(user.factoryId, {
+      status,
+      search,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get('devices/:id/status')
@@ -85,8 +93,17 @@ export class IotController {
     @CurrentUser() user: RequestUser,
     @Query('deviceId') deviceId?: string,
     @Query('machineId') machineId?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.iotService.getTags(user.factoryId, { deviceId, machineId });
+    return this.iotService.getTags(user.factoryId, {
+      deviceId,
+      machineId,
+      search,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Post('tags/read')

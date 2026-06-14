@@ -123,17 +123,40 @@ export class IotService {
     };
   }
 
-  async getDevices(factoryId: string | null, filters: { status?: string }) {
-    const factoryFilter = factoryId ? { factoryId } : {};
-    return this.prisma.device.findMany({
-      where: {
-        ...factoryFilter,
-        ...(filters.status && { status: filters.status }),
-        isActive: true,
-      },
-      include: { machine: { select: { name: true, code: true } } },
-      orderBy: { name: 'asc' },
-    });
+  async getDevices(
+    factoryId: string | null,
+    filters: { status?: string; search?: string; page?: number; limit?: number },
+  ) {
+    const page = filters.page ?? 1;
+    const limit = filters.limit ?? 20;
+    const where: any = {
+      ...(factoryId ? { factoryId } : {}),
+      isActive: true,
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.search
+        ? {
+            OR: [
+              { name: { contains: filters.search, mode: 'insensitive' } },
+              { deviceCode: { contains: filters.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+    const [data, total] = await Promise.all([
+      this.prisma.device.findMany({
+        where,
+        include: {
+          machine: { select: { id: true, name: true, code: true } },
+          gateway: { select: { id: true, name: true } },
+          _count: { select: { tagDefinitions: true } },
+        },
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.device.count({ where }),
+    ]);
+    return { data, total, page, limit };
   }
 
   async getDeviceStatus(deviceId: string) {
@@ -159,18 +182,41 @@ export class IotService {
     return { status: 'CONNECTED', timestamp: new Date() };
   }
 
-  async getTags(factoryId: string | null, filters: { deviceId?: string; machineId?: string }) {
-    const factoryFilter = factoryId ? { factoryId } : {};
-    return this.prisma.tagDefinition.findMany({
-      where: {
-        ...factoryFilter,
-        ...(filters.deviceId && { deviceId: filters.deviceId }),
-        ...(filters.machineId && { machineId: filters.machineId }),
-        isActive: true,
-      },
-      include: { currentValue: true },
-      orderBy: { name: 'asc' },
-    });
+  async getTags(
+    factoryId: string | null,
+    filters: { deviceId?: string; machineId?: string; search?: string; page?: number; limit?: number },
+  ) {
+    const page = filters.page ?? 1;
+    const limit = filters.limit ?? 20;
+    const where: any = {
+      ...(factoryId ? { factoryId } : {}),
+      isActive: true,
+      ...(filters.deviceId ? { deviceId: filters.deviceId } : {}),
+      ...(filters.machineId ? { machineId: filters.machineId } : {}),
+      ...(filters.search
+        ? {
+            OR: [
+              { name: { contains: filters.search, mode: 'insensitive' } },
+              { code: { contains: filters.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+    const [data, total] = await Promise.all([
+      this.prisma.tagDefinition.findMany({
+        where,
+        include: {
+          currentValue: true,
+          device: { select: { id: true, name: true } },
+          machine: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.tagDefinition.count({ where }),
+    ]);
+    return { data, total, page, limit };
   }
 
   async getMachineStates(factoryId: string | null) {

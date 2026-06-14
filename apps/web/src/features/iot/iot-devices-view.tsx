@@ -163,9 +163,9 @@ export function IotDevicesView() {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KPICard title="Total Devices" value={(kpis as any)?.total ?? 0} isLoading={isLoading} />
-          <KPICard title="Online" value={(kpis as any)?.online ?? 0} colorMode="default" isLoading={isLoading} />
-          <KPICard title="Offline" value={(kpis as any)?.offline ?? 0} colorMode="alarm" isLoading={isLoading} />
-          <KPICard title="Warnings" value={(kpis as any)?.warnings ?? 0} colorMode="alarm" isLoading={isLoading} />
+          <KPICard title="Connected" value={(kpis as any)?.connected ?? 0} colorMode="default" isLoading={isLoading} />
+          <KPICard title="Disconnected" value={(kpis as any)?.disconnected ?? 0} colorMode="alarm" isLoading={isLoading} />
+          <KPICard title="Errors" value={(kpis as any)?.errored ?? 0} colorMode="alarm" isLoading={isLoading} />
         </div>
 
         <div className="industrial-card p-4">
@@ -193,7 +193,8 @@ export function IotDevicesView() {
                   <TableHead className="text-[11px] font-semibold">Status</TableHead>
                   <TableHead className="text-[11px] font-semibold">Last Seen</TableHead>
                   <TableHead className="text-[11px] font-semibold">Tags</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Location</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Machine</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Gateway</TableHead>
                   <TableHead className="text-[11px] font-semibold">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -201,7 +202,7 @@ export function IotDevicesView() {
                 {isLoading ? (
                   Array.from({ length: 10 }).map((_, i) => (
                     <TableRow key={i} className="border-border/20">
-                      {Array.from({ length: 9 }).map((_, j) => (
+                      {Array.from({ length: 10 }).map((_, j) => (
                         <TableCell key={j}>
                           <div className="shimmer h-3.5 rounded w-20" />
                         </TableCell>
@@ -210,29 +211,30 @@ export function IotDevicesView() {
                   ))
                 ) : deviceList.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                       No devices found
                     </TableCell>
                   </TableRow>
                 ) : (
                   deviceList.map((device: any) => (
                     <TableRow key={device.id} className="border-border/20 hover:bg-muted/20 cursor-pointer">
-                      <TableCell className="font-mono text-xs font-semibold text-primary">{device.deviceId}</TableCell>
+                      <TableCell className="font-mono text-xs font-semibold text-primary">{device.deviceCode}</TableCell>
                       <TableCell className="text-xs font-medium">{device.name}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{device.type}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{device.protocol}</TableCell>
                       <TableCell>
                         <Badge
-                          variant={device.status === 'ONLINE' ? 'default' : 'destructive'}
+                          variant={device.status === 'CONNECTED' ? 'default' : device.status === 'ERROR' ? 'destructive' : 'secondary'}
                           className="text-[10px] h-5 gap-1"
                         >
-                          {device.status === 'ONLINE' ? <Wifi size={10} /> : <WifiOff size={10} />}
+                          {device.status === 'CONNECTED' ? <Wifi size={10} /> : <WifiOff size={10} />}
                           {device.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{formatDate(device.lastSeen)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{device.tagCount} tags</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{device.location}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{device.lastSeenAt ? formatDate(device.lastSeenAt) : '—'}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{device._count?.tagDefinitions ?? 0}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{device.machine?.name ?? '—'}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{device.gateway?.name ?? '—'}</TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>

@@ -188,8 +188,9 @@ export function IotTagsView() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border/30">
-                  <TableHead className="text-[11px] font-semibold">Tag Name</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Tag</TableHead>
                   <TableHead className="text-[11px] font-semibold">Device</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Type / Role</TableHead>
                   <TableHead className="text-[11px] font-semibold">Data Type</TableHead>
                   <TableHead className="text-[11px] font-semibold">Current Value</TableHead>
                   <TableHead className="text-[11px] font-semibold">Unit</TableHead>
@@ -203,7 +204,7 @@ export function IotTagsView() {
                 {isLoading ? (
                   Array.from({ length: 12 }).map((_, i) => (
                     <TableRow key={i} className="border-border/20">
-                      {Array.from({ length: 9 }).map((_, j) => (
+                      {Array.from({ length: 10 }).map((_, j) => (
                         <TableCell key={j}>
                           <div className="shimmer h-3.5 rounded w-20" />
                         </TableCell>
@@ -212,33 +213,42 @@ export function IotTagsView() {
                   ))
                 ) : tagList.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                       No tags found
                     </TableCell>
                   </TableRow>
                 ) : (
                   tagList.map((tag: any) => (
                     <TableRow key={tag.id} className="border-border/20 hover:bg-muted/20 cursor-pointer">
-                      <TableCell className="font-mono text-xs font-semibold text-primary">{tag.name}</TableCell>
-                      <TableCell className="text-xs">{tag.deviceName}</TableCell>
+                      <TableCell className="text-xs">
+                        <div className="font-mono font-semibold text-primary">{tag.code}</div>
+                        <div className="text-muted-foreground">{tag.name}</div>
+                      </TableCell>
+                      <TableCell className="text-xs">{tag.device?.name ?? '—'}</TableCell>
+                      <TableCell className="text-xs">
+                        <Badge variant="outline" className="text-[10px] h-5">{tag.tagType}</Badge>
+                        {tag.counterRole && tag.counterRole !== 'NONE' && (
+                          <Badge variant="secondary" className="text-[10px] h-5 ml-1">{tag.counterRole}</Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{tag.dataType}</TableCell>
-                      <TableCell className="text-xs font-semibold">{tag.value}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{tag.unit}</TableCell>
+                      <TableCell className="text-xs font-semibold">{tag.currentValue?.value ?? '—'}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{tag.unit ?? '—'}</TableCell>
                       <TableCell>
-                        <Badge 
-                          variant={tag.quality === 'GOOD' ? 'default' : 'outline'}
+                        <Badge
+                          variant={tag.currentValue?.quality === 'GOOD' ? 'default' : 'outline'}
                           className="text-[10px] h-5"
                         >
-                          {tag.quality}
+                          {tag.currentValue?.quality ?? '—'}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{formatDate(tag.lastUpdate)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{tag.currentValue?.timestamp ? formatDate(tag.currentValue.timestamp) : '—'}</TableCell>
                       <TableCell>
-                        <Badge 
-                          variant={tag.status === 'ACTIVE' ? 'default' : 'secondary'}
+                        <Badge
+                          variant={tag.isActive ? 'default' : 'secondary'}
                           className="text-[10px] h-5"
                         >
-                          {tag.status}
+                          {tag.isActive ? 'Active' : 'Inactive'}
                         </Badge>
                       </TableCell>
                       <TableCell>
