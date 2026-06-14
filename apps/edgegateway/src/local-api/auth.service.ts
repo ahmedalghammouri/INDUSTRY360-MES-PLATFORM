@@ -1,35 +1,36 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcryptjs';
+import { timingSafeEqual } from 'node:crypto';
 
-import { PrismaService } from '../prisma/prisma.service';
+import { CONFIG_USERS } from './config-users';
 
 /**
- * Validates dashboard logins against the SAME `users` table + bcrypt hashes the
- * platform uses, and issues a JWT signed with the shared JWT_SECRET — so the
- * gateway honours the project's existing accounts.
+ * Dashboard auth restricted to the two static {@link CONFIG_USERS}. Does NOT
+ * touch the platform DB, so the edge admin can always log in (offline-safe).
  */
 @Injectable()
 export class AuthService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly jwt: JwtService,
-  ) {}
+  constructor(private readonly jwt: JwtService) {}
 
   async login(email: string, password: string) {
-    const user = await this.prisma.user.findFirst({
-      where: { email: email.toLowerCase(), deletedAt: null },
-    });
-    if (!user || !user.isActive) throw new UnauthorizedException('Invalid credentials');
-
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) throw new UnauthorizedException('Invalid credentials');
-
-    const payload = { sub: user.id, email: user.email, role: user.role, factoryId: user.factoryId };
+    const user = CONFIG_USERS.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    if (!user || !safeEqual(password, user.password)) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    const payload = { sub: user.email, email: user.email, role: user.role, name: user.name };
     const accessToken = await this.jwt.signAsync(payload, { expiresIn: '8h' });
-    return {
-      accessToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-    };
+    return { accessToken, user: { email: user.email, name: user.name, role: user.role } };
   }
+}
+
+/** Constant-time string comparison (avoids leaking length/content via timing). */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) {
+    // Compare against self to keep timing roughly constant, then fail.
+    timingSafeEqual(ab, ab);
+    return false;
+  }
+  return timingSafeEqual(ab, bb);
 }

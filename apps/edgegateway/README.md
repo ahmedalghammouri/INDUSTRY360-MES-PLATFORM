@@ -185,9 +185,35 @@ Logs: `build\logs\out.log` and `build\logs\err.log`.
 
 ---
 
+## Dashboard access — two fixed users
+
+The dashboard and **all** configuration (devices, tags, service settings) are
+restricted to **exactly two hard-coded users**. They are NOT in the platform
+database — they're defined in [`src/local-api/config-users.ts`](src/local-api/config-users.ts)
+so the edge admin can always log in even when the database/MES is offline.
+
+| Role | Email | Password |
+|---|---|---|
+| Edge Administrator | `admin@star-mes.sa` | `Password@123` |
+| Edge Engineer | `engineer@star-mes.sa` | `Password@123` |
+
+> Change the passwords for production via env (`EDGE_ADMIN_PASSWORD`,
+> `EDGE_ENGINEER_PASSWORD`) or by editing `config-users.ts`. No other account —
+> not even a valid platform user — can access the gateway dashboard.
+
+## The local dashboard (`http://localhost:4900`)
+
+Styled to match the STAR-MES web app (logo, dark theme, sidebar). Tabbed
+management UI, usable on the edge PC without the cloud app:
+
+- **Overview** — live device status, executing Job-Order counts, live tag values.
+- **Devices** — add/edit/delete Modbus devices (IP/port, unit id, poll, machine binding; auto-bound to this gateway).
+- **Tags** — add/edit/delete tags with register address/type, scaling, and counter role/edge.
+- **Settings** — edit service connections (**DB / MQTT / InfluxDB / MES Platform**) + gateway name/factory/poll. Saved to `gateway-config.json` (overrides `.env`); use **Save & Restart** to apply (as a Windows service it auto-restarts; in dev re-run `node dist/main.js`).
+
 ## After it's running — configure acquisition
 
-In the web app (or, soon, the gateway's own dashboard):
+In the web app **or** the gateway's own dashboard (Devices / Tags tabs):
 
 1. **IIoT → Devices → Add Device**: Protocol *Modbus TCP*, IP + Port, **Assigned
    Gateway** = this gateway, **Bound Machine** = the machine to count for, Unit ID.

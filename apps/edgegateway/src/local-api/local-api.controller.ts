@@ -1,6 +1,7 @@
 import {
   Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards, BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { MqttService } from '../services/mqtt.service';
@@ -8,6 +9,7 @@ import { InfluxService } from '../services/influx.service';
 import { GatewayContextService } from '../context/gateway-context.service';
 import { ModbusPollerService } from '../acquisition/modbus-poller.service';
 import { BufferService } from '../acquisition/buffer.service';
+import { readConfigFile, writeConfigFile } from '../config/config-store';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
@@ -25,6 +27,7 @@ export class LocalApiController {
     private readonly poller: ModbusPollerService,
     private readonly buffer: BufferService,
     private readonly auth: AuthService,
+    private readonly config: ConfigService,
   ) {}
 
   @Post('auth/login')
@@ -38,11 +41,12 @@ export class LocalApiController {
   async status() {
     let dbOk = true;
     try { await this.prisma.$queryRaw`SELECT 1`; } catch { dbOk = false; }
+    const mes = await this.checkMesReachable();
     return {
       gatewayId: this.ctx.getGatewayId(),
       factoryId: this.ctx.getFactoryId(),
       ready: this.ctx.isReady(),
-      sinks: { db: dbOk, mqtt: this.mqtt.isConnected(), influx: this.influx.isEnabled() },
+      sinks: { db: dbOk, mqtt: this.mqtt.isConnected(), influx: this.influx.isEnabled(), mes },
       devices: this.poller.status(),
       buffers: {
         pgTagValue: this.buffer.size('pg-tagvalue'),
@@ -50,6 +54,74 @@ export class LocalApiController {
         mqtt: this.buffer.size('mqtt'),
       },
     };
+  }
+
+  private async checkMesReachable(): Promise<boolean | null> {
+    const url = this.config.get<string>('mesPlatformUrl');
+    if (!url) return null; // not configured
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 3000);
+      const res = await fetch(`${url.replace(/\/$/, '')}/health`, { signal: ctrl.signal });
+      clearTimeout(t);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  // ── Settings (service connections) ───────────────────────────
+  @UseGuards(JwtAuthGuard)
+  @Get('settings')
+  settings() {
+    const stored = readConfigFile();
+    // Effective values: stored override, else current runtime config.
+    return {
+      gatewayName: stored.gatewayName ?? this.config.get('gatewayName'),
+      factoryCode: stored.factoryCode ?? this.config.get('factoryCode') ?? '',
+      databaseUrl: stored.databaseUrl ?? this.config.get('databaseUrl') ?? '',
+      mqttBrokerUrl: stored.mqttBrokerUrl ?? this.config.get('mqtt.brokerUrl') ?? '',
+      influxUrl: stored.influxUrl ?? this.config.get('influx.url') ?? '',
+      influxToken: stored.influxToken ?? this.config.get('influx.token') ?? '',
+      influxOrg: stored.influxOrg ?? this.config.get('influx.org') ?? '',
+      influxBucket: stored.influxBucket ?? this.config.get('influx.bucket') ?? '',
+      mesPlatformUrl: stored.mesPlatformUrl ?? this.config.get('mesPlatformUrl') ?? '',
+      defaultPollIntervalMs: stored.defaultPollIntervalMs ?? this.config.get('defaultPollIntervalMs'),
+    };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('settings')
+  saveSettings(@Body() b: any) {
+    const allowed = [
+      'gatewayName', 'factoryCode', 'databaseUrl', 'mqttBrokerUrl',
+      'influxUrl', 'influxToken', 'influxOrg', 'influxBucket', 'mesPlatformUrl', 'defaultPollIntervalMs',
+    ];
+    const patch: Record<string, unknown> = {};
+    for (const k of allowed) if (b[k] !== undefined) patch[k] = b[k];
+    writeConfigFile(patch);
+    return { ok: true, restartRequired: true };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('restart')
+  restart() {
+    // Exit cleanly; NSSM (service) or a dev runner restarts the process so the
+    // new settings take effect. Delay so the HTTP response is flushed first.
+    setTimeout(() => process.exit(0), 300);
+    return { ok: true, restarting: true };
+  }
+
+  // ── Machines (for binding devices) ───────────────────────────
+  @UseGuards(JwtAuthGuard)
+  @Get('machines')
+  machines() {
+    const factoryId = this.ctx.getFactoryId();
+    return this.prisma.machine.findMany({
+      where: { ...(factoryId ? { factoryId } : {}), isActive: true },
+      select: { id: true, code: true, name: true },
+      orderBy: { code: 'asc' },
+    });
   }
 
   // ── Devices ──────────────────────────────────────────────────

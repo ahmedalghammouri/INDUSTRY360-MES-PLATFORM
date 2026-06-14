@@ -1,0 +1,12 @@
+{
+  "gatewayName": "Local Dev Gateway",
+  "factoryCode": "SIDCO",
+  "databaseUrl": "postgresql://mes_user:mes_password@platform.star-mes.com:5433/star_mes?schema=public",
+  "mqttBrokerUrl": "mqtt://platform.star-mes.com:1883",
+  "influxUrl": "http://platform.star-mes.com:8086",
+  "influxToken": "mes-influx-super-secret-token",
+  "influxOrg": "star-mes",
+  "influxBucket": "mes_timeseries",
+  "mesPlatformUrl": "http://platform.star-mes.com:8080",
+  "defaultPollIntervalMs": 1000
+}
